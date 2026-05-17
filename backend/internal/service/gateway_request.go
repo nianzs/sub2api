@@ -48,6 +48,7 @@ type SessionContext struct {
 	ClientIP  string
 	UserAgent string
 	APIKeyID  int64
+	UserID    int64
 }
 
 // ParsedRequest 保存网关请求的预解析结果

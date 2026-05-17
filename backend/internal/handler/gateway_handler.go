@@ -268,6 +268,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 		ClientIP:  ip.GetClientIP(c),
 		UserAgent: c.GetHeader("User-Agent"),
 		APIKeyID:  apiKey.ID,
+		UserID:    subject.UserID,
 	}
 	sessionHash := h.gatewayService.GenerateSessionHash(parsedReq)
 
@@ -1466,7 +1467,7 @@ func (h *GatewayHandler) CountTokens(c *gin.Context) {
 		return
 	}
 
-	_, ok = middleware2.GetAuthSubjectFromContext(c)
+	subject, ok := middleware2.GetAuthSubjectFromContext(c)
 	if !ok {
 		h.errorResponse(c, http.StatusInternalServerError, "api_error", "User context not found")
 		return
@@ -1536,6 +1537,7 @@ func (h *GatewayHandler) CountTokens(c *gin.Context) {
 		ClientIP:  ip.GetClientIP(c),
 		UserAgent: c.GetHeader("User-Agent"),
 		APIKeyID:  apiKey.ID,
+		UserID:    subject.UserID,
 	}
 	sessionHash := h.gatewayService.GenerateSessionHash(parsedReq)
 

@@ -61,6 +61,123 @@ func TestBuildKiroPayloadBasic(t *testing.T) {
 	require.Equal(t, "I will follow these instructions.", gjson.GetBytes(payload, "conversationState.history.1.assistantResponseMessage.content").String())
 }
 
+func TestBuildKiroPayloadAlwaysIgnoresClientConversationMetadata(t *testing.T) {
+	body := []byte(`{
+		"model":"claude-sonnet-4-5",
+		"messages":[{"role":"user","content":"hello","additional_kwargs":{"conversationId":"client-conv","continuationId":"client-cont"}}]
+	}`)
+
+	result, err := BuildKiroPayloadWithContext(body, "claude-sonnet-4.5", "", "AI_EDITOR", nil)
+	require.NoError(t, err)
+	conversationID := gjson.GetBytes(result.Payload, "conversationState.conversationId").String()
+	require.NotEmpty(t, conversationID)
+	require.NotEqual(t, "client-conv", conversationID)
+	require.False(t, gjson.GetBytes(result.Payload, "conversationState.agentContinuationId").Exists())
+}
+
+func TestBuildKiroPayloadDoesNotInsertUserDotBeforeLeadingAssistant(t *testing.T) {
+	body := []byte(`{
+		"model":"claude-sonnet-4-5",
+		"messages":[
+			{"role":"assistant","content":"prior assistant"},
+			{"role":"user","content":"next user"}
+		]
+	}`)
+
+	payload, err := BuildKiroPayload(body, "claude-sonnet-4.5", "", "AI_EDITOR", nil)
+	require.NoError(t, err)
+
+	history := gjson.GetBytes(payload, "conversationState.history").Array()
+	foundLeadingAssistant := false
+	for _, msg := range history {
+		require.NotEqual(t, ".", msg.Get("userInputMessage.content").String())
+		if msg.Get("assistantResponseMessage.content").String() == "prior assistant" {
+			foundLeadingAssistant = true
+		}
+	}
+	require.True(t, foundLeadingAssistant)
+	require.Equal(t, "next user", gjson.GetBytes(payload, "conversationState.currentMessage.userInputMessage.content").String())
+}
+
+func TestBuildKiroPayloadSingleAssistantDoesNotInsertUserDot(t *testing.T) {
+	body := []byte(`{
+		"model":"claude-sonnet-4-5",
+		"messages":[{"role":"assistant","content":"only assistant"}]
+	}`)
+
+	payload, err := BuildKiroPayload(body, "claude-sonnet-4.5", "", "AI_EDITOR", nil)
+	require.NoError(t, err)
+
+	history := gjson.GetBytes(payload, "conversationState.history").Array()
+	foundOnlyAssistant := false
+	for _, msg := range history {
+		require.NotEqual(t, ".", msg.Get("userInputMessage.content").String())
+		if msg.Get("assistantResponseMessage.content").String() == "only assistant" {
+			foundOnlyAssistant = true
+		}
+	}
+	require.True(t, foundOnlyAssistant)
+	require.Equal(t, "Continue", gjson.GetBytes(payload, "conversationState.currentMessage.userInputMessage.content").String())
+}
+
+func TestBuildKiroPayloadOmitsImagesBeyondRecentHistory(t *testing.T) {
+	body := []byte(`{
+		"model":"claude-sonnet-4-5",
+		"messages":[
+			{"role":"user","content":"first"},
+			{"role":"assistant","content":"first answer"},
+			{"role":"user","content":[
+				{"type":"text","text":"stale image"},
+				{"type":"image","source":{"media_type":"image/png","data":"stale-image"}}
+			]},
+			{"role":"assistant","content":"second answer"},
+			{"role":"user","content":"middle"},
+			{"role":"assistant","content":"middle answer"},
+			{"role":"user","content":"near"},
+			{"role":"tool","content":"ignored separator"},
+			{"role":"user","content":[
+				{"type":"text","text":"current image"},
+				{"type":"image","source":{"media_type":"image/jpeg","data":"current-image"}}
+			]}
+		]
+	}`)
+
+	payload, err := BuildKiroPayload(body, "claude-sonnet-4.5", "", "AI_EDITOR", nil)
+	require.NoError(t, err)
+
+	staleUser := gjson.GetBytes(payload, "conversationState.history.4.userInputMessage")
+	require.False(t, staleUser.Get("images").Exists())
+	require.Contains(t, staleUser.Get("content").String(), "stale image")
+	require.Contains(t, staleUser.Get("content").String(), "[This message contained 1 image(s), omitted from older conversation history.]")
+	require.Equal(t, "current-image", gjson.GetBytes(payload, "conversationState.currentMessage.userInputMessage.images.0.source.bytes").String())
+}
+
+func TestBuildKiroPayloadKeepsImagesAtRecentHistoryBoundary(t *testing.T) {
+	body := []byte(`{
+		"model":"claude-sonnet-4-5",
+		"messages":[
+			{"role":"user","content":"first"},
+			{"role":"assistant","content":"first answer"},
+			{"role":"user","content":[
+				{"type":"text","text":"boundary image"},
+				{"type":"image","source":{"media_type":"image/png","data":"boundary-image"}}
+			]},
+			{"role":"assistant","content":"second answer"},
+			{"role":"user","content":"middle"},
+			{"role":"assistant","content":"middle answer"},
+			{"role":"tool","content":"ignored separator"},
+			{"role":"user","content":"current"}
+		]
+	}`)
+
+	payload, err := BuildKiroPayload(body, "claude-sonnet-4.5", "", "AI_EDITOR", nil)
+	require.NoError(t, err)
+
+	boundaryUser := gjson.GetBytes(payload, "conversationState.history.4.userInputMessage")
+	require.Equal(t, "boundary-image", boundaryUser.Get("images.0.source.bytes").String())
+	require.NotContains(t, boundaryUser.Get("content").String(), "omitted from older conversation history")
+}
+
 func TestBuildKiroPayloadWebSearchUsesCachedDescription(t *testing.T) {
 	SetCachedWebSearchDescription("cached web search description")
 	t.Cleanup(func() { SetCachedWebSearchDescription("") })
@@ -808,6 +925,53 @@ func TestStreamEventStreamAsAnthropicIgnoresPingFrames(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "end_turn", result.StopReason)
 	require.Contains(t, out.String(), `"text":"Hello after ping"`)
+}
+
+func TestStreamEventStreamAsAnthropicNormalizesCumulativeAssistantSnapshots(t *testing.T) {
+	stream := bytes.NewBuffer(nil)
+	for _, fragment := range []string{"I", "I'm", "I'm re propos", "I'm re proposing"} {
+		_, _ = stream.Write(buildEventStreamFrame(t, "assistantResponseEvent", map[string]any{
+			"assistantResponseEvent": map[string]any{
+				"content": fragment,
+			},
+		}))
+	}
+
+	var out bytes.Buffer
+	result, err := StreamEventStreamAsAnthropic(context.Background(), stream, &out, "claude-opus-4-7", 9)
+	require.NoError(t, err)
+	require.Equal(t, "end_turn", result.StopReason)
+
+	output := out.String()
+	require.Equal(t, 1, strings.Count(output, `event: content_block_start`))
+	require.Contains(t, output, `"text":"I"`)
+	require.Contains(t, output, `"text":"'m"`)
+	require.Contains(t, output, `"text":" re propos"`)
+	require.Contains(t, output, `"text":"ing"`)
+	require.NotContains(t, output, `"text":"I'm"`)
+	require.NotContains(t, output, `"text":"I'm re propos"`)
+	require.NotContains(t, output, `"text":"I'm re proposing"`)
+}
+
+func TestStreamEventStreamAsAnthropicIgnoresAssistantSnapshotRewinds(t *testing.T) {
+	stream := bytes.NewBuffer(nil)
+	for _, fragment := range []string{"I'm proposing", "I'm propos", "I'm proposing a plan"} {
+		_, _ = stream.Write(buildEventStreamFrame(t, "assistantResponseEvent", map[string]any{
+			"assistantResponseEvent": map[string]any{
+				"content": fragment,
+			},
+		}))
+	}
+
+	var out bytes.Buffer
+	result, err := StreamEventStreamAsAnthropic(context.Background(), stream, &out, "claude-opus-4-7", 9)
+	require.NoError(t, err)
+	require.Equal(t, "end_turn", result.StopReason)
+
+	output := out.String()
+	require.Contains(t, output, `"text":"I'm proposing"`)
+	require.Contains(t, output, `"text":" a plan"`)
+	require.NotContains(t, output, `"text":"I'm propos"`)
 }
 
 func TestStreamEventStreamAsAnthropicThinkingOnlyResponse(t *testing.T) {
