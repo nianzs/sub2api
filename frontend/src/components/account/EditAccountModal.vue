@@ -1652,6 +1652,59 @@
         </div>
       </div>
 
+      <!-- Anthropic API Key: Custom Request Headers -->
+      <div
+        v-if="account?.platform === 'anthropic' && account?.type === 'apikey'"
+        class="border-t border-gray-200 pt-4 dark:border-dark-600"
+      >
+        <div>
+          <label class="input-label">{{ t('admin.accounts.anthropic.customHeaders') }}</label>
+          <p class="mb-2 text-xs text-gray-500 dark:text-gray-400">
+            {{ t('admin.accounts.anthropic.customHeadersDesc') }}
+          </p>
+          <div class="space-y-1.5">
+            <div v-for="(row, i) in anthropicCustomHeaders" :key="i" class="flex items-center gap-2">
+              <input
+                v-model="row.name"
+                type="text"
+                spellcheck="false"
+                :placeholder="t('admin.accounts.anthropic.headerNamePlaceholder')"
+                class="input w-52 flex-none font-mono text-xs"
+              />
+              <input
+                v-model="row.value"
+                type="text"
+                spellcheck="false"
+                :placeholder="t('admin.accounts.anthropic.headerValuePlaceholder')"
+                class="input flex-1 font-mono text-xs"
+              />
+              <button
+                type="button"
+                class="flex-none rounded p-1 text-gray-400 hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-500/10 dark:hover:text-red-400"
+                @click="anthropicCustomHeaders.splice(i, 1); if (anthropicCustomHeaders.length === 0) anthropicCustomHeaders.push({ name: '', value: '' })"
+              >
+                <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+            <button
+              type="button"
+              class="inline-flex items-center gap-1 rounded border border-dashed border-gray-300 px-2 py-1 text-xs text-gray-500 hover:border-primary-400 hover:text-primary-600 dark:border-dark-600 dark:text-gray-400 dark:hover:border-primary-500 dark:hover:text-primary-400"
+              @click="anthropicCustomHeaders.push({ name: '', value: '' })"
+            >
+              <svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
+              </svg>
+              {{ t('admin.accounts.anthropic.headerAddRow') }}
+            </button>
+          </div>
+          <p class="mt-1 text-xs text-gray-400">
+            {{ t('admin.accounts.anthropic.customHeadersHint') }}
+          </p>
+        </div>
+      </div>
+
       <!-- 配额控制 (Anthropic apikey/bedrock: 配额限制 + 亲和) -->
       <div
         v-if="account?.platform === 'anthropic' && (account?.type === 'apikey' || account?.type === 'bedrock')"
@@ -2566,6 +2619,7 @@ type CodexImageGenerationBridgeMode = 'inherit' | 'enabled' | 'disabled'
 const codexImageGenerationBridgeMode = ref<CodexImageGenerationBridgeMode>('inherit')
 const anthropicPassthroughEnabled = ref(false)
 const webSearchEmulationMode = ref('default')
+const anthropicCustomHeaders = ref<Array<{ name: string; value: string }>>([{ name: '', value: '' }])
 const webSearchGlobalEnabled = ref(false)
 const {
   globalEnabled: quotaNotifyGlobalEnabled,
@@ -2858,6 +2912,7 @@ const syncFormFromAccount = (newAccount: Account | null) => {
   codexImageGenerationBridgeMode.value = 'inherit'
   anthropicPassthroughEnabled.value = false
   webSearchEmulationMode.value = 'default'
+  anthropicCustomHeaders.value = [{ name: '', value: '' }]
   if (newAccount.platform === 'openai' && (newAccount.type === 'oauth' || newAccount.type === 'apikey')) {
     openaiPassthroughEnabled.value = extra?.openai_passthrough === true || extra?.openai_oauth_passthrough === true
     openAICompactMode.value = (extra?.openai_compact_mode as OpenAICompactMode) || 'auto'
@@ -2903,6 +2958,16 @@ const syncFormFromAccount = (newAccount: Account | null) => {
       webSearchEmulationMode.value = 'enabled'
     } else {
       webSearchEmulationMode.value = 'default'
+    }
+    // 加载自定义请求头
+    const existingHeaders = extra?.custom_headers as Record<string, string> | undefined
+    if (existingHeaders && typeof existingHeaders === 'object') {
+      const entries = Object.entries(existingHeaders)
+      anthropicCustomHeaders.value = entries.length > 0
+        ? entries.map(([name, value]) => ({ name, value }))
+        : [{ name: '', value: '' }]
+    } else {
+      anthropicCustomHeaders.value = [{ name: '', value: '' }]
     }
   }
 
@@ -4000,6 +4065,19 @@ const handleSubmit = async () => {
         delete newExtra.web_search_emulation
       } else {
         newExtra.web_search_emulation = webSearchEmulationMode.value
+      }
+      // 自定义请求头
+      const headersMap: Record<string, string> = {}
+      for (const row of anthropicCustomHeaders.value) {
+        const name = row.name.trim()
+        if (name !== '') {
+          headersMap[name] = row.value
+        }
+      }
+      if (Object.keys(headersMap).length > 0) {
+        newExtra.custom_headers = headersMap
+      } else {
+        delete newExtra.custom_headers
       }
       updatePayload.extra = newExtra
     }

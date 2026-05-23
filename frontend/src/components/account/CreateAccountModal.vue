@@ -3047,6 +3047,59 @@
         </div>
       </div>
 
+      <!-- Anthropic API Key: Custom Request Headers -->
+      <div
+        v-if="form.platform === 'anthropic' && accountCategory === 'apikey'"
+        class="border-t border-gray-200 pt-4 dark:border-dark-600"
+      >
+        <div>
+          <label class="input-label">{{ t('admin.accounts.anthropic.customHeaders') }}</label>
+          <p class="mb-2 text-xs text-gray-500 dark:text-gray-400">
+            {{ t('admin.accounts.anthropic.customHeadersDesc') }}
+          </p>
+          <div class="space-y-1.5">
+            <div v-for="(row, i) in anthropicCustomHeaders" :key="i" class="flex items-center gap-2">
+              <input
+                v-model="row.name"
+                type="text"
+                spellcheck="false"
+                :placeholder="t('admin.accounts.anthropic.headerNamePlaceholder')"
+                class="input w-52 flex-none font-mono text-xs"
+              />
+              <input
+                v-model="row.value"
+                type="text"
+                spellcheck="false"
+                :placeholder="t('admin.accounts.anthropic.headerValuePlaceholder')"
+                class="input flex-1 font-mono text-xs"
+              />
+              <button
+                type="button"
+                class="flex-none rounded p-1 text-gray-400 hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-500/10 dark:hover:text-red-400"
+                @click="anthropicCustomHeaders.splice(i, 1); if (anthropicCustomHeaders.length === 0) anthropicCustomHeaders.push({ name: '', value: '' })"
+              >
+                <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+            <button
+              type="button"
+              class="inline-flex items-center gap-1 rounded border border-dashed border-gray-300 px-2 py-1 text-xs text-gray-500 hover:border-primary-400 hover:text-primary-600 dark:border-dark-600 dark:text-gray-400 dark:hover:border-primary-500 dark:hover:text-primary-400"
+              @click="anthropicCustomHeaders.push({ name: '', value: '' })"
+            >
+              <svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
+              </svg>
+              {{ t('admin.accounts.anthropic.headerAddRow') }}
+            </button>
+          </div>
+          <p class="mt-1 text-xs text-gray-400">
+            {{ t('admin.accounts.anthropic.customHeadersHint') }}
+          </p>
+        </div>
+      </div>
+
       <!-- OpenAI OAuth Codex 官方客户端限制开关 -->
       <div
         v-if="form.platform === 'openai' && accountCategory === 'oauth-based'"
@@ -3818,6 +3871,7 @@ const openaiAPIKeyResponsesWebSocketV2Mode = ref<OpenAIWSMode>(OPENAI_WS_MODE_OF
 const codexCLIOnlyEnabled = ref(false)
 const anthropicPassthroughEnabled = ref(false)
 const webSearchEmulationMode = ref('default')
+const anthropicCustomHeaders = ref<Array<{ name: string; value: string }>>([{ name: '', value: '' }])
 const webSearchGlobalEnabled = ref(false)
 const {
   globalEnabled: quotaNotifyGlobalEnabled,
@@ -4662,6 +4716,7 @@ const resetForm = () => {
   codexCLIOnlyEnabled.value = false
   anthropicPassthroughEnabled.value = false
   webSearchEmulationMode.value = 'default'
+  anthropicCustomHeaders.value = [{ name: '', value: '' }]
   // Reset quota control state
   windowCostEnabled.value = false
   windowCostLimit.value = null
@@ -4769,6 +4824,19 @@ const buildAnthropicExtra = (base?: Record<string, unknown>): Record<string, unk
     delete extra.web_search_emulation
   } else {
     extra.web_search_emulation = webSearchEmulationMode.value
+  }
+
+  const headersMap: Record<string, string> = {}
+  for (const row of anthropicCustomHeaders.value) {
+    const name = row.name.trim()
+    if (name !== '') {
+      headersMap[name] = row.value
+    }
+  }
+  if (Object.keys(headersMap).length > 0) {
+    extra.custom_headers = headersMap
+  } else {
+    delete extra.custom_headers
   }
 
   return Object.keys(extra).length > 0 ? extra : undefined

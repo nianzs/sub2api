@@ -3344,6 +3344,14 @@ export default {
         webSearchDefault: 'Default',
         webSearchEnabled: 'Enabled',
         webSearchDisabled: 'Disabled',
+        customHeaders: 'Custom Request Headers',
+        customHeadersDesc:
+          'Add custom headers to upstream API requests. Overrides existing headers with the same name. Auth headers (Authorization, x-api-key) are not allowed.',
+        customHeadersHint:
+          'Applied last, overrides existing values. Forbidden: Host, Content-Length, Authorization, x-api-key.',
+        headerNamePlaceholder: 'Header name',
+        headerValuePlaceholder: 'Header value',
+        headerAddRow: 'Add header',
       },
       modelRestriction: 'Model Restriction (Optional)',
       modelWhitelist: 'Model Whitelist',

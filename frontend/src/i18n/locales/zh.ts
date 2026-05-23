@@ -3502,6 +3502,14 @@ export default {
         webSearchDefault: '默认',
         webSearchEnabled: '开启',
         webSearchDisabled: '关闭',
+        customHeaders: '自定义请求头',
+        customHeadersDesc:
+          '为上游 API 请求添加自定义请求头，会覆盖同名已有头。不允许设置认证头（Authorization、x-api-key）。',
+        customHeadersHint:
+          '自定义头最后应用，覆盖已有值。禁止：Host、Content-Length、Authorization、x-api-key。',
+        headerNamePlaceholder: '请求头名称',
+        headerValuePlaceholder: '请求头值',
+        headerAddRow: '添加请求头',
       },
       modelRestriction: '模型限制（可选）',
       modelWhitelist: '模型白名单',

@@ -4,6 +4,7 @@ package service
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"hash/fnv"
 	"log/slog"
 	"reflect"
@@ -1342,6 +1343,82 @@ func (a *Account) IsAnthropicAPIKeyPassthroughEnabled() bool {
 	}
 	enabled, ok := a.Extra["anthropic_passthrough"].(bool)
 	return ok && enabled
+}
+
+// accountCustomHeaderForbidden 账号自定义 header 中禁止覆盖的认证相关头。
+// hop-by-hop 类由 IsForbiddenHeaderName 兜底，此处仅补充认证头。
+var accountCustomHeaderForbidden = map[string]bool{
+	"authorization":  true,
+	"x-api-key":      true,
+	"x-goog-api-key": true,
+	"cookie":         true,
+}
+
+// GetCustomHeaders 返回账号级别的自定义请求头。
+// 字段：accounts.extra.custom_headers（map[string]string）。
+// 未配置或类型不匹配时返回 nil。
+func (a *Account) GetCustomHeaders() map[string]string {
+	if a == nil || a.Extra == nil {
+		return nil
+	}
+	raw, ok := a.Extra["custom_headers"]
+	if !ok || raw == nil {
+		return nil
+	}
+	rawMap, ok := raw.(map[string]any)
+	if !ok {
+		return nil
+	}
+	result := make(map[string]string, len(rawMap))
+	for k, v := range rawMap {
+		if s, ok := v.(string); ok {
+			result[k] = s
+		}
+	}
+	if len(result) == 0 {
+		return nil
+	}
+	return result
+}
+
+// ValidateAccountCustomHeaders 校验账号自定义 header 名称格式及黑名单。
+// 保存时调用，拒绝非法 header 名。
+func ValidateAccountCustomHeaders(h map[string]string) error {
+	for k := range h {
+		if !headerNameRegex.MatchString(k) {
+			return fmt.Errorf("custom header name invalid: %s", k)
+		}
+		lower := strings.ToLower(strings.TrimSpace(k))
+		if IsForbiddenHeaderName(k) || accountCustomHeaderForbidden[lower] {
+			return fmt.Errorf("custom header name forbidden: %s", k)
+		}
+	}
+	return nil
+}
+
+// validateAccountCustomHeadersFromExtra 从 extra map 中提取 custom_headers 并校验。
+func validateAccountCustomHeadersFromExtra(extra map[string]any) error {
+	if extra == nil {
+		return nil
+	}
+	raw, ok := extra["custom_headers"]
+	if !ok || raw == nil {
+		return nil
+	}
+	rawMap, ok := raw.(map[string]any)
+	if !ok {
+		return nil
+	}
+	parsed := make(map[string]string, len(rawMap))
+	for k, v := range rawMap {
+		if s, ok := v.(string); ok {
+			parsed[k] = s
+		}
+	}
+	if len(parsed) == 0 {
+		return nil
+	}
+	return ValidateAccountCustomHeaders(parsed)
 }
 
 // WebSearch 模拟三态常量
