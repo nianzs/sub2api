@@ -2376,7 +2376,7 @@
       <!-- Group Selection - 仅标准模式显示 -->
       <div
         v-if="!authStore.isSimpleMode"
-        :class="account?.platform === 'antigravity' ? '' : 'border-t border-gray-200 pt-4 dark:border-dark-600'"
+        class="border-t border-gray-200 pt-4 dark:border-dark-600"
       >
         <GroupSelector
           v-model="form.group_ids"
