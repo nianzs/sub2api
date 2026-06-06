@@ -74,6 +74,10 @@ type Group struct {
 	KiroStickySessionTTLSeconds int
 	KiroCacheEmulationRatio     float64
 
+	// Kiro 反向 token 缩放锚定单价：每 credit 对应 USD 余额（仅 platform=kiro 生效）。
+	// 0 = 禁用反向缩放（保持原有按 token 计费行为）。
+	KiroCreditTargetUSD float64
+
 	CreatedAt time.Time
 	UpdatedAt time.Time
 
@@ -165,6 +169,48 @@ func normalizeKiroCacheEmulationFields(g *Group) {
 
 func NormalizeGroupRuntimeFields(g *Group) {
 	normalizeKiroCacheEmulationFields(g)
+	normalizeKiroCreditTargetFields(g)
+}
+
+// kiroCreditTargetUSDMaxCap 是 KiroCreditTargetUSD 的安全上限。
+// 防止配置错误（如多写一位小数）导致计费暴涨；超出会被 cap。
+const kiroCreditTargetUSDMaxCap = 1.0
+
+// EffectiveKiroCreditTargetUSD 返回当前 group 用于反向缩放的锚定单价。
+// 仅当 Platform = kiro 且配置 > 0 时返回该值（含上限 cap），否则返回 0。
+func (g *Group) EffectiveKiroCreditTargetUSD() float64 {
+	if g == nil || g.Platform != PlatformKiro {
+		return 0
+	}
+	v := g.KiroCreditTargetUSD
+	if v <= 0 {
+		return 0
+	}
+	if v > kiroCreditTargetUSDMaxCap {
+		return kiroCreditTargetUSDMaxCap
+	}
+	return v
+}
+
+// KiroReverseScalingEnabled 报告该 group 是否启用 Kiro 反向 token 缩放。
+func (g *Group) KiroReverseScalingEnabled() bool {
+	return g.EffectiveKiroCreditTargetUSD() > 0
+}
+
+func normalizeKiroCreditTargetFields(g *Group) {
+	if g == nil {
+		return
+	}
+	if g.Platform != PlatformKiro {
+		g.KiroCreditTargetUSD = 0
+		return
+	}
+	if g.KiroCreditTargetUSD < 0 {
+		g.KiroCreditTargetUSD = 0
+	}
+	if g.KiroCreditTargetUSD > kiroCreditTargetUSDMaxCap {
+		g.KiroCreditTargetUSD = kiroCreditTargetUSDMaxCap
+	}
 }
 
 func (g *Group) IsActive() bool {

@@ -150,6 +150,11 @@ func CacheCreation1hTokens(v int) predicate.UsageLog {
 	return predicate.UsageLog(sql.FieldEQ(FieldCacheCreation1hTokens, v))
 }
 
+// KiroCredits applies equality check predicate on the "kiro_credits" field. It's identical to KiroCreditsEQ.
+func KiroCredits(v float64) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldEQ(FieldKiroCredits, v))
+}
+
 // InputCost applies equality check predicate on the "input_cost" field. It's identical to InputCostEQ.
 func InputCost(v float64) predicate.UsageLog {
 	return predicate.UsageLog(sql.FieldEQ(FieldInputCost, v))
@@ -1168,6 +1173,56 @@ func CacheCreation1hTokensLT(v int) predicate.UsageLog {
 // CacheCreation1hTokensLTE applies the LTE predicate on the "cache_creation_1h_tokens" field.
 func CacheCreation1hTokensLTE(v int) predicate.UsageLog {
 	return predicate.UsageLog(sql.FieldLTE(FieldCacheCreation1hTokens, v))
+}
+
+// KiroCreditsEQ applies the EQ predicate on the "kiro_credits" field.
+func KiroCreditsEQ(v float64) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldEQ(FieldKiroCredits, v))
+}
+
+// KiroCreditsNEQ applies the NEQ predicate on the "kiro_credits" field.
+func KiroCreditsNEQ(v float64) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldNEQ(FieldKiroCredits, v))
+}
+
+// KiroCreditsIn applies the In predicate on the "kiro_credits" field.
+func KiroCreditsIn(vs ...float64) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldIn(FieldKiroCredits, vs...))
+}
+
+// KiroCreditsNotIn applies the NotIn predicate on the "kiro_credits" field.
+func KiroCreditsNotIn(vs ...float64) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldNotIn(FieldKiroCredits, vs...))
+}
+
+// KiroCreditsGT applies the GT predicate on the "kiro_credits" field.
+func KiroCreditsGT(v float64) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldGT(FieldKiroCredits, v))
+}
+
+// KiroCreditsGTE applies the GTE predicate on the "kiro_credits" field.
+func KiroCreditsGTE(v float64) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldGTE(FieldKiroCredits, v))
+}
+
+// KiroCreditsLT applies the LT predicate on the "kiro_credits" field.
+func KiroCreditsLT(v float64) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldLT(FieldKiroCredits, v))
+}
+
+// KiroCreditsLTE applies the LTE predicate on the "kiro_credits" field.
+func KiroCreditsLTE(v float64) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldLTE(FieldKiroCredits, v))
+}
+
+// KiroCreditsIsNil applies the IsNil predicate on the "kiro_credits" field.
+func KiroCreditsIsNil() predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldIsNull(FieldKiroCredits))
+}
+
+// KiroCreditsNotNil applies the NotNil predicate on the "kiro_credits" field.
+func KiroCreditsNotNil() predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldNotNull(FieldKiroCredits))
 }
 
 // InputCostEQ applies the EQ predicate on the "input_cost" field.

@@ -550,6 +550,10 @@ type ClaudeUsage struct {
 	CacheCreation5mTokens    int // 5分钟缓存创建token（来自嵌套 cache_creation 对象）
 	CacheCreation1hTokens    int // 1小时缓存创建token（来自嵌套 cache_creation 对象）
 	ImageOutputTokens        int `json:"image_output_tokens,omitempty"`
+
+	// KiroCredits 来自 Kiro 上游 meteringEvent.usage（仅 Kiro 平台有值）。
+	// 透传给 usage_logs.kiro_credits 字段做事后对账用。
+	KiroCredits float64 `json:"-"`
 }
 
 // ForwardResult 转发结果
@@ -5935,6 +5939,7 @@ func (s *GatewayService) handleStreamingResponseAnthropicAPIKeyPassthrough(
 
 			if !clientDisconnected {
 				restored := string(reverseToolNamesIfPresent(c, []byte(line)))
+				restored = stripSub2apiInternalUsageFields(restored)
 				if _, err := io.WriteString(w, restored); err != nil {
 					clientDisconnected = true
 					logger.LegacyPrintf("service.gateway", "[Anthropic passthrough] Client disconnected during streaming, continue draining upstream for usage: account=%d", account.ID)
@@ -5997,6 +6002,24 @@ func extractAnthropicSSEDataLine(line string) (string, bool) {
 	return line[start:], true
 }
 
+// stripSub2apiInternalUsageFields 从出站 SSE 行中移除 sub2api 内部 usage 字段
+// （目前只有 _sub2api_kiro_credits：translator → 计费层的内部通道），
+// 确保不透传给客户端。非匹配行零开销。
+func stripSub2apiInternalUsageFields(line string) string {
+	if !strings.Contains(line, "_sub2api_kiro_credits") {
+		return line
+	}
+	data, ok := extractAnthropicSSEDataLine(line)
+	if !ok {
+		return line
+	}
+	cleaned, err := sjson.Delete(data, "usage._sub2api_kiro_credits")
+	if err != nil {
+		return line
+	}
+	return line[:len(line)-len(data)] + cleaned
+}
+
 func (s *GatewayService) parseSSEUsagePassthrough(data string, usage *ClaudeUsage) {
 	if usage == nil || data == "" || data == "[DONE]" {
 		return
@@ -6042,6 +6065,11 @@ func (s *GatewayService) parseSSEUsagePassthrough(data string, usage *ClaudeUsag
 			}
 			if cc1h.Exists() && cc1h.Int() > 0 {
 				usage.CacheCreation1hTokens = int(cc1h.Int())
+			}
+
+			// sub2api 内部通道：Kiro 反向缩放透传 credits（仅 Kiro 平台）
+			if v := deltaUsage.Get("_sub2api_kiro_credits"); v.Exists() && v.Float() > 0 {
+				usage.KiroCredits = v.Float()
 			}
 		}
 	}
@@ -8121,6 +8149,15 @@ func (s *GatewayService) handleStreamingResponse(ctx context.Context, resp *http
 		}
 
 		usagePatch := s.extractSSEUsagePatch(event)
+		// usagePatch 已捕获 _sub2api_kiro_credits（内部通道），转发客户端前剥离。
+		if eventType == "message_delta" {
+			if u, ok := event["usage"].(map[string]any); ok {
+				if _, exists := u["_sub2api_kiro_credits"]; exists {
+					delete(u, "_sub2api_kiro_credits")
+					eventChanged = true
+				}
+			}
+		}
 		if anthropicStreamEventIsTerminal(eventName, dataLine) {
 			sawTerminalEvent = true
 		}
@@ -8312,6 +8349,9 @@ type sseUsagePatch struct {
 	hasCacheCreation5m       bool
 	cacheCreation1hTokens    int
 	hasCacheCreation1h       bool
+	// Kiro 反向缩放：sub2api 内部通道，从 _sub2api_kiro_credits 解析
+	kiroCredits    float64
+	hasKiroCredits bool
 }
 
 func (s *GatewayService) extractSSEUsagePatch(event map[string]any) *sseUsagePatch {
@@ -8386,6 +8426,11 @@ func (s *GatewayService) extractSSEUsagePatch(event map[string]any) *sseUsagePat
 				patch.hasCacheCreation1h = true
 			}
 		}
+		// sub2api Kiro 反向缩放透传字段
+		if v, ok := parseSSEUsageFloat(usageObj["_sub2api_kiro_credits"]); ok && v > 0 {
+			patch.kiroCredits = v
+			patch.hasKiroCredits = true
+		}
 		return patch
 	}
 
@@ -8415,6 +8460,28 @@ func mergeSSEUsagePatch(usage *ClaudeUsage, patch *sseUsagePatch) {
 	if patch.hasCacheCreation1h {
 		usage.CacheCreation1hTokens = patch.cacheCreation1hTokens
 	}
+	if patch.hasKiroCredits {
+		usage.KiroCredits = patch.kiroCredits
+	}
+}
+
+// parseSSEUsageFloat 解析 SSE usage 字段中的浮点数（如 _sub2api_kiro_credits）。
+func parseSSEUsageFloat(value any) (float64, bool) {
+	switch v := value.(type) {
+	case float64:
+		return v, true
+	case float32:
+		return float64(v), true
+	case int:
+		return float64(v), true
+	case int64:
+		return float64(v), true
+	case json.Number:
+		if f, err := v.Float64(); err == nil {
+			return f, true
+		}
+	}
+	return 0, false
 }
 
 func parseSSEUsageInt(value any) (int, bool) {
@@ -9510,6 +9577,7 @@ func (s *GatewayService) buildRecordUsageLog(
 		CacheReadTokens:       result.Usage.CacheReadInputTokens,
 		CacheCreation5mTokens: result.Usage.CacheCreation5mTokens,
 		CacheCreation1hTokens: result.Usage.CacheCreation1hTokens,
+		KiroCredits:           kiroCreditsPtr(result.Usage.KiroCredits),
 		ImageOutputTokens:     result.Usage.ImageOutputTokens,
 		RateMultiplier:        multiplier,
 		AccountRateMultiplier: &accountRateMultiplier,

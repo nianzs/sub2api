@@ -134,6 +134,10 @@ type UsageLog struct {
 	CacheCreation5mTokens int `gorm:"column:cache_creation_5m_tokens"`
 	CacheCreation1hTokens int `gorm:"column:cache_creation_1h_tokens"`
 
+	// KiroCredits 来自上游 meteringEvent.usage 累加（仅 Kiro 平台有值）。
+	// 写到 usage_logs.kiro_credits 用于事后对账：cost ≡ KiroCredits × group.kiro_credit_target_usd。
+	KiroCredits *float64 `gorm:"column:kiro_credits"`
+
 	ImageOutputTokens int
 	ImageOutputCost   float64
 

@@ -179,6 +179,10 @@ func (Group) Fields() []ent.Field {
 			SchemaType(map[string]string{dialect.Postgres: "decimal(5,4)"}).
 			Default(1.0).
 			Comment("Kiro 模拟缓存生效比例，范围 0-1（仅 kiro 分组生效）"),
+		field.Float("kiro_credit_target_usd").
+			SchemaType(map[string]string{dialect.Postgres: "decimal(8,4)"}).
+			Default(0).
+			Comment("Kiro 反向 token 缩放锚定单价：每 credit 对应 USD 余额（0=禁用）"),
 	}
 }
 

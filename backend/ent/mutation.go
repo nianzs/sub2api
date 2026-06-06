@@ -15017,6 +15017,8 @@ type GroupMutation struct {
 	addkiro_sticky_session_ttl_seconds      *int
 	kiro_cache_emulation_ratio              *float64
 	addkiro_cache_emulation_ratio           *float64
+	kiro_credit_target_usd                  *float64
+	addkiro_credit_target_usd               *float64
 	clearedFields                           map[string]struct{}
 	api_keys                                map[int64]struct{}
 	removedapi_keys                         map[int64]struct{}
@@ -17009,6 +17011,62 @@ func (m *GroupMutation) ResetKiroCacheEmulationRatio() {
 	m.addkiro_cache_emulation_ratio = nil
 }
 
+// SetKiroCreditTargetUsd sets the "kiro_credit_target_usd" field.
+func (m *GroupMutation) SetKiroCreditTargetUsd(f float64) {
+	m.kiro_credit_target_usd = &f
+	m.addkiro_credit_target_usd = nil
+}
+
+// KiroCreditTargetUsd returns the value of the "kiro_credit_target_usd" field in the mutation.
+func (m *GroupMutation) KiroCreditTargetUsd() (r float64, exists bool) {
+	v := m.kiro_credit_target_usd
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldKiroCreditTargetUsd returns the old "kiro_credit_target_usd" field's value of the Group entity.
+// If the Group object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *GroupMutation) OldKiroCreditTargetUsd(ctx context.Context) (v float64, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldKiroCreditTargetUsd is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldKiroCreditTargetUsd requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldKiroCreditTargetUsd: %w", err)
+	}
+	return oldValue.KiroCreditTargetUsd, nil
+}
+
+// AddKiroCreditTargetUsd adds f to the "kiro_credit_target_usd" field.
+func (m *GroupMutation) AddKiroCreditTargetUsd(f float64) {
+	if m.addkiro_credit_target_usd != nil {
+		*m.addkiro_credit_target_usd += f
+	} else {
+		m.addkiro_credit_target_usd = &f
+	}
+}
+
+// AddedKiroCreditTargetUsd returns the value that was added to the "kiro_credit_target_usd" field in this mutation.
+func (m *GroupMutation) AddedKiroCreditTargetUsd() (r float64, exists bool) {
+	v := m.addkiro_credit_target_usd
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// ResetKiroCreditTargetUsd resets all changes to the "kiro_credit_target_usd" field.
+func (m *GroupMutation) ResetKiroCreditTargetUsd() {
+	m.kiro_credit_target_usd = nil
+	m.addkiro_credit_target_usd = nil
+}
+
 // AddAPIKeyIDs adds the "api_keys" edge to the APIKey entity by ids.
 func (m *GroupMutation) AddAPIKeyIDs(ids ...int64) {
 	if m.api_keys == nil {
@@ -17367,7 +17425,7 @@ func (m *GroupMutation) Type() string {
 // order to get all numeric fields that were incremented/decremented, call
 // AddedFields().
 func (m *GroupMutation) Fields() []string {
-	fields := make([]string, 0, 39)
+	fields := make([]string, 0, 40)
 	if m.created_at != nil {
 		fields = append(fields, group.FieldCreatedAt)
 	}
@@ -17485,6 +17543,9 @@ func (m *GroupMutation) Fields() []string {
 	if m.kiro_cache_emulation_ratio != nil {
 		fields = append(fields, group.FieldKiroCacheEmulationRatio)
 	}
+	if m.kiro_credit_target_usd != nil {
+		fields = append(fields, group.FieldKiroCreditTargetUsd)
+	}
 	return fields
 }
 
@@ -17571,6 +17632,8 @@ func (m *GroupMutation) Field(name string) (ent.Value, bool) {
 		return m.KiroStickySessionTTLSeconds()
 	case group.FieldKiroCacheEmulationRatio:
 		return m.KiroCacheEmulationRatio()
+	case group.FieldKiroCreditTargetUsd:
+		return m.KiroCreditTargetUsd()
 	}
 	return nil, false
 }
@@ -17658,6 +17721,8 @@ func (m *GroupMutation) OldField(ctx context.Context, name string) (ent.Value, e
 		return m.OldKiroStickySessionTTLSeconds(ctx)
 	case group.FieldKiroCacheEmulationRatio:
 		return m.OldKiroCacheEmulationRatio(ctx)
+	case group.FieldKiroCreditTargetUsd:
+		return m.OldKiroCreditTargetUsd(ctx)
 	}
 	return nil, fmt.Errorf("unknown Group field %s", name)
 }
@@ -17940,6 +18005,13 @@ func (m *GroupMutation) SetField(name string, value ent.Value) error {
 		}
 		m.SetKiroCacheEmulationRatio(v)
 		return nil
+	case group.FieldKiroCreditTargetUsd:
+		v, ok := value.(float64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetKiroCreditTargetUsd(v)
+		return nil
 	}
 	return fmt.Errorf("unknown Group field %s", name)
 }
@@ -17993,6 +18065,9 @@ func (m *GroupMutation) AddedFields() []string {
 	if m.addkiro_cache_emulation_ratio != nil {
 		fields = append(fields, group.FieldKiroCacheEmulationRatio)
 	}
+	if m.addkiro_credit_target_usd != nil {
+		fields = append(fields, group.FieldKiroCreditTargetUsd)
+	}
 	return fields
 }
 
@@ -18031,6 +18106,8 @@ func (m *GroupMutation) AddedField(name string) (ent.Value, bool) {
 		return m.AddedKiroStickySessionTTLSeconds()
 	case group.FieldKiroCacheEmulationRatio:
 		return m.AddedKiroCacheEmulationRatio()
+	case group.FieldKiroCreditTargetUsd:
+		return m.AddedKiroCreditTargetUsd()
 	}
 	return nil, false
 }
@@ -18144,6 +18221,13 @@ func (m *GroupMutation) AddField(name string, value ent.Value) error {
 			return fmt.Errorf("unexpected type %T for field %s", value, name)
 		}
 		m.AddKiroCacheEmulationRatio(v)
+		return nil
+	case group.FieldKiroCreditTargetUsd:
+		v, ok := value.(float64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.AddKiroCreditTargetUsd(v)
 		return nil
 	}
 	return fmt.Errorf("unknown Group numeric field %s", name)
@@ -18357,6 +18441,9 @@ func (m *GroupMutation) ResetField(name string) error {
 		return nil
 	case group.FieldKiroCacheEmulationRatio:
 		m.ResetKiroCacheEmulationRatio()
+		return nil
+	case group.FieldKiroCreditTargetUsd:
+		m.ResetKiroCreditTargetUsd()
 		return nil
 	}
 	return fmt.Errorf("unknown Group field %s", name)
@@ -35191,6 +35278,8 @@ type UsageLogMutation struct {
 	addcache_creation_5m_tokens *int
 	cache_creation_1h_tokens    *int
 	addcache_creation_1h_tokens *int
+	kiro_credits                *float64
+	addkiro_credits             *float64
 	input_cost                  *float64
 	addinput_cost               *float64
 	output_cost                 *float64
@@ -36266,6 +36355,76 @@ func (m *UsageLogMutation) AddedCacheCreation1hTokens() (r int, exists bool) {
 func (m *UsageLogMutation) ResetCacheCreation1hTokens() {
 	m.cache_creation_1h_tokens = nil
 	m.addcache_creation_1h_tokens = nil
+}
+
+// SetKiroCredits sets the "kiro_credits" field.
+func (m *UsageLogMutation) SetKiroCredits(f float64) {
+	m.kiro_credits = &f
+	m.addkiro_credits = nil
+}
+
+// KiroCredits returns the value of the "kiro_credits" field in the mutation.
+func (m *UsageLogMutation) KiroCredits() (r float64, exists bool) {
+	v := m.kiro_credits
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldKiroCredits returns the old "kiro_credits" field's value of the UsageLog entity.
+// If the UsageLog object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *UsageLogMutation) OldKiroCredits(ctx context.Context) (v *float64, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldKiroCredits is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldKiroCredits requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldKiroCredits: %w", err)
+	}
+	return oldValue.KiroCredits, nil
+}
+
+// AddKiroCredits adds f to the "kiro_credits" field.
+func (m *UsageLogMutation) AddKiroCredits(f float64) {
+	if m.addkiro_credits != nil {
+		*m.addkiro_credits += f
+	} else {
+		m.addkiro_credits = &f
+	}
+}
+
+// AddedKiroCredits returns the value that was added to the "kiro_credits" field in this mutation.
+func (m *UsageLogMutation) AddedKiroCredits() (r float64, exists bool) {
+	v := m.addkiro_credits
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// ClearKiroCredits clears the value of the "kiro_credits" field.
+func (m *UsageLogMutation) ClearKiroCredits() {
+	m.kiro_credits = nil
+	m.addkiro_credits = nil
+	m.clearedFields[usagelog.FieldKiroCredits] = struct{}{}
+}
+
+// KiroCreditsCleared returns if the "kiro_credits" field was cleared in this mutation.
+func (m *UsageLogMutation) KiroCreditsCleared() bool {
+	_, ok := m.clearedFields[usagelog.FieldKiroCredits]
+	return ok
+}
+
+// ResetKiroCredits resets all changes to the "kiro_credits" field.
+func (m *UsageLogMutation) ResetKiroCredits() {
+	m.kiro_credits = nil
+	m.addkiro_credits = nil
+	delete(m.clearedFields, usagelog.FieldKiroCredits)
 }
 
 // SetInputCost sets the "input_cost" field.
@@ -37602,7 +37761,7 @@ func (m *UsageLogMutation) Type() string {
 // order to get all numeric fields that were incremented/decremented, call
 // AddedFields().
 func (m *UsageLogMutation) Fields() []string {
-	fields := make([]string, 0, 41)
+	fields := make([]string, 0, 42)
 	if m.user != nil {
 		fields = append(fields, usagelog.FieldUserID)
 	}
@@ -37659,6 +37818,9 @@ func (m *UsageLogMutation) Fields() []string {
 	}
 	if m.cache_creation_1h_tokens != nil {
 		fields = append(fields, usagelog.FieldCacheCreation1hTokens)
+	}
+	if m.kiro_credits != nil {
+		fields = append(fields, usagelog.FieldKiroCredits)
 	}
 	if m.input_cost != nil {
 		fields = append(fields, usagelog.FieldInputCost)
@@ -37772,6 +37934,8 @@ func (m *UsageLogMutation) Field(name string) (ent.Value, bool) {
 		return m.CacheCreation5mTokens()
 	case usagelog.FieldCacheCreation1hTokens:
 		return m.CacheCreation1hTokens()
+	case usagelog.FieldKiroCredits:
+		return m.KiroCredits()
 	case usagelog.FieldInputCost:
 		return m.InputCost()
 	case usagelog.FieldOutputCost:
@@ -37863,6 +38027,8 @@ func (m *UsageLogMutation) OldField(ctx context.Context, name string) (ent.Value
 		return m.OldCacheCreation5mTokens(ctx)
 	case usagelog.FieldCacheCreation1hTokens:
 		return m.OldCacheCreation1hTokens(ctx)
+	case usagelog.FieldKiroCredits:
+		return m.OldKiroCredits(ctx)
 	case usagelog.FieldInputCost:
 		return m.OldInputCost(ctx)
 	case usagelog.FieldOutputCost:
@@ -38049,6 +38215,13 @@ func (m *UsageLogMutation) SetField(name string, value ent.Value) error {
 		}
 		m.SetCacheCreation1hTokens(v)
 		return nil
+	case usagelog.FieldKiroCredits:
+		v, ok := value.(float64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetKiroCredits(v)
+		return nil
 	case usagelog.FieldInputCost:
 		v, ok := value.(float64)
 		if !ok {
@@ -38232,6 +38405,9 @@ func (m *UsageLogMutation) AddedFields() []string {
 	if m.addcache_creation_1h_tokens != nil {
 		fields = append(fields, usagelog.FieldCacheCreation1hTokens)
 	}
+	if m.addkiro_credits != nil {
+		fields = append(fields, usagelog.FieldKiroCredits)
+	}
 	if m.addinput_cost != nil {
 		fields = append(fields, usagelog.FieldInputCost)
 	}
@@ -38290,6 +38466,8 @@ func (m *UsageLogMutation) AddedField(name string) (ent.Value, bool) {
 		return m.AddedCacheCreation5mTokens()
 	case usagelog.FieldCacheCreation1hTokens:
 		return m.AddedCacheCreation1hTokens()
+	case usagelog.FieldKiroCredits:
+		return m.AddedKiroCredits()
 	case usagelog.FieldInputCost:
 		return m.AddedInputCost()
 	case usagelog.FieldOutputCost:
@@ -38371,6 +38549,13 @@ func (m *UsageLogMutation) AddField(name string, value ent.Value) error {
 			return fmt.Errorf("unexpected type %T for field %s", value, name)
 		}
 		m.AddCacheCreation1hTokens(v)
+		return nil
+	case usagelog.FieldKiroCredits:
+		v, ok := value.(float64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.AddKiroCredits(v)
 		return nil
 	case usagelog.FieldInputCost:
 		v, ok := value.(float64)
@@ -38488,6 +38673,9 @@ func (m *UsageLogMutation) ClearedFields() []string {
 	if m.FieldCleared(usagelog.FieldSubscriptionID) {
 		fields = append(fields, usagelog.FieldSubscriptionID)
 	}
+	if m.FieldCleared(usagelog.FieldKiroCredits) {
+		fields = append(fields, usagelog.FieldKiroCredits)
+	}
 	if m.FieldCleared(usagelog.FieldAccountRateMultiplier) {
 		fields = append(fields, usagelog.FieldAccountRateMultiplier)
 	}
@@ -38555,6 +38743,9 @@ func (m *UsageLogMutation) ClearField(name string) error {
 		return nil
 	case usagelog.FieldSubscriptionID:
 		m.ClearSubscriptionID()
+		return nil
+	case usagelog.FieldKiroCredits:
+		m.ClearKiroCredits()
 		return nil
 	case usagelog.FieldAccountRateMultiplier:
 		m.ClearAccountRateMultiplier()
@@ -38650,6 +38841,9 @@ func (m *UsageLogMutation) ResetField(name string) error {
 		return nil
 	case usagelog.FieldCacheCreation1hTokens:
 		m.ResetCacheCreation1hTokens()
+		return nil
+	case usagelog.FieldKiroCredits:
+		m.ResetKiroCredits()
 		return nil
 	case usagelog.FieldInputCost:
 		m.ResetInputCost()

@@ -52,6 +52,8 @@ const (
 	FieldCacheCreation5mTokens = "cache_creation_5m_tokens"
 	// FieldCacheCreation1hTokens holds the string denoting the cache_creation_1h_tokens field in the database.
 	FieldCacheCreation1hTokens = "cache_creation_1h_tokens"
+	// FieldKiroCredits holds the string denoting the kiro_credits field in the database.
+	FieldKiroCredits = "kiro_credits"
 	// FieldInputCost holds the string denoting the input_cost field in the database.
 	FieldInputCost = "input_cost"
 	// FieldOutputCost holds the string denoting the output_cost field in the database.
@@ -167,6 +169,7 @@ var Columns = []string{
 	FieldCacheReadTokens,
 	FieldCacheCreation5mTokens,
 	FieldCacheCreation1hTokens,
+	FieldKiroCredits,
 	FieldInputCost,
 	FieldOutputCost,
 	FieldCacheCreationCost,
@@ -367,6 +370,11 @@ func ByCacheCreation5mTokens(opts ...sql.OrderTermOption) OrderOption {
 // ByCacheCreation1hTokens orders the results by the cache_creation_1h_tokens field.
 func ByCacheCreation1hTokens(opts ...sql.OrderTermOption) OrderOption {
 	return sql.OrderByField(FieldCacheCreation1hTokens, opts...).ToFunc()
+}
+
+// ByKiroCredits orders the results by the kiro_credits field.
+func ByKiroCredits(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldKiroCredits, opts...).ToFunc()
 }
 
 // ByInputCost orders the results by the input_cost field.

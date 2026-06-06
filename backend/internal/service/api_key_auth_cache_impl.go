@@ -14,7 +14,7 @@ import (
 	"github.com/dgraph-io/ristretto"
 )
 
-const apiKeyAuthSnapshotVersion = 13 // v13: reload snapshots for Kiro auto sticky routing switch
+const apiKeyAuthSnapshotVersion = 14 // v14: add Kiro credit target USD for group snapshot (reverse token scaling anchor price); v13: Kiro auto sticky routing switch
 
 type apiKeyAuthCacheConfig struct {
 	l1Size        int
@@ -286,6 +286,7 @@ func (s *APIKeyService) snapshotFromAPIKey(ctx context.Context, apiKey *APIKey) 
 			KiroAutoStickyEnabled:           groupForSnapshot.EffectiveKiroAutoStickyEnabled(),
 			KiroStickySessionTTLSeconds:     groupForSnapshot.EffectiveKiroStickySessionTTLSeconds(),
 			KiroCacheEmulationRatio:         groupForSnapshot.EffectiveKiroCacheEmulationRatio(),
+			KiroCreditTargetUSD:             groupForSnapshot.EffectiveKiroCreditTargetUSD(),
 		}
 	}
 	return snapshot
@@ -363,8 +364,10 @@ func (s *APIKeyService) snapshotToAPIKey(key string, snapshot *APIKeyAuthSnapsho
 			KiroAutoStickyEnabled:           snapshot.Group.KiroAutoStickyEnabled,
 			KiroStickySessionTTLSeconds:     snapshot.Group.KiroStickySessionTTLSeconds,
 			KiroCacheEmulationRatio:         snapshot.Group.KiroCacheEmulationRatio,
+			KiroCreditTargetUSD:             snapshot.Group.KiroCreditTargetUSD,
 		}
 		normalizeKiroCacheEmulationFields(apiKey.Group)
+		normalizeKiroCreditTargetFields(apiKey.Group)
 	}
 	s.compileAPIKeyIPRules(apiKey)
 	return apiKey

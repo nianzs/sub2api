@@ -393,3 +393,59 @@ func TestHandleStreamingResponse_FailoverBodyDoesNotLeakAddresses(t *testing.T) 
 	require.Contains(t, body, "connection reset by peer")
 	require.Contains(t, body, "upstream stream disconnected")
 }
+
+// --- Kiro 内部 usage 字段剥离 ---
+
+// TestHandleStreamingResponse_StripsKiroInternalCredits 验证 translator 经
+// _sub2api_kiro_credits 内部通道透传的真实 credits 被计费侧捕获，
+// 但不会出现在转发给客户端的 SSE 中。
+func TestHandleStreamingResponse_StripsKiroInternalCredits(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	svc := newMinimalGatewayService()
+
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
+
+	pr, pw := io.Pipe()
+	resp := &http.Response{StatusCode: http.StatusOK, Header: http.Header{}, Body: pr}
+
+	go func() {
+		defer func() { _ = pw.Close() }()
+		_, _ = pw.Write([]byte("data: {\"type\":\"message_start\",\"message\":{\"usage\":{\"input_tokens\":10}}}\n\n"))
+		_, _ = pw.Write([]byte("data: {\"type\":\"message_delta\",\"usage\":{\"output_tokens\":15,\"_sub2api_kiro_credits\":1.25}}\n\n"))
+		_, _ = pw.Write([]byte("data: [DONE]\n\n"))
+	}()
+
+	result, err := svc.handleStreamingResponse(context.Background(), resp, c, &Account{ID: 1}, time.Now(), "model", "model", false)
+	_ = pr.Close()
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.NotNil(t, result.usage)
+	require.InDelta(t, 1.25, result.usage.KiroCredits, 1e-9, "内部通道应捕获 credits")
+	require.Equal(t, 15, result.usage.OutputTokens)
+
+	body := rec.Body.String()
+	require.NotContains(t, body, "_sub2api_kiro_credits", "内部字段不得透传给客户端")
+	require.Contains(t, body, "\"output_tokens\":15", "其余 usage 字段应正常转发")
+}
+
+func TestStripSub2apiInternalUsageFields(t *testing.T) {
+	t.Run("removes field from data line", func(t *testing.T) {
+		line := `data: {"type":"message_delta","usage":{"output_tokens":15,"_sub2api_kiro_credits":1.25}}`
+		got := stripSub2apiInternalUsageFields(line)
+		require.NotContains(t, got, "_sub2api_kiro_credits")
+		require.Contains(t, got, `"output_tokens":15`)
+		require.True(t, len(got) > len("data: {}"))
+	})
+
+	t.Run("no-op without marker", func(t *testing.T) {
+		line := `data: {"type":"message_delta","usage":{"output_tokens":15}}`
+		require.Equal(t, line, stripSub2apiInternalUsageFields(line))
+	})
+
+	t.Run("no-op for non-data lines", func(t *testing.T) {
+		line := `event: message_delta`
+		require.Equal(t, line, stripSub2apiInternalUsageFields(line))
+	})
+}

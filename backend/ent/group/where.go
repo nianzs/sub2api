@@ -230,6 +230,11 @@ func KiroCacheEmulationRatio(v float64) predicate.Group {
 	return predicate.Group(sql.FieldEQ(FieldKiroCacheEmulationRatio, v))
 }
 
+// KiroCreditTargetUsd applies equality check predicate on the "kiro_credit_target_usd" field. It's identical to KiroCreditTargetUsdEQ.
+func KiroCreditTargetUsd(v float64) predicate.Group {
+	return predicate.Group(sql.FieldEQ(FieldKiroCreditTargetUsd, v))
+}
+
 // CreatedAtEQ applies the EQ predicate on the "created_at" field.
 func CreatedAtEQ(v time.Time) predicate.Group {
 	return predicate.Group(sql.FieldEQ(FieldCreatedAt, v))
@@ -1558,6 +1563,46 @@ func KiroCacheEmulationRatioLT(v float64) predicate.Group {
 // KiroCacheEmulationRatioLTE applies the LTE predicate on the "kiro_cache_emulation_ratio" field.
 func KiroCacheEmulationRatioLTE(v float64) predicate.Group {
 	return predicate.Group(sql.FieldLTE(FieldKiroCacheEmulationRatio, v))
+}
+
+// KiroCreditTargetUsdEQ applies the EQ predicate on the "kiro_credit_target_usd" field.
+func KiroCreditTargetUsdEQ(v float64) predicate.Group {
+	return predicate.Group(sql.FieldEQ(FieldKiroCreditTargetUsd, v))
+}
+
+// KiroCreditTargetUsdNEQ applies the NEQ predicate on the "kiro_credit_target_usd" field.
+func KiroCreditTargetUsdNEQ(v float64) predicate.Group {
+	return predicate.Group(sql.FieldNEQ(FieldKiroCreditTargetUsd, v))
+}
+
+// KiroCreditTargetUsdIn applies the In predicate on the "kiro_credit_target_usd" field.
+func KiroCreditTargetUsdIn(vs ...float64) predicate.Group {
+	return predicate.Group(sql.FieldIn(FieldKiroCreditTargetUsd, vs...))
+}
+
+// KiroCreditTargetUsdNotIn applies the NotIn predicate on the "kiro_credit_target_usd" field.
+func KiroCreditTargetUsdNotIn(vs ...float64) predicate.Group {
+	return predicate.Group(sql.FieldNotIn(FieldKiroCreditTargetUsd, vs...))
+}
+
+// KiroCreditTargetUsdGT applies the GT predicate on the "kiro_credit_target_usd" field.
+func KiroCreditTargetUsdGT(v float64) predicate.Group {
+	return predicate.Group(sql.FieldGT(FieldKiroCreditTargetUsd, v))
+}
+
+// KiroCreditTargetUsdGTE applies the GTE predicate on the "kiro_credit_target_usd" field.
+func KiroCreditTargetUsdGTE(v float64) predicate.Group {
+	return predicate.Group(sql.FieldGTE(FieldKiroCreditTargetUsd, v))
+}
+
+// KiroCreditTargetUsdLT applies the LT predicate on the "kiro_credit_target_usd" field.
+func KiroCreditTargetUsdLT(v float64) predicate.Group {
+	return predicate.Group(sql.FieldLT(FieldKiroCreditTargetUsd, v))
+}
+
+// KiroCreditTargetUsdLTE applies the LTE predicate on the "kiro_credit_target_usd" field.
+func KiroCreditTargetUsdLTE(v float64) predicate.Group {
+	return predicate.Group(sql.FieldLTE(FieldKiroCreditTargetUsd, v))
 }
 
 // HasAPIKeys applies the HasEdge predicate on the "api_keys" edge.

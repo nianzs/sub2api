@@ -721,6 +721,27 @@ func (_u *GroupUpdate) AddKiroCacheEmulationRatio(v float64) *GroupUpdate {
 	return _u
 }
 
+// SetKiroCreditTargetUsd sets the "kiro_credit_target_usd" field.
+func (_u *GroupUpdate) SetKiroCreditTargetUsd(v float64) *GroupUpdate {
+	_u.mutation.ResetKiroCreditTargetUsd()
+	_u.mutation.SetKiroCreditTargetUsd(v)
+	return _u
+}
+
+// SetNillableKiroCreditTargetUsd sets the "kiro_credit_target_usd" field if the given value is not nil.
+func (_u *GroupUpdate) SetNillableKiroCreditTargetUsd(v *float64) *GroupUpdate {
+	if v != nil {
+		_u.SetKiroCreditTargetUsd(*v)
+	}
+	return _u
+}
+
+// AddKiroCreditTargetUsd adds value to the "kiro_credit_target_usd" field.
+func (_u *GroupUpdate) AddKiroCreditTargetUsd(v float64) *GroupUpdate {
+	_u.mutation.AddKiroCreditTargetUsd(v)
+	return _u
+}
+
 // AddAPIKeyIDs adds the "api_keys" edge to the APIKey entity by IDs.
 func (_u *GroupUpdate) AddAPIKeyIDs(ids ...int64) *GroupUpdate {
 	_u.mutation.AddAPIKeyIDs(ids...)
@@ -1222,6 +1243,12 @@ func (_u *GroupUpdate) sqlSave(ctx context.Context) (_node int, err error) {
 	}
 	if value, ok := _u.mutation.AddedKiroCacheEmulationRatio(); ok {
 		_spec.AddField(group.FieldKiroCacheEmulationRatio, field.TypeFloat64, value)
+	}
+	if value, ok := _u.mutation.KiroCreditTargetUsd(); ok {
+		_spec.SetField(group.FieldKiroCreditTargetUsd, field.TypeFloat64, value)
+	}
+	if value, ok := _u.mutation.AddedKiroCreditTargetUsd(); ok {
+		_spec.AddField(group.FieldKiroCreditTargetUsd, field.TypeFloat64, value)
 	}
 	if _u.mutation.APIKeysCleared() {
 		edge := &sqlgraph.EdgeSpec{
@@ -2222,6 +2249,27 @@ func (_u *GroupUpdateOne) AddKiroCacheEmulationRatio(v float64) *GroupUpdateOne 
 	return _u
 }
 
+// SetKiroCreditTargetUsd sets the "kiro_credit_target_usd" field.
+func (_u *GroupUpdateOne) SetKiroCreditTargetUsd(v float64) *GroupUpdateOne {
+	_u.mutation.ResetKiroCreditTargetUsd()
+	_u.mutation.SetKiroCreditTargetUsd(v)
+	return _u
+}
+
+// SetNillableKiroCreditTargetUsd sets the "kiro_credit_target_usd" field if the given value is not nil.
+func (_u *GroupUpdateOne) SetNillableKiroCreditTargetUsd(v *float64) *GroupUpdateOne {
+	if v != nil {
+		_u.SetKiroCreditTargetUsd(*v)
+	}
+	return _u
+}
+
+// AddKiroCreditTargetUsd adds value to the "kiro_credit_target_usd" field.
+func (_u *GroupUpdateOne) AddKiroCreditTargetUsd(v float64) *GroupUpdateOne {
+	_u.mutation.AddKiroCreditTargetUsd(v)
+	return _u
+}
+
 // AddAPIKeyIDs adds the "api_keys" edge to the APIKey entity by IDs.
 func (_u *GroupUpdateOne) AddAPIKeyIDs(ids ...int64) *GroupUpdateOne {
 	_u.mutation.AddAPIKeyIDs(ids...)
@@ -2753,6 +2801,12 @@ func (_u *GroupUpdateOne) sqlSave(ctx context.Context) (_node *Group, err error)
 	}
 	if value, ok := _u.mutation.AddedKiroCacheEmulationRatio(); ok {
 		_spec.AddField(group.FieldKiroCacheEmulationRatio, field.TypeFloat64, value)
+	}
+	if value, ok := _u.mutation.KiroCreditTargetUsd(); ok {
+		_spec.SetField(group.FieldKiroCreditTargetUsd, field.TypeFloat64, value)
+	}
+	if value, ok := _u.mutation.AddedKiroCreditTargetUsd(); ok {
+		_spec.AddField(group.FieldKiroCreditTargetUsd, field.TypeFloat64, value)
 	}
 	if _u.mutation.APIKeysCleared() {
 		edge := &sqlgraph.EdgeSpec{

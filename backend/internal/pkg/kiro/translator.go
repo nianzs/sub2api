@@ -13,6 +13,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"os"
 	"regexp"
@@ -82,6 +83,9 @@ type Usage struct {
 	CacheCreationInputTokens   int
 	CacheCreation5mInputTokens int
 	CacheCreation1hInputTokens int
+	// KiroCredits 来自上游 meteringEvent 帧的 usage 字段（浮点 credits 累加）。
+	// Kiro 真实计费的唯一可信来源，用于反向 token 缩放锚定金额。
+	KiroCredits float64
 }
 
 type StreamResult struct {
@@ -104,6 +108,15 @@ type KiroRequestContext struct {
 	StructuredOutputUserHint string
 	StopSequences            []string
 	MaxOutputTokens          int
+
+	// ReverseScaling 配置反向 token 缩放：
+	//   - TargetUSD > 0 启用，每 credit 对应的 sub2api USD 余额
+	//   - 流结束时拿到 KiroCredits 后，把 4 个 token 字段 × K 让计费金额 = credits × TargetUSD
+	//   - 由 service 层 (kiroUsageToClaude 之前) 注入，translator 不读 group / model 配置
+	ReverseScalingTargetUSD float64
+	// ReverseScalingPrices 是 Anthropic 标准价 (input/output/cc/cr per M tokens)，
+	// 由 service 层按 model 类别选好后传入。
+	ReverseScalingPrices [4]float64
 }
 
 type KiroBuildResult struct {
@@ -501,6 +514,7 @@ func ParseNonStreamingEventStreamWithContext(body io.Reader, model string, reque
 	if requestCtx.CacheEmulationUsage != nil {
 		usage = mergeKiroCacheEmulationUsage(usage, requestCtx.CacheEmulationUsage)
 	}
+	usage = applyKiroReverseScalingUsage(usage, requestCtx)
 	return &ParseResult{
 		ResponseBody: buildClaudeResponse(content, toolUses, model, usage, stopReason, requestCtx),
 		Usage:        usage,
@@ -1168,6 +1182,9 @@ func StreamEventStreamAsAnthropicWithContext(ctx context.Context, body io.Reader
 	if requestCtx.CacheEmulationUsage != nil {
 		usage = mergeKiroCacheEmulationUsage(usage, requestCtx.CacheEmulationUsage)
 	}
+	// 反向 token 缩放：让 token × Anthropic价 = credits × TargetUSD
+	// 必须在构建 finalUsageMap 之前，确保响应给客户端的 token 与库里的一致。
+	usage = applyKiroReverseScalingUsage(usage, requestCtx)
 	if stopReason == "" {
 		if len(emittedToolContents) > 0 {
 			stopReason = "tool_use"
@@ -1183,6 +1200,12 @@ func StreamEventStreamAsAnthropicWithContext(ctx context.Context, body io.Reader
 		"output_tokens":               usage.OutputTokens,
 		"cache_read_input_tokens":     usage.CacheReadInputTokens,
 		"cache_creation_input_tokens": usage.CacheCreationInputTokens,
+	}
+	// sub2api 内部通道：把 Kiro 真实 credits 透传给 gateway 层（经 SSE message_delta），
+	// 用于 usage_logs.kiro_credits 持久化。gateway 在转发给客户端前会剥离该字段
+	// （见 gateway_service 的 stripSub2apiInternalUsageFields / SSE 重写路径）。
+	if usage.KiroCredits > 0 {
+		finalUsageMap["_sub2api_kiro_credits"] = usage.KiroCredits
 	}
 	addKiroCacheUsageFields(finalUsageMap, usage)
 	if err := writeEvent("message_delta", map[string]any{
@@ -3126,6 +3149,8 @@ func buildKiroClaudeUsageMap(usage Usage) map[string]any {
 		"output_tokens":           usage.OutputTokens,
 		"cache_read_input_tokens": usage.CacheReadInputTokens,
 	}
+	// 注意：不在这里透传 _sub2api_kiro_credits。非流式响应体原样发给客户端，
+	// 而非流式计费走 ParseResult.Usage 返回值，无需经响应体中转。
 	if usage.CacheCreationInputTokens > 0 {
 		usageMap["cache_creation_input_tokens"] = usage.CacheCreationInputTokens
 	}
@@ -3641,7 +3666,7 @@ func extractSemanticEvents(eventType string, event map[string]any, lastContentFr
 				SourceStopReason: sourceStopReason,
 			})
 		}
-	case "messageMetadataEvent", "metadataEvent", "supplementaryWebLinksEvent", "usageEvent", "messageStopEvent", "message_stop":
+	case "messageMetadataEvent", "metadataEvent", "supplementaryWebLinksEvent", "usageEvent", "messageStopEvent", "message_stop", "meteringEvent":
 		out = append(out, kiroSemanticEvent{
 			Type:             kiroSemanticUsage,
 			SourceEventType:  eventType,
@@ -4067,6 +4092,17 @@ func updateUsageFromEvent(usage *Usage, eventType string, event map[string]any) 
 	if value, ok := toInt(meta["totalTokens"]); ok && value > 0 {
 		usage.TotalTokens = value
 	}
+	// meteringEvent: { unit: "credit", unitPlural: "credits", usage: 0.685 }
+	// 一次请求可能下发多个 meteringEvent 帧，累加。usage 字段命名同 tokenUsage 父键，
+	// 但语义不同（是 credit 浮点数），用 toFloat 解析。
+	if eventType == "meteringEvent" {
+		// payload 可能在 event 顶层或 nested 在 eventType key 下。
+		if value, ok := toFloat(meta["usage"]); ok && value > 0 {
+			usage.KiroCredits += value
+		} else if value, ok := toFloat(event["usage"]); ok && value > 0 {
+			usage.KiroCredits += value
+		}
+	}
 }
 
 func readToolUses(primary, fallback map[string]any) []KiroToolUse {
@@ -4131,6 +4167,26 @@ func toInt(value any) (int, bool) {
 	}
 }
 
+// toFloat 把 SSE 事件 payload 中的数值字段转 float64。
+// meteringEvent.usage 是小数 credit 数（如 0.6856651423548923），必须用 float64 解析。
+func toFloat(value any) (float64, bool) {
+	switch v := value.(type) {
+	case float64:
+		return v, true
+	case float32:
+		return float64(v), true
+	case int:
+		return float64(v), true
+	case int64:
+		return float64(v), true
+	case json.Number:
+		f, err := v.Float64()
+		return f, err == nil
+	default:
+		return 0, false
+	}
+}
+
 func mergeKiroCacheEmulationUsage(base Usage, simulated *Usage) Usage {
 	if simulated == nil {
 		return base
@@ -4145,6 +4201,63 @@ func mergeKiroCacheEmulationUsage(base Usage, simulated *Usage) Usage {
 	base.CacheCreation1hInputTokens = simulated.CacheCreation1hInputTokens
 	base.TotalTokens = base.InputTokens + base.OutputTokens + base.CacheReadInputTokens + base.CacheCreationInputTokens
 	return base
+}
+
+// kiroReverseScalingMinK / MaxK 是反向缩放安全围栏。
+// 实测 K 范围 0.55-1.16，正常区间 [0.1, 5]；超出视为上游异常，不缩放。
+const (
+	kiroReverseScalingMinK = 0.1
+	kiroReverseScalingMaxK = 5.0
+)
+
+// applyKiroReverseScalingUsage 按 Anthropic 标准价反向缩放 4 个 token 字段，
+// 让 sum(token × Anthropic_price) = KiroCredits × TargetUSD。
+//
+// 触发条件：requestCtx.ReverseScalingTargetUSD > 0 且 usage.KiroCredits > 0
+// 兜底：K 不在 [0.1, 5] 范围 → 不缩放，原值返回。
+//
+// 参考算法：KIRO_REVERSE_SCALING_ALGORITHM.md
+func applyKiroReverseScalingUsage(usage Usage, ctx KiroRequestContext) Usage {
+	if ctx.ReverseScalingTargetUSD <= 0 || usage.KiroCredits <= 0 {
+		return usage
+	}
+	pIn, pOut, pCC, pCR := ctx.ReverseScalingPrices[0], ctx.ReverseScalingPrices[1], ctx.ReverseScalingPrices[2], ctx.ReverseScalingPrices[3]
+	if pIn <= 0 && pOut <= 0 && pCC <= 0 && pCR <= 0 {
+		return usage
+	}
+	inM := float64(usage.InputTokens) / 1e6
+	outM := float64(usage.OutputTokens) / 1e6
+	ccM := float64(usage.CacheCreationInputTokens) / 1e6
+	crM := float64(usage.CacheReadInputTokens) / 1e6
+	origCost := inM*pIn + outM*pOut + ccM*pCC + crM*pCR
+	if origCost <= 0 {
+		return usage
+	}
+	targetCost := usage.KiroCredits * ctx.ReverseScalingTargetUSD
+	K := targetCost / origCost
+	if K < kiroReverseScalingMinK || K > kiroReverseScalingMaxK {
+		return usage
+	}
+	usage.InputTokens = scaleKiroTokenValue(usage.InputTokens, K)
+	usage.OutputTokens = scaleKiroTokenValue(usage.OutputTokens, K)
+	usage.CacheCreationInputTokens = scaleKiroTokenValue(usage.CacheCreationInputTokens, K)
+	usage.CacheReadInputTokens = scaleKiroTokenValue(usage.CacheReadInputTokens, K)
+	usage.CacheCreation5mInputTokens = scaleKiroTokenValue(usage.CacheCreation5mInputTokens, K)
+	usage.CacheCreation1hInputTokens = scaleKiroTokenValue(usage.CacheCreation1hInputTokens, K)
+	usage.TotalTokens = usage.InputTokens + usage.OutputTokens + usage.CacheReadInputTokens + usage.CacheCreationInputTokens
+	return usage
+}
+
+// scaleKiroTokenValue 缩放单个 token 字段：原值 0 时不变，原值 > 0 时缩放后至少为 1。
+func scaleKiroTokenValue(orig int, K float64) int {
+	if orig <= 0 {
+		return orig
+	}
+	scaled := int(math.Round(float64(orig) * K))
+	if scaled < 1 {
+		return 1
+	}
+	return scaled
 }
 
 func addKiroCacheUsageFields(usageMap map[string]any, usage Usage) {

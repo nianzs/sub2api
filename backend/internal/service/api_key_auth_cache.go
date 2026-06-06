@@ -99,6 +99,9 @@ type APIKeyAuthGroupSnapshot struct {
 	KiroAutoStickyEnabled       bool    `json:"kiro_auto_sticky_enabled"`
 	KiroStickySessionTTLSeconds int     `json:"kiro_sticky_session_ttl_seconds"`
 	KiroCacheEmulationRatio     float64 `json:"kiro_cache_emulation_ratio"`
+
+	// Kiro 反向 token 缩放锚定单价（仅 platform=kiro 生效；0 = 禁用）
+	KiroCreditTargetUSD float64 `json:"kiro_credit_target_usd"`
 }
 
 // APIKeyAuthCacheEntry 缓存条目，支持负缓存

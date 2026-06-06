@@ -242,6 +242,7 @@ func (s *GatewayService) forwardKiroMessages(ctx context.Context, c *gin.Context
 
 	cacheUsage := s.buildKiroCacheEmulationUsage(account, parsed.Group, body, mappedModel, inputTokens)
 	requestCtx.CacheEmulationUsage = cacheUsage.toKiroUsage()
+	applyKiroReverseScalingContext(&requestCtx, parsed.Group, originalModel)
 	parseResult, err := kiropkg.ParseNonStreamingEventStreamWithContext(resp.Body, originalModel, requestCtx)
 	if err != nil {
 		c.JSON(http.StatusBadGateway, gin.H{
@@ -289,7 +290,7 @@ func (s *GatewayService) openKiroAnthropicStreamResponse(ctx context.Context, ac
 		headers := make(http.Header)
 		headers.Set("Content-Type", "text/event-stream")
 		go func() {
-			streamErr := s.streamKiroWebSearchAsAnthropic(ctx, account, anthropicBody, mappedModel, requestModel, token, inputTokens, headers, pw, cacheUsage)
+			streamErr := s.streamKiroWebSearchAsAnthropic(ctx, account, group, anthropicBody, mappedModel, requestModel, token, inputTokens, headers, pw, cacheUsage)
 			if streamErr != nil {
 				_ = pw.CloseWithError(streamErr)
 				return
@@ -316,6 +317,7 @@ func (s *GatewayService) openKiroAnthropicStreamResponse(ctx context.Context, ac
 	}
 	cacheUsage := s.buildKiroCacheEmulationUsage(account, group, anthropicBody, mappedModel, inputTokens)
 	requestCtx.CacheEmulationUsage = cacheUsage.toKiroUsage()
+	applyKiroReverseScalingContext(&requestCtx, group, requestModel)
 
 	pr, pw := io.Pipe()
 	wrappedHeaders := resp.Header.Clone()
@@ -716,11 +718,24 @@ func estimateKiroInputTokens(body []byte) int {
 	return tokens
 }
 
+// kiroCreditsPtr 把 KiroCredits float64 转为可空指针：
+// 仅 Kiro 平台请求会有 credits > 0 才写入 db.kiro_credits 列；
+// 其他平台或 credits=0 写 NULL 表示"无可信 credit 数据"。
+func kiroCreditsPtr(credits float64) *float64 {
+	if credits <= 0 {
+		return nil
+	}
+	v := credits
+	return &v
+}
+
 func kiroUsageToClaude(usage kiropkg.Usage, fallbackInput int) ClaudeUsage {
 	inputTokens := usage.InputTokens
 	if inputTokens == 0 {
 		inputTokens = fallbackInput
 	}
+	// 反向缩放已在 translator.go 流结束时应用（通过 KiroRequestContext 注入），
+	// 此处 usage 已是缩放后的值。KiroCredits 字段透传，给 usage_logs.kiro_credits 做对账。
 	return ClaudeUsage{
 		InputTokens:              inputTokens,
 		OutputTokens:             usage.OutputTokens,
@@ -728,6 +743,40 @@ func kiroUsageToClaude(usage kiropkg.Usage, fallbackInput int) ClaudeUsage {
 		CacheCreationInputTokens: usage.CacheCreationInputTokens,
 		CacheCreation5mTokens:    usage.CacheCreation5mInputTokens,
 		CacheCreation1hTokens:    usage.CacheCreation1hInputTokens,
+		KiroCredits:              usage.KiroCredits,
+	}
+}
+
+// applyKiroReverseScalingContext 把 group 配置注入到 KiroRequestContext，
+// 让 translator 在流结束时执行反向 token 缩放。
+//
+// 必须在所有调用 ParseNonStreamingEventStreamWithContext / StreamEventStreamAsAnthropicWithContext
+// 之前调用，确保流式和非流式路径都覆盖。
+func applyKiroReverseScalingContext(ctx *kiropkg.KiroRequestContext, group *Group, model string) {
+	if ctx == nil || group == nil {
+		return
+	}
+	target := group.EffectiveKiroCreditTargetUSD()
+	if target <= 0 {
+		return
+	}
+	pIn, pOut, pCC, pCR := kiroReverseScalingPrices(model)
+	ctx.ReverseScalingTargetUSD = target
+	ctx.ReverseScalingPrices = [4]float64{pIn, pOut, pCC, pCR}
+}
+
+// kiroReverseScalingPrices 返回反向缩放算法用的 Anthropic 标准价（USD per 1M tokens）。
+// 注意：这是仅用于"反算 K"的参考价，不影响 sub2api 真实计费表。
+func kiroReverseScalingPrices(model string) (pIn, pOut, pCC, pCR float64) {
+	m := strings.ToLower(model)
+	switch {
+	case strings.Contains(m, "haiku"):
+		return 1.0, 5.0, 1.25, 0.10
+	case strings.Contains(m, "sonnet"):
+		return 3.0, 15.0, 3.75, 0.30
+	default:
+		// Opus 4.x（默认，含 thinking 变体）
+		return 5.0, 25.0, 6.25, 0.50
 	}
 }
 

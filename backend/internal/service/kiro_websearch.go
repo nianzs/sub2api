@@ -48,9 +48,9 @@ func (w *kiroStreamChunkCollector) Write(p []byte) (int, error) {
 	return len(p), nil
 }
 
-func bufferKiroAnthropicStream(ctx context.Context, body io.Reader, responseModel string, inputTokens int) ([][]byte, *kiropkg.StreamResult, error) {
+func bufferKiroAnthropicStream(ctx context.Context, body io.Reader, responseModel string, inputTokens int, requestCtx kiropkg.KiroRequestContext) ([][]byte, *kiropkg.StreamResult, error) {
 	collector := &kiroStreamChunkCollector{}
-	result, err := kiropkg.StreamEventStreamAsAnthropicWithContext(ctx, body, collector, responseModel, inputTokens, kiropkg.KiroRequestContext{})
+	result, err := kiropkg.StreamEventStreamAsAnthropicWithContext(ctx, body, collector, responseModel, inputTokens, requestCtx)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -106,7 +106,7 @@ func writeAnthropicMessageStart(w io.Writer, msgID, model string, inputTokens in
 }
 
 func (s *GatewayService) streamKiroWebSearchAsAnthropic(
-	ctx context.Context, account *Account, anthropicBody []byte, mappedModel, requestModel, token string, inputTokens int, headers http.Header, w io.Writer, cacheUsage *kiroCacheEmulationUsage,
+	ctx context.Context, account *Account, group *Group, anthropicBody []byte, mappedModel, requestModel, token string, inputTokens int, headers http.Header, w io.Writer, cacheUsage *kiroCacheEmulationUsage,
 ) error {
 	query := kiropkg.ExtractSearchQuery(anthropicBody)
 	if strings.TrimSpace(query) == "" {
@@ -123,6 +123,10 @@ func (s *GatewayService) streamKiroWebSearchAsAnthropic(
 	if err := writeAnthropicMessageStart(w, "", requestModel, inputTokens, cacheUsage); err != nil {
 		return err
 	}
+
+	// 反向缩放上下文：每次迭代都用同一个 wsCtx（cacheUsage + reverse-scaling 配置）。
+	wsCtx := kiropkg.KiroRequestContext{CacheEmulationUsage: cacheUsage.toKiroUsage()}
+	applyKiroReverseScalingContext(&wsCtx, group, requestModel)
 
 	for iteration := 0; iteration < kiroMaxWebSearchIterations; iteration++ {
 		s.prefetchKiroWebSearchDescription(ctx, account, token)
@@ -155,7 +159,7 @@ func (s *GatewayService) streamKiroWebSearchAsAnthropic(
 
 		chunks, _, streamErr := func() ([][]byte, *kiropkg.StreamResult, error) {
 			defer func() { _ = resp.Body.Close() }()
-			return bufferKiroAnthropicStream(ctx, resp.Body, requestModel, inputTokens)
+			return bufferKiroAnthropicStream(ctx, resp.Body, requestModel, inputTokens, wsCtx)
 		}()
 		if streamErr != nil {
 			return streamErr
@@ -247,7 +251,9 @@ func (s *GatewayService) executeKiroWebSearch(ctx context.Context, account *Acco
 				cacheUsage = s.buildKiroCacheEmulationUsage(account, group, anthropicBody, mappedModel, inputTokens)
 				cacheUsageResolved = true
 			}
-			return kiropkg.ParseNonStreamingEventStreamWithContext(resp.Body, requestModel, kiropkg.KiroRequestContext{CacheEmulationUsage: cacheUsage.toKiroUsage()})
+			wsCtx := kiropkg.KiroRequestContext{CacheEmulationUsage: cacheUsage.toKiroUsage()}
+			applyKiroReverseScalingContext(&wsCtx, group, requestModel)
+			return kiropkg.ParseNonStreamingEventStreamWithContext(resp.Body, requestModel, wsCtx)
 		}()
 		if parseErr != nil {
 			return nil, parseErr

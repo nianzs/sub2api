@@ -235,6 +235,8 @@ type CreateGroupInput struct {
 	KiroAutoStickyEnabled       *bool
 	KiroStickySessionTTLSeconds *int
 	KiroCacheEmulationRatio     *float64
+	// Kiro 反向 token 缩放：每 credit 对应 USD 余额（0=禁用，仅 platform=kiro 生效）
+	KiroCreditTargetUSD *float64
 	// 从指定分组复制账号（创建分组后在同一事务内绑定）
 	CopyAccountsFromGroupIDs []int64
 }
@@ -281,6 +283,8 @@ type UpdateGroupInput struct {
 	KiroAutoStickyEnabled       *bool
 	KiroStickySessionTTLSeconds *int
 	KiroCacheEmulationRatio     *float64
+	// Kiro 反向 token 缩放：每 credit 对应 USD 余额（仅 platform=kiro 生效）
+	KiroCreditTargetUSD *float64
 	// 从指定分组复制账号（同步操作：先清空当前分组的账号绑定，再绑定源分组的账号）
 	CopyAccountsFromGroupIDs []int64
 }
@@ -1930,8 +1934,12 @@ func (s *adminServiceImpl) CreateGroup(ctx context.Context, input *CreateGroupIn
 	if input.KiroCacheEmulationRatio != nil {
 		group.KiroCacheEmulationRatio = *input.KiroCacheEmulationRatio
 	}
+	if input.KiroCreditTargetUSD != nil {
+		group.KiroCreditTargetUSD = *input.KiroCreditTargetUSD
+	}
 	sanitizeGroupMessagesDispatchFields(group)
 	normalizeKiroCacheEmulationFields(group)
+	normalizeKiroCreditTargetFields(group)
 	if err := s.groupRepo.Create(ctx, group); err != nil {
 		return nil, err
 	}
@@ -2194,8 +2202,12 @@ func (s *adminServiceImpl) UpdateGroup(ctx context.Context, id int64, input *Upd
 	if input.KiroCacheEmulationRatio != nil {
 		group.KiroCacheEmulationRatio = *input.KiroCacheEmulationRatio
 	}
+	if input.KiroCreditTargetUSD != nil {
+		group.KiroCreditTargetUSD = *input.KiroCreditTargetUSD
+	}
 	sanitizeGroupMessagesDispatchFields(group)
 	normalizeKiroCacheEmulationFields(group)
+	normalizeKiroCreditTargetFields(group)
 
 	if err := s.groupRepo.Update(ctx, group); err != nil {
 		return nil, err
