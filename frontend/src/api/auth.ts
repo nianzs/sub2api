@@ -497,12 +497,30 @@ export interface ValidateInvitationCodeResponse {
 }
 
 /**
+ * Validate affiliate code response
+ */
+export interface ValidateAffCodeResponse {
+  valid: boolean
+  error_code?: string
+}
+
+/**
  * Validate invitation code (public endpoint, no auth required)
  * @param code - Invitation code to validate
  * @returns Validation result
  */
 export async function validateInvitationCode(code: string): Promise<ValidateInvitationCodeResponse> {
   const { data } = await apiClient.post<ValidateInvitationCodeResponse>('/auth/validate-invitation-code', { code })
+  return data
+}
+
+/**
+ * Validate affiliate code (public endpoint, no auth required)
+ * @param code - Affiliate code to validate
+ * @returns Validation result
+ */
+export async function validateAffCode(code: string): Promise<ValidateAffCodeResponse> {
+  const { data } = await apiClient.post<ValidateAffCodeResponse>('/auth/validate-aff-code', { code })
   return data
 }
 

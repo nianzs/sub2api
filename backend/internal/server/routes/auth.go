@@ -51,6 +51,9 @@ func RegisterAuthRoutes(
 			FailureMode: middleware.RateLimitFailClose,
 		}), h.Auth.ValidatePromoCode)
 		// 邀请码验证接口添加速率限制：每分钟最多 10 次（Redis 故障时 fail-close）
+		auth.POST("/validate-aff-code", rateLimiter.LimitWithOptions("validate-aff", 10, time.Minute, middleware.RateLimitOptions{
+			FailureMode: middleware.RateLimitFailClose,
+		}), h.Auth.ValidateAffCode)
 		auth.POST("/validate-invitation-code", rateLimiter.LimitWithOptions("validate-invitation", 10, time.Minute, middleware.RateLimitOptions{
 			FailureMode: middleware.RateLimitFailClose,
 		}), h.Auth.ValidateInvitationCode)

@@ -507,6 +507,62 @@ func (h *AuthHandler) ValidatePromoCode(c *gin.Context) {
 }
 
 // ValidateInvitationCodeRequest 验证邀请码请求
+// ValidateAffCodeRequest 验证返利码请求
+type ValidateAffCodeRequest struct {
+	Code string `json:"code" binding:"required"`
+}
+
+// ValidateAffCodeResponse 验证返利码响应
+type ValidateAffCodeResponse struct {
+	Valid     bool   `json:"valid"`
+	ErrorCode string `json:"error_code,omitempty"`
+}
+
+// ValidateAffCode 验证返利码（公开接口，注册前调用）
+// POST /api/v1/auth/validate-aff-code
+func (h *AuthHandler) ValidateAffCode(c *gin.Context) {
+	if h.settingSvc == nil || !h.settingSvc.IsAffiliateEnabled(c.Request.Context()) {
+		response.Success(c, ValidateAffCodeResponse{
+			Valid:     false,
+			ErrorCode: "AFFILIATE_CODE_DISABLED",
+		})
+		return
+	}
+
+	var req ValidateAffCodeRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, "Invalid request: "+err.Error())
+		return
+	}
+
+	if h.authService == nil {
+		response.Success(c, ValidateAffCodeResponse{
+			Valid:     false,
+			ErrorCode: "AFFILIATE_CODE_INVALID",
+		})
+		return
+	}
+
+	if err := h.authService.ValidateAffiliateCode(c.Request.Context(), req.Code); err != nil {
+		errorCode := "AFFILIATE_CODE_INVALID"
+		switch err {
+		case service.ErrAffiliateCodeDisabled:
+			errorCode = "AFFILIATE_CODE_DISABLED"
+		case service.ErrAffiliateCodeInvalid, service.ErrAffiliateProfileNotFound:
+			errorCode = "AFFILIATE_CODE_INVALID"
+		}
+		response.Success(c, ValidateAffCodeResponse{
+			Valid:     false,
+			ErrorCode: errorCode,
+		})
+		return
+	}
+
+	response.Success(c, ValidateAffCodeResponse{
+		Valid: true,
+	})
+}
+
 type ValidateInvitationCodeRequest struct {
 	Code string `json:"code" binding:"required"`
 }

@@ -279,6 +279,18 @@ type SendVerifyCodeResult struct {
 }
 
 // SendVerifyCode 发送邮箱验证码（同步方式）
+// ValidateAffiliateCode validates a registration affiliate code.
+func (s *AuthService) ValidateAffiliateCode(ctx context.Context, code string) error {
+	if s == nil || s.affiliateService == nil {
+		return ErrAffiliateCodeInvalid
+	}
+	_, err := s.affiliateService.ValidateAffiliateCode(ctx, code)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
 func (s *AuthService) SendVerifyCode(ctx context.Context, email string, locale ...string) error {
 	// 检查是否开放注册（默认关闭）
 	if s.settingService == nil || !s.settingService.IsRegistrationEnabled(ctx) {
