@@ -433,6 +433,7 @@ func ProxyFromService(p *service.Proxy) *Proxy {
 		Status:         p.Status,
 		CreatedAt:      p.CreatedAt,
 		UpdatedAt:      p.UpdatedAt,
+		MaxAccounts:    p.MaxAccounts,
 		ExpiresAt:      p.ExpiresAt,
 		FallbackMode:   p.FallbackMode,
 		BackupProxyID:  p.BackupProxyID,

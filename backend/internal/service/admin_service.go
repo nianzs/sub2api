@@ -12,6 +12,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	dbent "github.com/Wei-Shaw/sub2api/ent"
@@ -406,6 +407,7 @@ type CreateProxyInput struct {
 	Port           int
 	Username       string
 	Password       string
+	MaxAccounts    *int // nil → 用默认值 DefaultProxyMaxAccounts
 	ExpiresAt      *time.Time
 	FallbackMode   string
 	BackupProxyID  *int64
@@ -420,6 +422,7 @@ type UpdateProxyInput struct {
 	Username       string
 	Password       string
 	Status         string
+	MaxAccounts    *int // nil → 不更新
 	ExpiresAt      *time.Time
 	FallbackMode   string
 	BackupProxyID  *int64
@@ -567,6 +570,14 @@ type adminServiceImpl struct {
 	userSubRepo          UserSubscriptionRepository
 	privacyClientFactory PrivacyClientFactory
 	runtimeBlocker       AccountRuntimeBlocker
+
+	// kiroProxyBindLocks 串行化同一 proxy 上 Kiro 账号的"校验 + 绑定写入"组合，
+	// 避免并发请求都通过 capacity 检查后突破 max_accounts。
+	// key 为 proxy ID，value 为 *sync.Mutex。仅在 add 路径
+	// （CreateAccount / UpdateAccount[换绑] / BulkUpdateAccounts[改 proxy]）使用；
+	// 删除/解绑只会降低 count，不破坏不变式，无需加锁。
+	// 仅保护单进程内并发；多实例部署需依赖 DB 层约束（暂未实现）。
+	kiroProxyBindLocks sync.Map
 }
 
 type userGroupRateBatchReader interface {
@@ -2606,7 +2617,119 @@ func (s *adminServiceImpl) GetAccountsByIDs(ctx context.Context, ids []int64) ([
 	return accounts, nil
 }
 
+// validateKiroProxyBinding 在 Kiro 平台账号创建 / 换代理时校验代理可用。
+// platform != PlatformKiro 时直接通过。
+// effectiveProxyID == nil/<=0 表示账号将无代理，必拒（Kiro 强制绑代理是风控纪律）。
+// checkCapacity=true 仅在新绑/换绑时校验配额；维持原绑定时不再校验，
+// 避免"账号已绑且原代理被改满"后再编辑账号被误拒。
+func (s *adminServiceImpl) validateKiroProxyBinding(ctx context.Context, platform string, effectiveProxyID *int64, checkCapacity bool) error {
+	if platform != PlatformKiro {
+		return nil
+	}
+	if effectiveProxyID == nil || *effectiveProxyID <= 0 {
+		return &ProxyValidationError{Reason: ProxyValidationKiroRequiresProxy}
+	}
+	p, err := s.proxyRepo.GetByID(ctx, *effectiveProxyID)
+	if err != nil {
+		if errors.Is(err, ErrProxyNotFound) {
+			return &ProxyValidationError{Reason: ProxyValidationProxyNotFound}
+		}
+		return err
+	}
+	if !p.IsActive() {
+		return &ProxyValidationError{Reason: ProxyValidationProxyNotActive}
+	}
+	if p.IsExpired(time.Now()) {
+		return &ProxyValidationError{Reason: ProxyValidationProxyExpired}
+	}
+	if checkCapacity {
+		count, err := s.proxyRepo.CountAccountsByProxyID(ctx, p.ID)
+		if err != nil {
+			return err
+		}
+		if !p.HasCapacity(count) {
+			return &ProxyValidationError{Reason: ProxyValidationCapacityFull}
+		}
+	}
+	return nil
+}
+
+// lockKiroProxyBind 串行化指定 proxy 上的 Kiro 账号绑定操作。
+// 返回 unlock 函数，调用者应 defer 释放。
+func (s *adminServiceImpl) lockKiroProxyBind(proxyID int64) func() {
+	actual, _ := s.kiroProxyBindLocks.LoadOrStore(proxyID, &sync.Mutex{})
+	mu := actual.(*sync.Mutex)
+	mu.Lock()
+	return mu.Unlock
+}
+
+// validateKiroBulkProxyRebind 批量更新 proxy 绑定时对 Kiro 账号做整体校验。
+// newProxyID == nil：未改 proxy，跳过。
+// 批次中无 Kiro 账号：跳过。
+// newProxyID == 0：Kiro 强制绑代理 → 拒。
+// newProxyID > 0：校验 Active/未过期，并将"批次新增绑定数"叠加到现有数与 max_accounts 对比。
+// 仅本批次中当前 proxy_id != newProxyID 的 Kiro 账号视为新增绑定；
+// CountAccountsByProxyID 已包含批次中那些原本就绑在 newProxyID 上的 Kiro 账号，无双算。
+func (s *adminServiceImpl) validateKiroBulkProxyRebind(ctx context.Context, accounts []*Account, newProxyID *int64) error {
+	if newProxyID == nil {
+		return nil
+	}
+	var kiroAccounts []*Account
+	for _, a := range accounts {
+		if a != nil && a.Platform == PlatformKiro {
+			kiroAccounts = append(kiroAccounts, a)
+		}
+	}
+	if len(kiroAccounts) == 0 {
+		return nil
+	}
+	if *newProxyID == 0 {
+		return &ProxyValidationError{Reason: ProxyValidationKiroRequiresProxy}
+	}
+	p, err := s.proxyRepo.GetByID(ctx, *newProxyID)
+	if err != nil {
+		if errors.Is(err, ErrProxyNotFound) {
+			return &ProxyValidationError{Reason: ProxyValidationProxyNotFound}
+		}
+		return err
+	}
+	if !p.IsActive() {
+		return &ProxyValidationError{Reason: ProxyValidationProxyNotActive}
+	}
+	if p.IsExpired(time.Now()) {
+		return &ProxyValidationError{Reason: ProxyValidationProxyExpired}
+	}
+	var newBindings int64
+	for _, a := range kiroAccounts {
+		if a.ProxyID == nil || *a.ProxyID != p.ID {
+			newBindings++
+		}
+	}
+	if newBindings == 0 {
+		return nil
+	}
+	count, err := s.proxyRepo.CountAccountsByProxyID(ctx, p.ID)
+	if err != nil {
+		return err
+	}
+	if p.MaxAccounts > 0 && count+newBindings > int64(p.MaxAccounts) {
+		return &ProxyValidationError{Reason: ProxyValidationCapacityFull}
+	}
+	return nil
+}
+
 func (s *adminServiceImpl) CreateAccount(ctx context.Context, input *CreateAccountInput) (*Account, error) {
+	// 锁住目标 proxy：让"validate capacity + insert account"在单进程内串行，
+	// 防止并发请求都通过 capacity 检查后突破 max_accounts。
+	if input.Platform == PlatformKiro && input.ProxyID != nil && *input.ProxyID > 0 {
+		unlock := s.lockKiroProxyBind(*input.ProxyID)
+		defer unlock()
+	}
+	// Kiro 强制选代理：在分组等逻辑前先短路，避免无效写入。
+	if err := s.validateKiroProxyBinding(ctx, input.Platform, input.ProxyID, true); err != nil {
+		return nil, err
+	}
+
 	// 绑定分组
 	groupIDs := input.GroupIDs
 	// 如果没有指定分组,自动绑定对应平台的默认分组
@@ -2719,6 +2842,31 @@ func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *U
 	if err != nil {
 		return nil, err
 	}
+
+	// Kiro proxy 校验：计算更新后的 effective proxy_id，仅在新绑/换绑时校验配额。
+	// input.ProxyID == nil → 不动；*input.ProxyID == 0 → 清除；其他 → 设为新值。
+	{
+		effectiveProxyID := account.ProxyID
+		isNewBinding := false
+		if input.ProxyID != nil {
+			if *input.ProxyID == 0 {
+				effectiveProxyID = nil
+			} else {
+				effectiveProxyID = input.ProxyID
+			}
+			isNewBinding = !proxyIDPtrEqual(account.ProxyID, effectiveProxyID)
+		}
+		// 换绑到新的 Kiro proxy → 锁住目标 proxy，串行化 validate+update。
+		// 只锁新目标即可，旧 proxy 的 count 只会下降（解绑/删除路径无需锁）。
+		if isNewBinding && account.Platform == PlatformKiro && effectiveProxyID != nil && *effectiveProxyID > 0 {
+			unlock := s.lockKiroProxyBind(*effectiveProxyID)
+			defer unlock()
+		}
+		if err := s.validateKiroProxyBinding(ctx, account.Platform, effectiveProxyID, isNewBinding); err != nil {
+			return nil, err
+		}
+	}
+
 	wasOveragesEnabled := account.IsOveragesEnabled()
 
 	if input.Name != "" {
@@ -2882,17 +3030,23 @@ func (s *adminServiceImpl) BulkUpdateAccounts(ctx context.Context, input *BulkUp
 	}
 
 	needMixedChannelCheck := input.GroupIDs != nil && !input.SkipMixedChannelCheck
+	// 改 proxy 时需要按 Kiro 强制绑代理规则校验目标代理。
+	needKiroProxyCheck := input.ProxyID != nil
 
-	// 预加载账号平台信息（混合渠道检查需要）。
+	// 预加载账号信息（混合渠道检查需要平台；Kiro 代理校验需要平台 + 当前 proxy_id）。
 	platformByID := map[int64]string{}
-	if needMixedChannelCheck {
+	var preloadedAccounts []*Account
+	if needMixedChannelCheck || needKiroProxyCheck {
 		accounts, err := s.accountRepo.GetByIDs(ctx, input.AccountIDs)
 		if err != nil {
 			return nil, err
 		}
-		for _, account := range accounts {
-			if account != nil {
-				platformByID[account.ID] = account.Platform
+		preloadedAccounts = accounts
+		if needMixedChannelCheck {
+			for _, account := range accounts {
+				if account != nil {
+					platformByID[account.ID] = account.Platform
+				}
 			}
 		}
 	}
@@ -2907,6 +3061,18 @@ func (s *adminServiceImpl) BulkUpdateAccounts(ctx context.Context, input *BulkUp
 			if err := s.checkMixedChannelRisk(ctx, accountID, platform, *input.GroupIDs); err != nil {
 				return nil, err
 			}
+		}
+	}
+
+	// Kiro 批量代理校验：若任一选中账号是 Kiro 平台，校验目标代理可用且容得下新增绑定。
+	// 锁住目标 proxy，串行化 validate+bulk update，避免与其它 add 路径并发突破 max_accounts。
+	if needKiroProxyCheck {
+		if input.ProxyID != nil && *input.ProxyID > 0 {
+			unlock := s.lockKiroProxyBind(*input.ProxyID)
+			defer unlock()
+		}
+		if err := s.validateKiroBulkProxyRebind(ctx, preloadedAccounts, input.ProxyID); err != nil {
+			return nil, err
 		}
 	}
 
@@ -3142,6 +3308,11 @@ func (s *adminServiceImpl) CreateProxy(ctx context.Context, input *CreateProxyIn
 		return nil, infraerrors.BadRequest("PROXY_WARN_DAYS_INVALID", "expiry_warn_days must be >= 0")
 	}
 
+	maxAccounts := DefaultProxyMaxAccounts
+	if input.MaxAccounts != nil && *input.MaxAccounts > 0 {
+		maxAccounts = *input.MaxAccounts
+	}
+
 	proxy := &Proxy{
 		Name:           input.Name,
 		Protocol:       input.Protocol,
@@ -3150,6 +3321,7 @@ func (s *adminServiceImpl) CreateProxy(ctx context.Context, input *CreateProxyIn
 		Username:       input.Username,
 		Password:       input.Password,
 		Status:         StatusActive,
+		MaxAccounts:    maxAccounts,
 		ExpiresAt:      input.ExpiresAt,
 		FallbackMode:   mode,
 		BackupProxyID:  input.BackupProxyID,
@@ -3206,6 +3378,9 @@ func (s *adminServiceImpl) UpdateProxy(ctx context.Context, id int64, input *Upd
 	}
 	if input.Status != "" {
 		proxy.Status = input.Status
+	}
+	if input.MaxAccounts != nil && *input.MaxAccounts > 0 {
+		proxy.MaxAccounts = *input.MaxAccounts
 	}
 	// 透传有效期与回退字段
 	proxy.ExpiresAt = input.ExpiresAt

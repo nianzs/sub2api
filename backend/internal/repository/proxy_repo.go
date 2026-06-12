@@ -46,6 +46,9 @@ func (r *proxyRepository) Create(ctx context.Context, proxyIn *service.Proxy) er
 	if proxyIn.Password != "" {
 		builder.SetPassword(proxyIn.Password)
 	}
+	if proxyIn.MaxAccounts > 0 {
+		builder.SetMaxAccounts(proxyIn.MaxAccounts)
+	}
 	if proxyIn.ExpiresAt != nil {
 		builder.SetExpiresAt(*proxyIn.ExpiresAt)
 	}
@@ -108,6 +111,9 @@ func (r *proxyRepository) Update(ctx context.Context, proxyIn *service.Proxy) er
 		builder.SetPassword(proxyIn.Password)
 	} else {
 		builder.ClearPassword()
+	}
+	if proxyIn.MaxAccounts > 0 {
+		builder.SetMaxAccounts(proxyIn.MaxAccounts)
 	}
 	if proxyIn.ExpiresAt != nil {
 		builder.SetExpiresAt(*proxyIn.ExpiresAt)
@@ -448,6 +454,7 @@ func proxyEntityToService(m *dbent.Proxy) *service.Proxy {
 		Host:           m.Host,
 		Port:           m.Port,
 		Status:         m.Status,
+		MaxAccounts:    m.MaxAccounts,
 		CreatedAt:      m.CreatedAt,
 		UpdatedAt:      m.UpdatedAt,
 		ExpiresAt:      m.ExpiresAt,

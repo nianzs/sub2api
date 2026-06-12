@@ -4359,6 +4359,11 @@ export default {
     proxies: {
       title: 'IP管理',
       description: '管理代理服务器配置',
+      inactive: '已停用',
+      full: '配额已满',
+      daysLeft: '剩 {days} 天',
+      maxAccounts: '最大账号数',
+      maxAccountsHint: '该代理最多可绑定的账号数（Kiro 平台账号强制绑代理）。',
       createProxy: '添加代理',
       editProxy: '编辑代理',
       deleteProxy: '删除代理',

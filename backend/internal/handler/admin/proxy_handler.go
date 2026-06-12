@@ -33,6 +33,7 @@ type CreateProxyRequest struct {
 	Port           int    `json:"port" binding:"required,min=1,max=65535"`
 	Username       string `json:"username"`
 	Password       string `json:"password"`
+	MaxAccounts    *int   `json:"max_accounts,omitempty" binding:"omitempty,min=1,max=100"`
 	ExpiresAt      *int64 `json:"expires_at"`
 	FallbackMode   string `json:"fallback_mode" binding:"omitempty,oneof=none proxy direct"`
 	BackupProxyID  *int64 `json:"backup_proxy_id"`
@@ -48,6 +49,7 @@ type UpdateProxyRequest struct {
 	Username       string `json:"username"`
 	Password       string `json:"password"`
 	Status         string `json:"status" binding:"omitempty,oneof=active inactive"`
+	MaxAccounts    *int   `json:"max_accounts,omitempty" binding:"omitempty,min=1,max=100"`
 	ExpiresAt      *int64 `json:"expires_at"`
 	FallbackMode   string `json:"fallback_mode" binding:"omitempty,oneof=none proxy direct"`
 	BackupProxyID  *int64 `json:"backup_proxy_id"`
@@ -155,6 +157,7 @@ func (h *ProxyHandler) Create(c *gin.Context) {
 			Port:           req.Port,
 			Username:       strings.TrimSpace(req.Username),
 			Password:       strings.TrimSpace(req.Password),
+			MaxAccounts:    req.MaxAccounts,
 			ExpiresAt:      expiresAt,
 			FallbackMode:   strings.TrimSpace(req.FallbackMode),
 			BackupProxyID:  req.BackupProxyID,
@@ -195,6 +198,7 @@ func (h *ProxyHandler) Update(c *gin.Context) {
 		Username:       strings.TrimSpace(req.Username),
 		Password:       strings.TrimSpace(req.Password),
 		Status:         strings.TrimSpace(req.Status),
+		MaxAccounts:    req.MaxAccounts,
 		ExpiresAt:      expiresAt,
 		FallbackMode:   strings.TrimSpace(req.FallbackMode),
 		BackupProxyID:  req.BackupProxyID,

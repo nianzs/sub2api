@@ -66,8 +66,9 @@
 
         <!-- Options list -->
         <div class="select-options">
-          <!-- No Proxy option -->
+          <!-- No Proxy option (隐藏当 platform=kiro，强制选代理) -->
           <div
+            v-if="platform !== 'kiro'"
             @click="selectOption(null)"
             :class="['select-option', modelValue === null && 'select-option-selected']"
           >
@@ -80,17 +81,36 @@
             v-for="proxy in filteredProxies"
             :key="proxy.id"
             @click="selectOption(proxy.id)"
-            :class="['select-option', modelValue === proxy.id && 'select-option-selected']"
+            :class="[
+              'select-option',
+              modelValue === proxy.id && 'select-option-selected',
+              isProxyUnselectable(proxy) && modelValue !== proxy.id && 'select-option-disabled'
+            ]"
+            :title="getUnselectableReason(proxy)"
           >
             <div class="min-w-0 flex-1">
-              <div class="flex items-center gap-2">
+              <div class="flex flex-wrap items-center gap-2">
                 <span class="truncate font-medium">{{ proxy.name }}</span>
-                <!-- Account count badge -->
+                <!-- Quota badge N/max（满额时红底） -->
                 <span
-                  v-if="proxy.account_count !== undefined"
-                  class="inline-flex flex-shrink-0 items-center rounded bg-gray-100 px-1.5 py-0.5 text-xs text-gray-600 dark:bg-dark-600 dark:text-gray-400"
+                  :class="[
+                    'inline-flex flex-shrink-0 items-center rounded px-1.5 py-0.5 text-xs',
+                    isProxyFull(proxy)
+                      ? 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400'
+                      : 'bg-gray-100 text-gray-600 dark:bg-dark-600 dark:text-gray-400'
+                  ]"
                 >
-                  {{ proxy.account_count }}
+                  {{ proxy.account_count ?? 0 }}/{{ proxy.max_accounts }}
+                </span>
+                <!-- Expiry badge -->
+                <span
+                  v-if="getExpiryBadge(proxy)"
+                  :class="[
+                    'inline-flex flex-shrink-0 items-center rounded px-1.5 py-0.5 text-xs',
+                    getExpiryBadge(proxy)!.class
+                  ]"
+                >
+                  {{ getExpiryBadge(proxy)!.label }}
                 </span>
                 <!-- Test result badges -->
                 <template v-if="testResults[proxy.id]">
@@ -190,10 +210,13 @@ interface Props {
   modelValue: number | null
   proxies: Proxy[]
   disabled?: boolean
+  // platform: 'kiro' 时强制必须选代理（隐藏 noProxy 选项 + 不允许选无效代理）
+  platform?: string
 }
 
 const props = withDefaults(defineProps<Props>(), {
-  disabled: false
+  disabled: false,
+  platform: undefined
 })
 
 const emit = defineEmits<{
@@ -245,7 +268,58 @@ const toggle = () => {
   }
 }
 
+const isProxyExpired = (proxy: Proxy): boolean => {
+  if (!proxy.expires_at) return false
+  return new Date(proxy.expires_at).getTime() < Date.now()
+}
+
+const isProxyFull = (proxy: Proxy): boolean => {
+  const used = proxy.account_count ?? 0
+  return proxy.max_accounts > 0 && used >= proxy.max_accounts
+}
+
+const isProxyInactive = (proxy: Proxy): boolean => proxy.status !== 'active'
+
+// 当前选项是否不可选：满额、过期、非 active。已被选中的不算（允许保留当前选择）。
+const isProxyUnselectable = (proxy: Proxy): boolean => {
+  return isProxyInactive(proxy) || isProxyExpired(proxy) || isProxyFull(proxy)
+}
+
+const getUnselectableReason = (proxy: Proxy): string => {
+  if (isProxyInactive(proxy)) return t('admin.proxies.inactive')
+  if (isProxyExpired(proxy)) return t('admin.proxies.expired')
+  if (isProxyFull(proxy)) return t('admin.proxies.full')
+  return ''
+}
+
+// 过期/剩余天数 badge。<7 天红、7-30 天黄、>30 天灰；已过期红。null = 无 badge（无 expires_at）。
+const getExpiryBadge = (proxy: Proxy): { label: string; class: string } | null => {
+  if (!proxy.expires_at) return null
+  const ms = new Date(proxy.expires_at).getTime() - Date.now()
+  if (ms <= 0) {
+    return {
+      label: t('admin.proxies.expired'),
+      class: 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400'
+    }
+  }
+  const days = Math.ceil(ms / (24 * 60 * 60 * 1000))
+  let cls = 'bg-gray-100 text-gray-600 dark:bg-dark-600 dark:text-gray-400'
+  if (days < 7) {
+    cls = 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400'
+  } else if (days <= 30) {
+    cls = 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400'
+  }
+  return { label: t('admin.proxies.daysLeft', { days }), class: cls }
+}
+
 const selectOption = (value: number | null) => {
+  // platform=kiro 时禁止选 noProxy
+  if (props.platform === 'kiro' && value === null) return
+  // 当前选项不可选时禁止切换（已选中的允许保留）
+  if (value !== null && value !== props.modelValue) {
+    const proxy = props.proxies.find((p) => p.id === value)
+    if (proxy && isProxyUnselectable(proxy)) return
+  }
   emit('update:modelValue', value)
   isOpen.value = false
   searchQuery.value = ''
@@ -394,6 +468,14 @@ onUnmounted(() => {
 .select-option-selected {
   @apply bg-primary-50 dark:bg-primary-900/20;
   @apply text-primary-700 dark:text-primary-300;
+}
+
+.select-option-disabled {
+  @apply cursor-not-allowed opacity-50;
+}
+
+.select-option-disabled:hover {
+  @apply bg-transparent dark:bg-transparent;
 }
 
 .select-option-label {

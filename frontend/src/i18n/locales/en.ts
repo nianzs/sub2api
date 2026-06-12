@@ -4268,6 +4268,11 @@ export default {
     proxies: {
       title: 'Proxy Management',
       description: 'Manage proxy servers for accounts',
+      inactive: 'Inactive',
+      full: 'Quota full',
+      daysLeft: '{days}d left',
+      maxAccounts: 'Max accounts',
+      maxAccountsHint: 'Maximum accounts that may bind to this proxy (Kiro accounts must bind a proxy).',
       createProxy: 'Create Proxy',
       editProxy: 'Edit Proxy',
       deleteProxy: 'Delete Proxy',
