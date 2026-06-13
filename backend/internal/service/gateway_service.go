@@ -9260,6 +9260,35 @@ type recordUsageCoreInput struct {
 
 // recordUsageCore 是 RecordUsage 和 RecordUsageWithLongContext 的统一实现。
 // LongContextThreshold > 0 时 Token 计费回退走 CalculateCostWithLongContext。
+// applyKiroCreditDirectCost 把成本覆写为 Kiro credits × target_usd。
+// Kiro PRO 账号按 credits 计费，kiro_credit_target_usd 语义为"每 credit 最终扣费 USD"，
+// 是最终价，不再叠加 group/user rate multiplier 或 channel pricing。
+// 按比例缩放各成本子项以保持 sum(子项)==TotalCost 的不变式（供展示/账号统计），
+// 再把 TotalCost 与 ActualCost 都置为 target。credits 或 targetUSD<=0 时不动。
+func applyKiroCreditDirectCost(cost *CostBreakdown, credits, targetUSD float64) {
+	if cost == nil || credits <= 0 || targetUSD <= 0 {
+		return
+	}
+	target := credits * targetUSD
+	if cost.TotalCost > 0 {
+		ratio := target / cost.TotalCost
+		cost.InputCost *= ratio
+		cost.OutputCost *= ratio
+		cost.ImageOutputCost *= ratio
+		cost.CacheCreationCost *= ratio
+		cost.CacheReadCost *= ratio
+	} else {
+		// 无 token 成本兜底：全部归到 input 子项，保持 sum==Total。
+		cost.InputCost = target
+		cost.OutputCost = 0
+		cost.ImageOutputCost = 0
+		cost.CacheCreationCost = 0
+		cost.CacheReadCost = 0
+	}
+	cost.TotalCost = target
+	cost.ActualCost = target
+}
+
 func (s *GatewayService) recordUsageCore(ctx context.Context, input *recordUsageCoreInput, opts *recordUsageOpts) error {
 	result := input.Result
 	apiKey := input.APIKey
@@ -9314,6 +9343,14 @@ func (s *GatewayService) recordUsageCore(ctx context.Context, input *recordUsage
 	// 计算费用
 	opts.IsKiroAccount = account != nil && account.Platform == PlatformKiro
 	cost := s.calculateRecordUsageCost(ctx, result, apiKey, billingModel, multiplier, imageMultiplier, opts)
+
+	// Kiro credit 直接计费：group 配了 kiro_credit_target_usd 时，最终扣费严格等于
+	// credits × target_usd，绕过 rate multiplier / channel pricing 的二次改写
+	// （反向缩放后的 token 仅用于展示口径，真实成本以 Kiro credits 为准）。
+	if cost != nil && opts.IsKiroAccount && apiKey.Group != nil &&
+		apiKey.Group.KiroReverseScalingEnabled() && result.Usage.KiroCredits > 0 {
+		applyKiroCreditDirectCost(cost, result.Usage.KiroCredits, apiKey.Group.EffectiveKiroCreditTargetUSD())
+	}
 
 	// 判断计费方式：订阅模式 vs 余额模式
 	isSubscriptionBilling := subscription != nil && apiKey.Group != nil && apiKey.Group.IsSubscriptionType()

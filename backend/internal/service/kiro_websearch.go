@@ -128,6 +128,10 @@ func (s *GatewayService) streamKiroWebSearchAsAnthropic(
 	wsCtx := kiropkg.KiroRequestContext{CacheEmulationUsage: cacheUsage.toKiroUsage()}
 	applyKiroReverseScalingContext(&wsCtx, group, requestModel)
 
+	// 多轮 web search 每轮都消耗 Kiro credits，累计所有轮次，最后一轮转发前把累计
+	// 总额写回最终 message_delta，避免计费/对账只记最后一轮（中间轮 message_delta 被过滤）。
+	var totalKiroCredits float64
+
 	for iteration := 0; iteration < kiroMaxWebSearchIterations; iteration++ {
 		s.prefetchKiroWebSearchDescription(ctx, account, token)
 
@@ -157,12 +161,15 @@ func (s *GatewayService) streamKiroWebSearchAsAnthropic(
 			return &kiroWebSearchHTTPError{Response: resp}
 		}
 
-		chunks, _, streamErr := func() ([][]byte, *kiropkg.StreamResult, error) {
+		chunks, streamResult, streamErr := func() ([][]byte, *kiropkg.StreamResult, error) {
 			defer func() { _ = resp.Body.Close() }()
 			return bufferKiroAnthropicStream(ctx, resp.Body, requestModel, inputTokens, wsCtx)
 		}()
 		if streamErr != nil {
 			return streamErr
+		}
+		if streamResult != nil {
+			totalKiroCredits += streamResult.Usage.KiroCredits
 		}
 
 		analysis := kiropkg.AnalyzeBufferedStream(chunks)
@@ -183,6 +190,8 @@ func (s *GatewayService) streamKiroWebSearchAsAnthropic(
 			continue
 		}
 
+		// 最后一轮：把累计 credits 写回最终 message_delta，再转发给客户端/计费层。
+		chunks = kiropkg.RewriteFinalKiroCredits(chunks, totalKiroCredits)
 		for _, chunk := range chunks {
 			adjusted, shouldForward := kiropkg.AdjustSSEChunk(chunk, nextContentBlockIndex)
 			if !shouldForward {
@@ -215,6 +224,9 @@ func (s *GatewayService) executeKiroWebSearch(ctx context.Context, account *Acco
 	requestID := ""
 	var cacheUsage *kiroCacheEmulationUsage
 	cacheUsageResolved := false
+	// 多轮 web search 每轮各自累计 credits；只返回最后一轮 parseResult，故需在循环外汇总，
+	// 最终把累计总额写回 parseResult.Usage，确保计费/对账记的是所有轮次之和。
+	var totalKiroCredits float64
 
 	for iteration := 0; iteration < kiroMaxWebSearchIterations; iteration++ {
 		s.prefetchKiroWebSearchDescription(ctx, account, token)
@@ -258,6 +270,7 @@ func (s *GatewayService) executeKiroWebSearch(ctx context.Context, account *Acco
 		if parseErr != nil {
 			return nil, parseErr
 		}
+		totalKiroCredits += parseResult.Usage.KiroCredits
 		if requestID == "" {
 			requestID = buildKiroRequestID(resp)
 		}
@@ -268,6 +281,8 @@ func (s *GatewayService) executeKiroWebSearch(ctx context.Context, account *Acco
 			if injectErr == nil {
 				parseResult.ResponseBody = finalBody
 			}
+			// 用累计总额覆写最后一轮的 credits，再交给计费层。
+			parseResult.Usage.KiroCredits = totalKiroCredits
 			return &kiroWebSearchExecution{
 				ResponseBody: parseResult.ResponseBody,
 				Usage:        kiroUsageToClaude(parseResult.Usage, inputTokens),

@@ -693,7 +693,7 @@
             <p class="input-hint">{{ t("admin.groups.kiroCache.ratioHint") }}</p>
           </div>
           <div class="mt-4">
-            <label class="input-label">Kiro 反向缩放锚定单价（USD/credit）</label>
+            <label class="input-label">Kiro credit 最终单价（USD/credit）</label>
             <input
               v-model.number="createForm.kiro_credit_target_usd"
               type="number"
@@ -703,7 +703,7 @@
               class="input"
               placeholder="0.0000"
             />
-            <p class="input-hint">每 credit 对应的 sub2api USD 余额。0 = 禁用反向缩放（按 token × Anthropic 标准价计费）。</p>
+            <p class="input-hint">每 credit 最终扣费的 USD（最终价，不再叠加分组/用户倍率或渠道定价）。0 = 禁用反向缩放（按 token × Anthropic 标准价计费）。</p>
           </div>
         </div>
 
@@ -2041,7 +2041,7 @@
             <p class="input-hint">{{ t("admin.groups.kiroCache.ratioHint") }}</p>
           </div>
           <div class="mt-4">
-            <label class="input-label">Kiro 反向缩放锚定单价（USD/credit）</label>
+            <label class="input-label">Kiro credit 最终单价（USD/credit）</label>
             <input
               v-model.number="editForm.kiro_credit_target_usd"
               type="number"
@@ -2051,7 +2051,7 @@
               class="input"
               placeholder="0.0000"
             />
-            <p class="input-hint">每 credit 对应的 sub2api USD 余额。0 = 禁用反向缩放（按 token × Anthropic 标准价计费）。</p>
+            <p class="input-hint">每 credit 最终扣费的 USD（最终价，不再叠加分组/用户倍率或渠道定价）。0 = 禁用反向缩放（按 token × Anthropic 标准价计费）。</p>
           </div>
         </div>
 
