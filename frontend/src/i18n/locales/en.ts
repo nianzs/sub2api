@@ -2241,6 +2241,8 @@ export default {
         enabled: 'Enable cache emulation',
         ratio: 'Cache ratio',
         ratioHint: '0 to 1. For example, 0.5 applies half of the simulated cache tokens.',
+        forceRatio: 'Enable Anthropic-like cache distribution',
+        forceRatioHint: 'Reshapes the displayed token distribution to match real Anthropic direct usage (tiny input, cache_read dominant). Display only; does not change the real billed total.',
         stickyRouting: 'Enable Kiro account sticky routing',
         stickyRoutingHint: 'When enabled, multi-turn conversations are pinned to the same account when possible. X-Session-ID still takes precedence for explicit session binding.',
         stickyTTL: 'Sticky binding TTL (seconds)',

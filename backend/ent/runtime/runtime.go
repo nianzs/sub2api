@@ -898,6 +898,10 @@ func init() {
 	groupDescKiroCreditTargetUsd := groupFields[36].Descriptor()
 	// group.DefaultKiroCreditTargetUsd holds the default value on creation for the kiro_credit_target_usd field.
 	group.DefaultKiroCreditTargetUsd = groupDescKiroCreditTargetUsd.Default.(float64)
+	// groupDescKiroCacheForceRatioCenter is the schema descriptor for kiro_cache_force_ratio_center field.
+	groupDescKiroCacheForceRatioCenter := groupFields[37].Descriptor()
+	// group.DefaultKiroCacheForceRatioCenter holds the default value on creation for the kiro_cache_force_ratio_center field.
+	group.DefaultKiroCacheForceRatioCenter = groupDescKiroCacheForceRatioCenter.Default.(float64)
 	idempotencyrecordMixin := schema.IdempotencyRecord{}.Mixin()
 	idempotencyrecordMixinFields0 := idempotencyrecordMixin[0].Fields()
 	_ = idempotencyrecordMixinFields0

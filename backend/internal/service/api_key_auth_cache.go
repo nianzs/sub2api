@@ -101,7 +101,8 @@ type APIKeyAuthGroupSnapshot struct {
 	KiroCacheEmulationRatio     float64 `json:"kiro_cache_emulation_ratio"`
 
 	// Kiro 反向 token 缩放锚定单价（仅 platform=kiro 生效；0 = 禁用）
-	KiroCreditTargetUSD float64 `json:"kiro_credit_target_usd"`
+	KiroCreditTargetUSD       float64 `json:"kiro_credit_target_usd"`
+	KiroCacheForceRatioCenter float64 `json:"kiro_cache_force_ratio_center"`
 }
 
 // APIKeyAuthCacheEntry 缓存条目，支持负缓存

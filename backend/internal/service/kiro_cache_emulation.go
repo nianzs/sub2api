@@ -77,7 +77,98 @@ func (s *GatewayService) buildKiroCacheEmulationUsage(account *Account, group *G
 	if result.CacheReadInputTokens == 0 && result.CacheCreationInputTokens == 0 {
 		return nil
 	}
+	// 缓存分布强制重塑：把模拟出的 input/cache_read/cache_creation 拆分重塑成
+	// Anthropic-like 形态（input 极小、cache_read 占大头），仅展示口径，不改总额。
+	if group.KiroCacheForceEnabled() {
+		applyKiroCacheForceRatio(result)
+	}
 	return result
+}
+
+// kiroCacheForceBreakpoint 是 Anthropic-like 缓存分布拟合段端点。
+type kiroCacheForceBreakpoint struct {
+	threshold float64
+	readRatio float64
+	inputCap  int
+}
+
+// kiroCacheForceFit 基于真实 Anthropic Claude Code 直连流量反推的分段拟合表：
+// 实测（按 total_input 分桶）input 不随 total 增长（≥20k 恒 p50≈2，故 inputCap=1，
+// 配合下游可能的缩放落到 ~2），cache_read 占比在 0.82~0.93 之间。
+var kiroCacheForceFit = []kiroCacheForceBreakpoint{
+	{0, 0.600, 1},
+	{5000, 0.800, 1},
+	{20000, 0.830, 1},
+	{100000, 0.900, 1},
+	{500000, 0.930, 1},
+	{2000000, 0.915, 1},
+}
+
+// computeKiroCacheForceRatio 给定 total_input_tokens，返回 (cache_read_ratio, input_cap)。
+func computeKiroCacheForceRatio(total int) (float64, int) {
+	t := float64(total)
+	bp := kiroCacheForceFit
+	if t <= bp[0].threshold {
+		return bp[0].readRatio, bp[0].inputCap
+	}
+	if t >= bp[len(bp)-1].threshold {
+		return bp[len(bp)-1].readRatio, bp[len(bp)-1].inputCap
+	}
+	for i := 0; i < len(bp)-1; i++ {
+		if t >= bp[i].threshold && t < bp[i+1].threshold {
+			seg := bp[i+1].threshold - bp[i].threshold
+			if seg <= 0 {
+				return bp[i].readRatio, bp[i].inputCap
+			}
+			p := (t - bp[i].threshold) / seg
+			ratio := bp[i].readRatio + p*(bp[i+1].readRatio-bp[i].readRatio)
+			cap := bp[i].inputCap
+			if bp[i+1].inputCap > cap {
+				cap = bp[i+1].inputCap
+			}
+			return ratio, cap
+		}
+	}
+	return bp[len(bp)-1].readRatio, bp[len(bp)-1].inputCap
+}
+
+// applyKiroCacheForceRatio 把模拟缓存分布重塑成 Anthropic-like：input 钳到极小，
+// 剩余按 readRatio 切给 cache_read / cache_creation；总量守恒。
+func applyKiroCacheForceRatio(u *kiroCacheEmulationUsage) {
+	if u == nil {
+		return
+	}
+	total := u.InputTokens + u.CacheReadInputTokens + u.CacheCreationInputTokens
+	// 极短请求：只兜底 input=0 → 1。
+	if total <= 100 {
+		if u.InputTokens == 0 && (u.CacheReadInputTokens > 0 || u.CacheCreationInputTokens > 0) {
+			u.InputTokens = 1
+		}
+		return
+	}
+	readRatio, inputCap := computeKiroCacheForceRatio(total)
+	newInput := inputCap
+	if newInput >= total-2 {
+		newInput = total - 2
+	}
+	if newInput < 1 {
+		newInput = 1
+	}
+	remaining := total - newInput
+	newCacheRead := int(math.Round(float64(remaining) * readRatio))
+	if newCacheRead >= remaining {
+		newCacheRead = remaining - 1
+	}
+	if newCacheRead < 0 {
+		newCacheRead = 0
+	}
+	newCacheCreation := remaining - newCacheRead
+	u.InputTokens = newInput
+	u.CacheReadInputTokens = newCacheRead
+	// 真实数据显示 cache_creation 几乎全在 5m TTL。
+	u.CacheCreation5mInputTokens = newCacheCreation
+	u.CacheCreation1hInputTokens = 0
+	u.CacheCreationInputTokens = newCacheCreation
 }
 
 func scaleKiroCacheTokens(tokens int, ratio float64) int {

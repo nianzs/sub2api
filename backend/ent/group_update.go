@@ -742,6 +742,27 @@ func (_u *GroupUpdate) AddKiroCreditTargetUsd(v float64) *GroupUpdate {
 	return _u
 }
 
+// SetKiroCacheForceRatioCenter sets the "kiro_cache_force_ratio_center" field.
+func (_u *GroupUpdate) SetKiroCacheForceRatioCenter(v float64) *GroupUpdate {
+	_u.mutation.ResetKiroCacheForceRatioCenter()
+	_u.mutation.SetKiroCacheForceRatioCenter(v)
+	return _u
+}
+
+// SetNillableKiroCacheForceRatioCenter sets the "kiro_cache_force_ratio_center" field if the given value is not nil.
+func (_u *GroupUpdate) SetNillableKiroCacheForceRatioCenter(v *float64) *GroupUpdate {
+	if v != nil {
+		_u.SetKiroCacheForceRatioCenter(*v)
+	}
+	return _u
+}
+
+// AddKiroCacheForceRatioCenter adds value to the "kiro_cache_force_ratio_center" field.
+func (_u *GroupUpdate) AddKiroCacheForceRatioCenter(v float64) *GroupUpdate {
+	_u.mutation.AddKiroCacheForceRatioCenter(v)
+	return _u
+}
+
 // AddAPIKeyIDs adds the "api_keys" edge to the APIKey entity by IDs.
 func (_u *GroupUpdate) AddAPIKeyIDs(ids ...int64) *GroupUpdate {
 	_u.mutation.AddAPIKeyIDs(ids...)
@@ -1249,6 +1270,12 @@ func (_u *GroupUpdate) sqlSave(ctx context.Context) (_node int, err error) {
 	}
 	if value, ok := _u.mutation.AddedKiroCreditTargetUsd(); ok {
 		_spec.AddField(group.FieldKiroCreditTargetUsd, field.TypeFloat64, value)
+	}
+	if value, ok := _u.mutation.KiroCacheForceRatioCenter(); ok {
+		_spec.SetField(group.FieldKiroCacheForceRatioCenter, field.TypeFloat64, value)
+	}
+	if value, ok := _u.mutation.AddedKiroCacheForceRatioCenter(); ok {
+		_spec.AddField(group.FieldKiroCacheForceRatioCenter, field.TypeFloat64, value)
 	}
 	if _u.mutation.APIKeysCleared() {
 		edge := &sqlgraph.EdgeSpec{
@@ -2270,6 +2297,27 @@ func (_u *GroupUpdateOne) AddKiroCreditTargetUsd(v float64) *GroupUpdateOne {
 	return _u
 }
 
+// SetKiroCacheForceRatioCenter sets the "kiro_cache_force_ratio_center" field.
+func (_u *GroupUpdateOne) SetKiroCacheForceRatioCenter(v float64) *GroupUpdateOne {
+	_u.mutation.ResetKiroCacheForceRatioCenter()
+	_u.mutation.SetKiroCacheForceRatioCenter(v)
+	return _u
+}
+
+// SetNillableKiroCacheForceRatioCenter sets the "kiro_cache_force_ratio_center" field if the given value is not nil.
+func (_u *GroupUpdateOne) SetNillableKiroCacheForceRatioCenter(v *float64) *GroupUpdateOne {
+	if v != nil {
+		_u.SetKiroCacheForceRatioCenter(*v)
+	}
+	return _u
+}
+
+// AddKiroCacheForceRatioCenter adds value to the "kiro_cache_force_ratio_center" field.
+func (_u *GroupUpdateOne) AddKiroCacheForceRatioCenter(v float64) *GroupUpdateOne {
+	_u.mutation.AddKiroCacheForceRatioCenter(v)
+	return _u
+}
+
 // AddAPIKeyIDs adds the "api_keys" edge to the APIKey entity by IDs.
 func (_u *GroupUpdateOne) AddAPIKeyIDs(ids ...int64) *GroupUpdateOne {
 	_u.mutation.AddAPIKeyIDs(ids...)
@@ -2807,6 +2855,12 @@ func (_u *GroupUpdateOne) sqlSave(ctx context.Context) (_node *Group, err error)
 	}
 	if value, ok := _u.mutation.AddedKiroCreditTargetUsd(); ok {
 		_spec.AddField(group.FieldKiroCreditTargetUsd, field.TypeFloat64, value)
+	}
+	if value, ok := _u.mutation.KiroCacheForceRatioCenter(); ok {
+		_spec.SetField(group.FieldKiroCacheForceRatioCenter, field.TypeFloat64, value)
+	}
+	if value, ok := _u.mutation.AddedKiroCacheForceRatioCenter(); ok {
+		_spec.AddField(group.FieldKiroCacheForceRatioCenter, field.TypeFloat64, value)
 	}
 	if _u.mutation.APIKeysCleared() {
 		edge := &sqlgraph.EdgeSpec{

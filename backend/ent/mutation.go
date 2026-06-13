@@ -15019,6 +15019,8 @@ type GroupMutation struct {
 	addkiro_cache_emulation_ratio           *float64
 	kiro_credit_target_usd                  *float64
 	addkiro_credit_target_usd               *float64
+	kiro_cache_force_ratio_center           *float64
+	addkiro_cache_force_ratio_center        *float64
 	clearedFields                           map[string]struct{}
 	api_keys                                map[int64]struct{}
 	removedapi_keys                         map[int64]struct{}
@@ -17067,6 +17069,62 @@ func (m *GroupMutation) ResetKiroCreditTargetUsd() {
 	m.addkiro_credit_target_usd = nil
 }
 
+// SetKiroCacheForceRatioCenter sets the "kiro_cache_force_ratio_center" field.
+func (m *GroupMutation) SetKiroCacheForceRatioCenter(f float64) {
+	m.kiro_cache_force_ratio_center = &f
+	m.addkiro_cache_force_ratio_center = nil
+}
+
+// KiroCacheForceRatioCenter returns the value of the "kiro_cache_force_ratio_center" field in the mutation.
+func (m *GroupMutation) KiroCacheForceRatioCenter() (r float64, exists bool) {
+	v := m.kiro_cache_force_ratio_center
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldKiroCacheForceRatioCenter returns the old "kiro_cache_force_ratio_center" field's value of the Group entity.
+// If the Group object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *GroupMutation) OldKiroCacheForceRatioCenter(ctx context.Context) (v float64, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldKiroCacheForceRatioCenter is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldKiroCacheForceRatioCenter requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldKiroCacheForceRatioCenter: %w", err)
+	}
+	return oldValue.KiroCacheForceRatioCenter, nil
+}
+
+// AddKiroCacheForceRatioCenter adds f to the "kiro_cache_force_ratio_center" field.
+func (m *GroupMutation) AddKiroCacheForceRatioCenter(f float64) {
+	if m.addkiro_cache_force_ratio_center != nil {
+		*m.addkiro_cache_force_ratio_center += f
+	} else {
+		m.addkiro_cache_force_ratio_center = &f
+	}
+}
+
+// AddedKiroCacheForceRatioCenter returns the value that was added to the "kiro_cache_force_ratio_center" field in this mutation.
+func (m *GroupMutation) AddedKiroCacheForceRatioCenter() (r float64, exists bool) {
+	v := m.addkiro_cache_force_ratio_center
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// ResetKiroCacheForceRatioCenter resets all changes to the "kiro_cache_force_ratio_center" field.
+func (m *GroupMutation) ResetKiroCacheForceRatioCenter() {
+	m.kiro_cache_force_ratio_center = nil
+	m.addkiro_cache_force_ratio_center = nil
+}
+
 // AddAPIKeyIDs adds the "api_keys" edge to the APIKey entity by ids.
 func (m *GroupMutation) AddAPIKeyIDs(ids ...int64) {
 	if m.api_keys == nil {
@@ -17425,7 +17483,7 @@ func (m *GroupMutation) Type() string {
 // order to get all numeric fields that were incremented/decremented, call
 // AddedFields().
 func (m *GroupMutation) Fields() []string {
-	fields := make([]string, 0, 40)
+	fields := make([]string, 0, 41)
 	if m.created_at != nil {
 		fields = append(fields, group.FieldCreatedAt)
 	}
@@ -17546,6 +17604,9 @@ func (m *GroupMutation) Fields() []string {
 	if m.kiro_credit_target_usd != nil {
 		fields = append(fields, group.FieldKiroCreditTargetUsd)
 	}
+	if m.kiro_cache_force_ratio_center != nil {
+		fields = append(fields, group.FieldKiroCacheForceRatioCenter)
+	}
 	return fields
 }
 
@@ -17634,6 +17695,8 @@ func (m *GroupMutation) Field(name string) (ent.Value, bool) {
 		return m.KiroCacheEmulationRatio()
 	case group.FieldKiroCreditTargetUsd:
 		return m.KiroCreditTargetUsd()
+	case group.FieldKiroCacheForceRatioCenter:
+		return m.KiroCacheForceRatioCenter()
 	}
 	return nil, false
 }
@@ -17723,6 +17786,8 @@ func (m *GroupMutation) OldField(ctx context.Context, name string) (ent.Value, e
 		return m.OldKiroCacheEmulationRatio(ctx)
 	case group.FieldKiroCreditTargetUsd:
 		return m.OldKiroCreditTargetUsd(ctx)
+	case group.FieldKiroCacheForceRatioCenter:
+		return m.OldKiroCacheForceRatioCenter(ctx)
 	}
 	return nil, fmt.Errorf("unknown Group field %s", name)
 }
@@ -18012,6 +18077,13 @@ func (m *GroupMutation) SetField(name string, value ent.Value) error {
 		}
 		m.SetKiroCreditTargetUsd(v)
 		return nil
+	case group.FieldKiroCacheForceRatioCenter:
+		v, ok := value.(float64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetKiroCacheForceRatioCenter(v)
+		return nil
 	}
 	return fmt.Errorf("unknown Group field %s", name)
 }
@@ -18068,6 +18140,9 @@ func (m *GroupMutation) AddedFields() []string {
 	if m.addkiro_credit_target_usd != nil {
 		fields = append(fields, group.FieldKiroCreditTargetUsd)
 	}
+	if m.addkiro_cache_force_ratio_center != nil {
+		fields = append(fields, group.FieldKiroCacheForceRatioCenter)
+	}
 	return fields
 }
 
@@ -18108,6 +18183,8 @@ func (m *GroupMutation) AddedField(name string) (ent.Value, bool) {
 		return m.AddedKiroCacheEmulationRatio()
 	case group.FieldKiroCreditTargetUsd:
 		return m.AddedKiroCreditTargetUsd()
+	case group.FieldKiroCacheForceRatioCenter:
+		return m.AddedKiroCacheForceRatioCenter()
 	}
 	return nil, false
 }
@@ -18228,6 +18305,13 @@ func (m *GroupMutation) AddField(name string, value ent.Value) error {
 			return fmt.Errorf("unexpected type %T for field %s", value, name)
 		}
 		m.AddKiroCreditTargetUsd(v)
+		return nil
+	case group.FieldKiroCacheForceRatioCenter:
+		v, ok := value.(float64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.AddKiroCacheForceRatioCenter(v)
 		return nil
 	}
 	return fmt.Errorf("unknown Group numeric field %s", name)
@@ -18444,6 +18528,9 @@ func (m *GroupMutation) ResetField(name string) error {
 		return nil
 	case group.FieldKiroCreditTargetUsd:
 		m.ResetKiroCreditTargetUsd()
+		return nil
+	case group.FieldKiroCacheForceRatioCenter:
+		m.ResetKiroCacheForceRatioCenter()
 		return nil
 	}
 	return fmt.Errorf("unknown Group field %s", name)
