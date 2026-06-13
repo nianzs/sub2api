@@ -724,7 +724,8 @@ export interface Proxy {
   username: string | null
   password?: string | null
   status: 'active' | 'inactive' | 'expired'
-  max_accounts: number // 每个代理最多绑定的账号数（默认 3，Kiro 强制绑代理配额）
+  max_accounts: number // 每个代理最多绑定的账号数（默认 3）
+  enforce_max_accounts: boolean // true=硬限制(超限拒绝)；false=软限制(仅告警放行，默认)
   account_count?: number // Number of accounts using this proxy
   latency_ms?: number
   latency_status?: 'success' | 'failed'
@@ -1133,6 +1134,7 @@ export interface CreateProxyRequest {
   username?: string | null
   password?: string | null
   max_accounts?: number   // 每个代理最多绑定的账号数；省略 = 后端默认 3
+  enforce_max_accounts?: boolean   // true=硬限制；省略/false = 软限制（默认）
   expires_at?: number | null   // unix 秒；null/0 = 永不过期
   fallback_mode?: 'none' | 'proxy' | 'direct'
   backup_proxy_id?: number | null
@@ -1148,6 +1150,7 @@ export interface UpdateProxyRequest {
   password?: string | null
   status?: 'active' | 'inactive'
   max_accounts?: number   // 每个代理最多绑定的账号数；省略 = 不更新
+  enforce_max_accounts?: boolean   // true=硬限制；false=软限制；省略 = 不更新
   expires_at?: number | null   // unix 秒；null/0 = 永不过期
   fallback_mode?: 'none' | 'proxy' | 'direct'
   backup_proxy_id?: number | null

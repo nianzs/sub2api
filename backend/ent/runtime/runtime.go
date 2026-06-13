@@ -1384,14 +1384,18 @@ func init() {
 	proxy.DefaultMaxAccounts = proxyDescMaxAccounts.Default.(int)
 	// proxy.MaxAccountsValidator is a validator for the "max_accounts" field. It is called by the builders before save.
 	proxy.MaxAccountsValidator = proxyDescMaxAccounts.Validators[0].(func(int) error)
+	// proxyDescEnforceMaxAccounts is the schema descriptor for enforce_max_accounts field.
+	proxyDescEnforceMaxAccounts := proxyFields[8].Descriptor()
+	// proxy.DefaultEnforceMaxAccounts holds the default value on creation for the enforce_max_accounts field.
+	proxy.DefaultEnforceMaxAccounts = proxyDescEnforceMaxAccounts.Default.(bool)
 	// proxyDescFallbackMode is the schema descriptor for fallback_mode field.
-	proxyDescFallbackMode := proxyFields[9].Descriptor()
+	proxyDescFallbackMode := proxyFields[10].Descriptor()
 	// proxy.DefaultFallbackMode holds the default value on creation for the fallback_mode field.
 	proxy.DefaultFallbackMode = proxyDescFallbackMode.Default.(string)
 	// proxy.FallbackModeValidator is a validator for the "fallback_mode" field. It is called by the builders before save.
 	proxy.FallbackModeValidator = proxyDescFallbackMode.Validators[0].(func(string) error)
 	// proxyDescExpiryWarnDays is the schema descriptor for expiry_warn_days field.
-	proxyDescExpiryWarnDays := proxyFields[11].Descriptor()
+	proxyDescExpiryWarnDays := proxyFields[12].Descriptor()
 	// proxy.DefaultExpiryWarnDays holds the default value on creation for the expiry_warn_days field.
 	proxy.DefaultExpiryWarnDays = proxyDescExpiryWarnDays.Default.(int)
 	redeemcodeFields := schema.RedeemCode{}.Fields()

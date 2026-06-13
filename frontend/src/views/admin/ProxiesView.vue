@@ -502,6 +502,11 @@
             placeholder="3"
           />
           <p class="input-hint">{{ t('admin.proxies.maxAccountsHint') }}</p>
+          <label class="mt-2 flex items-center gap-2 text-sm">
+            <input v-model="createForm.enforce_max_accounts" type="checkbox" />
+            {{ t('admin.proxies.enforceMaxAccounts') }}
+          </label>
+          <p class="input-hint">{{ t('admin.proxies.enforceMaxAccountsHint') }}</p>
         </div>
         <div>
           <label class="input-label">{{ t('admin.proxies.expiresAt') }}</label>
@@ -747,6 +752,11 @@
             placeholder="3"
           />
           <p class="input-hint">{{ t('admin.proxies.maxAccountsHint') }}</p>
+          <label class="mt-2 flex items-center gap-2 text-sm">
+            <input v-model="editForm.enforce_max_accounts" type="checkbox" />
+            {{ t('admin.proxies.enforceMaxAccounts') }}
+          </label>
+          <p class="input-hint">{{ t('admin.proxies.enforceMaxAccountsHint') }}</p>
         </div>
         <div>
           <label class="input-label">{{ t('admin.proxies.expiresAt') }}</label>
@@ -1151,6 +1161,7 @@ const createForm = reactive({
   username: '',
   password: '',
   max_accounts: 3 as number,
+  enforce_max_accounts: false as boolean,
   expires_at: '' as string,
   fallback_mode: 'none' as 'none' | 'proxy' | 'direct',
   backup_proxy_id: null as number | null,
@@ -1166,6 +1177,7 @@ const editForm = reactive({
   password: '',
   status: 'active' as 'active' | 'inactive' | 'expired',
   max_accounts: 3 as number,
+  enforce_max_accounts: false as boolean,
   expires_at: '' as string,
   fallback_mode: 'none' as 'none' | 'proxy' | 'direct',
   backup_proxy_id: null as number | null,
@@ -1282,6 +1294,7 @@ const closeCreateModal = () => {
   createForm.username = ''
   createForm.password = ''
   createForm.max_accounts = 3
+  createForm.enforce_max_accounts = false
   createForm.expires_at = ''
   createForm.fallback_mode = 'none'
   createForm.backup_proxy_id = null
@@ -1412,6 +1425,7 @@ const handleCreateProxy = async () => {
       username: createForm.username.trim() || null,
       password: createForm.password.trim() || null,
       max_accounts: createForm.max_accounts,
+      enforce_max_accounts: createForm.enforce_max_accounts,
       expires_at: createForm.expires_at ? Math.floor(new Date(createForm.expires_at).getTime() / 1000) : null,
       fallback_mode: createForm.fallback_mode,
       backup_proxy_id: createForm.fallback_mode === 'proxy' ? createForm.backup_proxy_id : null,
@@ -1438,6 +1452,7 @@ const handleEdit = (proxy: Proxy) => {
   editForm.password = proxy.password || ''
   editForm.status = proxy.status === 'expired' ? 'inactive' : proxy.status
   editForm.max_accounts = proxy.max_accounts ?? 3
+  editForm.enforce_max_accounts = proxy.enforce_max_accounts ?? false
   editForm.expires_at = proxy.expires_at ? proxy.expires_at.slice(0, 10) : ''
   editForm.fallback_mode = proxy.fallback_mode || 'none'
   editForm.backup_proxy_id = proxy.backup_proxy_id ?? null
@@ -1479,6 +1494,7 @@ const handleUpdateProxy = async () => {
       username: editForm.username.trim() || null,
       status: editForm.status,
       max_accounts: editForm.max_accounts,
+      enforce_max_accounts: editForm.enforce_max_accounts,
       expires_at: editForm.expires_at ? Math.floor(new Date(editForm.expires_at).getTime() / 1000) : null,
       fallback_mode: editForm.fallback_mode,
       backup_proxy_id: editForm.fallback_mode === 'proxy' ? editForm.backup_proxy_id : null,

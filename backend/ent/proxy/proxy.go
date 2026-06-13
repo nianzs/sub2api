@@ -37,6 +37,8 @@ const (
 	FieldStatus = "status"
 	// FieldMaxAccounts holds the string denoting the max_accounts field in the database.
 	FieldMaxAccounts = "max_accounts"
+	// FieldEnforceMaxAccounts holds the string denoting the enforce_max_accounts field in the database.
+	FieldEnforceMaxAccounts = "enforce_max_accounts"
 	// FieldExpiresAt holds the string denoting the expires_at field in the database.
 	FieldExpiresAt = "expires_at"
 	// FieldFallbackMode holds the string denoting the fallback_mode field in the database.
@@ -78,6 +80,7 @@ var Columns = []string{
 	FieldPassword,
 	FieldStatus,
 	FieldMaxAccounts,
+	FieldEnforceMaxAccounts,
 	FieldExpiresAt,
 	FieldFallbackMode,
 	FieldBackupProxyID,
@@ -126,6 +129,8 @@ var (
 	DefaultMaxAccounts int
 	// MaxAccountsValidator is a validator for the "max_accounts" field. It is called by the builders before save.
 	MaxAccountsValidator func(int) error
+	// DefaultEnforceMaxAccounts holds the default value on creation for the "enforce_max_accounts" field.
+	DefaultEnforceMaxAccounts bool
 	// DefaultFallbackMode holds the default value on creation for the "fallback_mode" field.
 	DefaultFallbackMode string
 	// FallbackModeValidator is a validator for the "fallback_mode" field. It is called by the builders before save.
@@ -195,6 +200,11 @@ func ByStatus(opts ...sql.OrderTermOption) OrderOption {
 // ByMaxAccounts orders the results by the max_accounts field.
 func ByMaxAccounts(opts ...sql.OrderTermOption) OrderOption {
 	return sql.OrderByField(FieldMaxAccounts, opts...).ToFunc()
+}
+
+// ByEnforceMaxAccounts orders the results by the enforce_max_accounts field.
+func ByEnforceMaxAccounts(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldEnforceMaxAccounts, opts...).ToFunc()
 }
 
 // ByExpiresAt orders the results by the expires_at field.

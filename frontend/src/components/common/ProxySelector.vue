@@ -66,9 +66,8 @@
 
         <!-- Options list -->
         <div class="select-options">
-          <!-- No Proxy option (隐藏当 platform=kiro，强制选代理) -->
+          <!-- No Proxy option（Kiro 不再强制绑代理，所有平台均可选无代理） -->
           <div
-            v-if="platform !== 'kiro'"
             @click="selectOption(null)"
             :class="['select-option', modelValue === null && 'select-option-selected']"
           >
@@ -313,8 +312,7 @@ const getExpiryBadge = (proxy: Proxy): { label: string; class: string } | null =
 }
 
 const selectOption = (value: number | null) => {
-  // platform=kiro 时禁止选 noProxy
-  if (props.platform === 'kiro' && value === null) return
+  // Kiro 不再强制绑代理，允许选 noProxy
   // 当前选项不可选时禁止切换（已选中的允许保留）
   if (value !== null && value !== props.modelValue) {
     const proxy = props.proxies.find((p) => p.id === value)

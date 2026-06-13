@@ -110,6 +110,11 @@ func MaxAccounts(v int) predicate.Proxy {
 	return predicate.Proxy(sql.FieldEQ(FieldMaxAccounts, v))
 }
 
+// EnforceMaxAccounts applies equality check predicate on the "enforce_max_accounts" field. It's identical to EnforceMaxAccountsEQ.
+func EnforceMaxAccounts(v bool) predicate.Proxy {
+	return predicate.Proxy(sql.FieldEQ(FieldEnforceMaxAccounts, v))
+}
+
 // ExpiresAt applies equality check predicate on the "expires_at" field. It's identical to ExpiresAtEQ.
 func ExpiresAt(v time.Time) predicate.Proxy {
 	return predicate.Proxy(sql.FieldEQ(FieldExpiresAt, v))
@@ -748,6 +753,16 @@ func MaxAccountsLT(v int) predicate.Proxy {
 // MaxAccountsLTE applies the LTE predicate on the "max_accounts" field.
 func MaxAccountsLTE(v int) predicate.Proxy {
 	return predicate.Proxy(sql.FieldLTE(FieldMaxAccounts, v))
+}
+
+// EnforceMaxAccountsEQ applies the EQ predicate on the "enforce_max_accounts" field.
+func EnforceMaxAccountsEQ(v bool) predicate.Proxy {
+	return predicate.Proxy(sql.FieldEQ(FieldEnforceMaxAccounts, v))
+}
+
+// EnforceMaxAccountsNEQ applies the NEQ predicate on the "enforce_max_accounts" field.
+func EnforceMaxAccountsNEQ(v bool) predicate.Proxy {
+	return predicate.Proxy(sql.FieldNEQ(FieldEnforceMaxAccounts, v))
 }
 
 // ExpiresAtEQ applies the EQ predicate on the "expires_at" field.

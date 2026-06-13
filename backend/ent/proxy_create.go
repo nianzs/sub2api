@@ -145,6 +145,20 @@ func (_c *ProxyCreate) SetNillableMaxAccounts(v *int) *ProxyCreate {
 	return _c
 }
 
+// SetEnforceMaxAccounts sets the "enforce_max_accounts" field.
+func (_c *ProxyCreate) SetEnforceMaxAccounts(v bool) *ProxyCreate {
+	_c.mutation.SetEnforceMaxAccounts(v)
+	return _c
+}
+
+// SetNillableEnforceMaxAccounts sets the "enforce_max_accounts" field if the given value is not nil.
+func (_c *ProxyCreate) SetNillableEnforceMaxAccounts(v *bool) *ProxyCreate {
+	if v != nil {
+		_c.SetEnforceMaxAccounts(*v)
+	}
+	return _c
+}
+
 // SetExpiresAt sets the "expires_at" field.
 func (_c *ProxyCreate) SetExpiresAt(v time.Time) *ProxyCreate {
 	_c.mutation.SetExpiresAt(v)
@@ -280,6 +294,10 @@ func (_c *ProxyCreate) defaults() error {
 		v := proxy.DefaultMaxAccounts
 		_c.mutation.SetMaxAccounts(v)
 	}
+	if _, ok := _c.mutation.EnforceMaxAccounts(); !ok {
+		v := proxy.DefaultEnforceMaxAccounts
+		_c.mutation.SetEnforceMaxAccounts(v)
+	}
 	if _, ok := _c.mutation.FallbackMode(); !ok {
 		v := proxy.DefaultFallbackMode
 		_c.mutation.SetFallbackMode(v)
@@ -351,6 +369,9 @@ func (_c *ProxyCreate) check() error {
 		if err := proxy.MaxAccountsValidator(v); err != nil {
 			return &ValidationError{Name: "max_accounts", err: fmt.Errorf(`ent: validator failed for field "Proxy.max_accounts": %w`, err)}
 		}
+	}
+	if _, ok := _c.mutation.EnforceMaxAccounts(); !ok {
+		return &ValidationError{Name: "enforce_max_accounts", err: errors.New(`ent: missing required field "Proxy.enforce_max_accounts"`)}
 	}
 	if _, ok := _c.mutation.FallbackMode(); !ok {
 		return &ValidationError{Name: "fallback_mode", err: errors.New(`ent: missing required field "Proxy.fallback_mode"`)}
@@ -433,6 +454,10 @@ func (_c *ProxyCreate) createSpec() (*Proxy, *sqlgraph.CreateSpec) {
 	if value, ok := _c.mutation.MaxAccounts(); ok {
 		_spec.SetField(proxy.FieldMaxAccounts, field.TypeInt, value)
 		_node.MaxAccounts = value
+	}
+	if value, ok := _c.mutation.EnforceMaxAccounts(); ok {
+		_spec.SetField(proxy.FieldEnforceMaxAccounts, field.TypeBool, value)
+		_node.EnforceMaxAccounts = value
 	}
 	if value, ok := _c.mutation.ExpiresAt(); ok {
 		_spec.SetField(proxy.FieldExpiresAt, field.TypeTime, value)
@@ -678,6 +703,18 @@ func (u *ProxyUpsert) UpdateMaxAccounts() *ProxyUpsert {
 // AddMaxAccounts adds v to the "max_accounts" field.
 func (u *ProxyUpsert) AddMaxAccounts(v int) *ProxyUpsert {
 	u.Add(proxy.FieldMaxAccounts, v)
+	return u
+}
+
+// SetEnforceMaxAccounts sets the "enforce_max_accounts" field.
+func (u *ProxyUpsert) SetEnforceMaxAccounts(v bool) *ProxyUpsert {
+	u.Set(proxy.FieldEnforceMaxAccounts, v)
+	return u
+}
+
+// UpdateEnforceMaxAccounts sets the "enforce_max_accounts" field to the value that was provided on create.
+func (u *ProxyUpsert) UpdateEnforceMaxAccounts() *ProxyUpsert {
+	u.SetExcluded(proxy.FieldEnforceMaxAccounts)
 	return u
 }
 
@@ -964,6 +1001,20 @@ func (u *ProxyUpsertOne) AddMaxAccounts(v int) *ProxyUpsertOne {
 func (u *ProxyUpsertOne) UpdateMaxAccounts() *ProxyUpsertOne {
 	return u.Update(func(s *ProxyUpsert) {
 		s.UpdateMaxAccounts()
+	})
+}
+
+// SetEnforceMaxAccounts sets the "enforce_max_accounts" field.
+func (u *ProxyUpsertOne) SetEnforceMaxAccounts(v bool) *ProxyUpsertOne {
+	return u.Update(func(s *ProxyUpsert) {
+		s.SetEnforceMaxAccounts(v)
+	})
+}
+
+// UpdateEnforceMaxAccounts sets the "enforce_max_accounts" field to the value that was provided on create.
+func (u *ProxyUpsertOne) UpdateEnforceMaxAccounts() *ProxyUpsertOne {
+	return u.Update(func(s *ProxyUpsert) {
+		s.UpdateEnforceMaxAccounts()
 	})
 }
 
@@ -1427,6 +1478,20 @@ func (u *ProxyUpsertBulk) AddMaxAccounts(v int) *ProxyUpsertBulk {
 func (u *ProxyUpsertBulk) UpdateMaxAccounts() *ProxyUpsertBulk {
 	return u.Update(func(s *ProxyUpsert) {
 		s.UpdateMaxAccounts()
+	})
+}
+
+// SetEnforceMaxAccounts sets the "enforce_max_accounts" field.
+func (u *ProxyUpsertBulk) SetEnforceMaxAccounts(v bool) *ProxyUpsertBulk {
+	return u.Update(func(s *ProxyUpsert) {
+		s.SetEnforceMaxAccounts(v)
+	})
+}
+
+// UpdateEnforceMaxAccounts sets the "enforce_max_accounts" field to the value that was provided on create.
+func (u *ProxyUpsertBulk) UpdateEnforceMaxAccounts() *ProxyUpsertBulk {
+	return u.Update(func(s *ProxyUpsert) {
+		s.UpdateEnforceMaxAccounts()
 	})
 }
 

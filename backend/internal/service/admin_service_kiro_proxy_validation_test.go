@@ -80,10 +80,12 @@ func newProxyValidationFake() *fakeProxyRepoForValidation {
 			1: {ID: 1, Status: StatusActive, MaxAccounts: 3, ExpiresAt: &future},
 			2: {ID: 2, Status: "inactive", MaxAccounts: 3, ExpiresAt: &future},
 			3: {ID: 3, Status: StatusActive, MaxAccounts: 3, ExpiresAt: &past},
-			4: {ID: 4, Status: StatusActive, MaxAccounts: 3, ExpiresAt: &future}, // saturated below
+			4: {ID: 4, Status: StatusActive, MaxAccounts: 3, ExpiresAt: &future}, // saturated, soft (default)
 			5: {ID: 5, Status: StatusActive, MaxAccounts: 3, ExpiresAt: nil},     // never expires
+			6: {ID: 6, Status: StatusActive, MaxAccounts: 3, ExpiresAt: &future, EnforceMaxAccounts: true}, // saturated, hard
+			7: {ID: 7, Status: StatusActive, MaxAccounts: 3, ExpiresAt: &future, EnforceMaxAccounts: true}, // empty, hard
 		},
-		counts: map[int64]int64{1: 0, 2: 0, 3: 0, 4: 3, 5: 0},
+		counts: map[int64]int64{1: 0, 2: 0, 3: 0, 4: 3, 5: 0, 6: 3, 7: 0},
 	}
 }
 
@@ -113,13 +115,14 @@ func TestValidateKiroProxyBinding(t *testing.T) {
 	}{
 		{name: "non-kiro platform always passes (no proxy)", platform: PlatformOpenAI, effectiveID: nil, checkCapacity: true, wantErr: false},
 		{name: "non-kiro platform passes (full proxy)", platform: PlatformOpenAI, effectiveID: pid(4), checkCapacity: true, wantErr: false},
-		{name: "kiro requires proxy_id", platform: PlatformKiro, effectiveID: nil, checkCapacity: true, wantErr: true, wantReason: ProxyValidationKiroRequiresProxy},
-		{name: "kiro rejects zero proxy_id", platform: PlatformKiro, effectiveID: pid(0), checkCapacity: true, wantErr: true, wantReason: ProxyValidationKiroRequiresProxy},
+		{name: "kiro without proxy allowed (soft, no forced proxy)", platform: PlatformKiro, effectiveID: nil, checkCapacity: true, wantErr: false},
+		{name: "kiro zero proxy_id allowed (soft)", platform: PlatformKiro, effectiveID: pid(0), checkCapacity: true, wantErr: false},
 		{name: "kiro proxy not found", platform: PlatformKiro, effectiveID: pid(999), checkCapacity: true, wantErr: true, wantReason: ProxyValidationProxyNotFound},
 		{name: "kiro proxy inactive", platform: PlatformKiro, effectiveID: pid(2), checkCapacity: true, wantErr: true, wantReason: ProxyValidationProxyNotActive},
 		{name: "kiro proxy expired", platform: PlatformKiro, effectiveID: pid(3), checkCapacity: true, wantErr: true, wantReason: ProxyValidationProxyExpired},
-		{name: "kiro proxy at capacity", platform: PlatformKiro, effectiveID: pid(4), checkCapacity: true, wantErr: true, wantReason: ProxyValidationCapacityFull},
-		{name: "kiro proxy at capacity skipped when checkCapacity=false (update without rebind)", platform: PlatformKiro, effectiveID: pid(4), checkCapacity: false, wantErr: false},
+		{name: "kiro proxy at capacity soft -> allowed", platform: PlatformKiro, effectiveID: pid(4), checkCapacity: true, wantErr: false},
+		{name: "kiro proxy at capacity hard -> CapacityFull", platform: PlatformKiro, effectiveID: pid(6), checkCapacity: true, wantErr: true, wantReason: ProxyValidationCapacityFull},
+		{name: "kiro proxy at capacity hard skipped when checkCapacity=false", platform: PlatformKiro, effectiveID: pid(6), checkCapacity: false, wantErr: false},
 		{name: "kiro happy path", platform: PlatformKiro, effectiveID: pid(1), checkCapacity: true, wantErr: false},
 		{name: "kiro proxy with no expiry passes", platform: PlatformKiro, effectiveID: pid(5), checkCapacity: true, wantErr: false},
 	}
@@ -160,15 +163,16 @@ func TestValidateKiroBulkProxyRebind(t *testing.T) {
 	}{
 		{name: "nil newProxyID is no-op", accounts: []*Account{mkAccount(1, PlatformKiro, nil)}, newProxyID: nil},
 		{name: "no kiro accounts in batch is no-op", accounts: []*Account{mkAccount(1, PlatformOpenAI, nil), mkAccount(2, PlatformOpenAI, pid(1))}, newProxyID: pid(0)},
-		{name: "clearing proxy with kiro account rejected", accounts: []*Account{mkAccount(1, PlatformKiro, pid(1)), mkAccount(2, PlatformOpenAI, nil)}, newProxyID: pid(0), wantErr: true, wantReason: ProxyValidationKiroRequiresProxy},
+		{name: "clearing proxy with kiro account allowed (soft)", accounts: []*Account{mkAccount(1, PlatformKiro, pid(1)), mkAccount(2, PlatformOpenAI, nil)}, newProxyID: pid(0), wantErr: false},
 		{name: "target proxy not found", accounts: []*Account{mkAccount(1, PlatformKiro, nil)}, newProxyID: pid(999), wantErr: true, wantReason: ProxyValidationProxyNotFound},
 		{name: "target proxy inactive", accounts: []*Account{mkAccount(1, PlatformKiro, nil)}, newProxyID: pid(2), wantErr: true, wantReason: ProxyValidationProxyNotActive},
 		{name: "target proxy expired", accounts: []*Account{mkAccount(1, PlatformKiro, nil)}, newProxyID: pid(3), wantErr: true, wantReason: ProxyValidationProxyExpired},
 		{name: "all kiro already bound to target -> no new bindings -> pass even if proxy looks full", accounts: []*Account{mkAccount(1, PlatformKiro, pid(4)), mkAccount(2, PlatformKiro, pid(4))}, newProxyID: pid(4)},
 		{name: "single new binding to proxy with room -> pass", accounts: []*Account{mkAccount(1, PlatformKiro, nil)}, newProxyID: pid(1)},
 		{name: "batch of 3 new bindings to empty proxy (capacity 3) -> pass", accounts: []*Account{mkAccount(1, PlatformKiro, nil), mkAccount(2, PlatformKiro, nil), mkAccount(3, PlatformKiro, nil)}, newProxyID: pid(1)},
-		{name: "batch of 4 new bindings to empty proxy (capacity 3) -> CapacityFull", accounts: []*Account{mkAccount(1, PlatformKiro, nil), mkAccount(2, PlatformKiro, nil), mkAccount(3, PlatformKiro, nil), mkAccount(4, PlatformKiro, nil)}, newProxyID: pid(1), wantErr: true, wantReason: ProxyValidationCapacityFull},
-		{name: "mix of new + existing on proxy 4 -> only new count against capacity", accounts: []*Account{mkAccount(1, PlatformKiro, pid(4)), mkAccount(2, PlatformKiro, pid(4)), mkAccount(3, PlatformKiro, nil)}, newProxyID: pid(4), wantErr: true, wantReason: ProxyValidationCapacityFull},
+		{name: "batch of 4 to empty soft proxy (capacity 3) -> allowed", accounts: []*Account{mkAccount(1, PlatformKiro, nil), mkAccount(2, PlatformKiro, nil), mkAccount(3, PlatformKiro, nil), mkAccount(4, PlatformKiro, nil)}, newProxyID: pid(1), wantErr: false},
+		{name: "batch of 4 to empty hard proxy (capacity 3) -> CapacityFull", accounts: []*Account{mkAccount(1, PlatformKiro, nil), mkAccount(2, PlatformKiro, nil), mkAccount(3, PlatformKiro, nil), mkAccount(4, PlatformKiro, nil)}, newProxyID: pid(7), wantErr: true, wantReason: ProxyValidationCapacityFull},
+		{name: "mix of new + existing on soft proxy 4 -> allowed", accounts: []*Account{mkAccount(1, PlatformKiro, pid(4)), mkAccount(2, PlatformKiro, pid(4)), mkAccount(3, PlatformKiro, nil)}, newProxyID: pid(4), wantErr: false},
 		{name: "non-kiro account moved to expired proxy is allowed (helper only checks kiro)", accounts: []*Account{mkAccount(1, PlatformOpenAI, nil)}, newProxyID: pid(3)},
 	}
 

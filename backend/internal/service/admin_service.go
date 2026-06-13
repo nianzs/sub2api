@@ -401,32 +401,34 @@ type BulkUpdateAccountsResult struct {
 }
 
 type CreateProxyInput struct {
-	Name           string
-	Protocol       string
-	Host           string
-	Port           int
-	Username       string
-	Password       string
-	MaxAccounts    *int // nil → 用默认值 DefaultProxyMaxAccounts
-	ExpiresAt      *time.Time
-	FallbackMode   string
-	BackupProxyID  *int64
-	ExpiryWarnDays int
+	Name               string
+	Protocol           string
+	Host               string
+	Port               int
+	Username           string
+	Password           string
+	MaxAccounts        *int  // nil → 用默认值 DefaultProxyMaxAccounts
+	EnforceMaxAccounts *bool // nil → 默认 false（软限制）
+	ExpiresAt          *time.Time
+	FallbackMode       string
+	BackupProxyID      *int64
+	ExpiryWarnDays     int
 }
 
 type UpdateProxyInput struct {
-	Name           string
-	Protocol       string
-	Host           string
-	Port           int
-	Username       string
-	Password       string
-	Status         string
-	MaxAccounts    *int // nil → 不更新
-	ExpiresAt      *time.Time
-	FallbackMode   string
-	BackupProxyID  *int64
-	ExpiryWarnDays int
+	Name               string
+	Protocol           string
+	Host               string
+	Port               int
+	Username           string
+	Password           string
+	Status             string
+	MaxAccounts        *int  // nil → 不更新
+	EnforceMaxAccounts *bool // nil → 不更新
+	ExpiresAt          *time.Time
+	FallbackMode       string
+	BackupProxyID      *int64
+	ExpiryWarnDays     int
 }
 
 type GenerateRedeemCodesInput struct {
@@ -2619,15 +2621,18 @@ func (s *adminServiceImpl) GetAccountsByIDs(ctx context.Context, ids []int64) ([
 
 // validateKiroProxyBinding 在 Kiro 平台账号创建 / 换代理时校验代理可用。
 // platform != PlatformKiro 时直接通过。
-// effectiveProxyID == nil/<=0 表示账号将无代理，必拒（Kiro 强制绑代理是风控纪律）。
+// effectiveProxyID == nil/<=0 表示账号将无代理：放行（Kiro 反代不强制绑代理，
+// 兼容自用直连用户），仅记一条建议日志。只有选择了代理时才校验代理 Active/未过期/容量。
 // checkCapacity=true 仅在新绑/换绑时校验配额；维持原绑定时不再校验，
 // 避免"账号已绑且原代理被改满"后再编辑账号被误拒。
+// 容量超限是否硬拒由 proxy.EnforceMaxAccounts 决定（默认 false=软限制，仅 warning 放行）。
 func (s *adminServiceImpl) validateKiroProxyBinding(ctx context.Context, platform string, effectiveProxyID *int64, checkCapacity bool) error {
 	if platform != PlatformKiro {
 		return nil
 	}
 	if effectiveProxyID == nil || *effectiveProxyID <= 0 {
-		return &ProxyValidationError{Reason: ProxyValidationKiroRequiresProxy}
+		slog.Info("kiro account without proxy (soft, allowed)", "platform", platform)
+		return nil
 	}
 	p, err := s.proxyRepo.GetByID(ctx, *effectiveProxyID)
 	if err != nil {
@@ -2648,7 +2653,10 @@ func (s *adminServiceImpl) validateKiroProxyBinding(ctx context.Context, platfor
 			return err
 		}
 		if !p.HasCapacity(count) {
-			return &ProxyValidationError{Reason: ProxyValidationCapacityFull}
+			if p.EnforceMaxAccounts {
+				return &ProxyValidationError{Reason: ProxyValidationCapacityFull}
+			}
+			slog.Warn("kiro proxy over soft capacity (allowed)", "proxy_id", p.ID, "current", count, "max_accounts", p.MaxAccounts)
 		}
 	}
 	return nil
@@ -2666,10 +2674,11 @@ func (s *adminServiceImpl) lockKiroProxyBind(proxyID int64) func() {
 // validateKiroBulkProxyRebind 批量更新 proxy 绑定时对 Kiro 账号做整体校验。
 // newProxyID == nil：未改 proxy，跳过。
 // 批次中无 Kiro 账号：跳过。
-// newProxyID == 0：Kiro 强制绑代理 → 拒。
+// newProxyID == 0：批量清除代理 → 放行（Kiro 不强制绑代理）。
 // newProxyID > 0：校验 Active/未过期，并将"批次新增绑定数"叠加到现有数与 max_accounts 对比。
 // 仅本批次中当前 proxy_id != newProxyID 的 Kiro 账号视为新增绑定；
 // CountAccountsByProxyID 已包含批次中那些原本就绑在 newProxyID 上的 Kiro 账号，无双算。
+// 容量超限是否硬拒由 proxy.EnforceMaxAccounts 决定（默认 false=软限制，仅 warning 放行）。
 func (s *adminServiceImpl) validateKiroBulkProxyRebind(ctx context.Context, accounts []*Account, newProxyID *int64) error {
 	if newProxyID == nil {
 		return nil
@@ -2684,7 +2693,8 @@ func (s *adminServiceImpl) validateKiroBulkProxyRebind(ctx context.Context, acco
 		return nil
 	}
 	if *newProxyID == 0 {
-		return &ProxyValidationError{Reason: ProxyValidationKiroRequiresProxy}
+		slog.Info("kiro bulk clear proxy (soft, allowed)", "count", len(kiroAccounts))
+		return nil
 	}
 	p, err := s.proxyRepo.GetByID(ctx, *newProxyID)
 	if err != nil {
@@ -2713,7 +2723,10 @@ func (s *adminServiceImpl) validateKiroBulkProxyRebind(ctx context.Context, acco
 		return err
 	}
 	if p.MaxAccounts > 0 && count+newBindings > int64(p.MaxAccounts) {
-		return &ProxyValidationError{Reason: ProxyValidationCapacityFull}
+		if p.EnforceMaxAccounts {
+			return &ProxyValidationError{Reason: ProxyValidationCapacityFull}
+		}
+		slog.Warn("kiro proxy over soft capacity on bulk rebind (allowed)", "proxy_id", p.ID, "current", count, "new", newBindings, "max_accounts", p.MaxAccounts)
 	}
 	return nil
 }
@@ -3313,19 +3326,25 @@ func (s *adminServiceImpl) CreateProxy(ctx context.Context, input *CreateProxyIn
 		maxAccounts = *input.MaxAccounts
 	}
 
+	enforceMaxAccounts := false
+	if input.EnforceMaxAccounts != nil {
+		enforceMaxAccounts = *input.EnforceMaxAccounts
+	}
+
 	proxy := &Proxy{
-		Name:           input.Name,
-		Protocol:       input.Protocol,
-		Host:           input.Host,
-		Port:           input.Port,
-		Username:       input.Username,
-		Password:       input.Password,
-		Status:         StatusActive,
-		MaxAccounts:    maxAccounts,
-		ExpiresAt:      input.ExpiresAt,
-		FallbackMode:   mode,
-		BackupProxyID:  input.BackupProxyID,
-		ExpiryWarnDays: input.ExpiryWarnDays,
+		Name:               input.Name,
+		Protocol:           input.Protocol,
+		Host:               input.Host,
+		Port:               input.Port,
+		Username:           input.Username,
+		Password:           input.Password,
+		Status:             StatusActive,
+		MaxAccounts:        maxAccounts,
+		EnforceMaxAccounts: enforceMaxAccounts,
+		ExpiresAt:          input.ExpiresAt,
+		FallbackMode:       mode,
+		BackupProxyID:      input.BackupProxyID,
+		ExpiryWarnDays:     input.ExpiryWarnDays,
 	}
 	if err := s.proxyRepo.Create(ctx, proxy); err != nil {
 		return nil, err
@@ -3381,6 +3400,9 @@ func (s *adminServiceImpl) UpdateProxy(ctx context.Context, id int64, input *Upd
 	}
 	if input.MaxAccounts != nil && *input.MaxAccounts > 0 {
 		proxy.MaxAccounts = *input.MaxAccounts
+	}
+	if input.EnforceMaxAccounts != nil {
+		proxy.EnforceMaxAccounts = *input.EnforceMaxAccounts
 	}
 	// 透传有效期与回退字段
 	proxy.ExpiresAt = input.ExpiresAt

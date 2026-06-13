@@ -39,6 +39,8 @@ type Proxy struct {
 	Status string `json:"status,omitempty"`
 	// Max accounts that may bind to this proxy (Kiro forced-proxy quota).
 	MaxAccounts int `json:"max_accounts,omitempty"`
+	// When true, max_accounts is a hard limit (binding rejected on overflow); when false (default) it is a soft advisory limit (overflow logged, allowed).
+	EnforceMaxAccounts bool `json:"enforce_max_accounts,omitempty"`
 	// Proxy expiration time (NULL means never expires).
 	ExpiresAt *time.Time `json:"expires_at,omitempty"`
 	// Fallback target on expiry: none | proxy | direct.
@@ -89,6 +91,8 @@ func (*Proxy) scanValues(columns []string) ([]any, error) {
 	values := make([]any, len(columns))
 	for i := range columns {
 		switch columns[i] {
+		case proxy.FieldEnforceMaxAccounts:
+			values[i] = new(sql.NullBool)
 		case proxy.FieldID, proxy.FieldPort, proxy.FieldMaxAccounts, proxy.FieldBackupProxyID, proxy.FieldExpiryWarnDays:
 			values[i] = new(sql.NullInt64)
 		case proxy.FieldName, proxy.FieldProtocol, proxy.FieldHost, proxy.FieldUsername, proxy.FieldPassword, proxy.FieldStatus, proxy.FieldFallbackMode:
@@ -184,6 +188,12 @@ func (_m *Proxy) assignValues(columns []string, values []any) error {
 				return fmt.Errorf("unexpected type %T for field max_accounts", values[i])
 			} else if value.Valid {
 				_m.MaxAccounts = int(value.Int64)
+			}
+		case proxy.FieldEnforceMaxAccounts:
+			if value, ok := values[i].(*sql.NullBool); !ok {
+				return fmt.Errorf("unexpected type %T for field enforce_max_accounts", values[i])
+			} else if value.Valid {
+				_m.EnforceMaxAccounts = value.Bool
 			}
 		case proxy.FieldExpiresAt:
 			if value, ok := values[i].(*sql.NullTime); !ok {
@@ -295,6 +305,9 @@ func (_m *Proxy) String() string {
 	builder.WriteString(", ")
 	builder.WriteString("max_accounts=")
 	builder.WriteString(fmt.Sprintf("%v", _m.MaxAccounts))
+	builder.WriteString(", ")
+	builder.WriteString("enforce_max_accounts=")
+	builder.WriteString(fmt.Sprintf("%v", _m.EnforceMaxAccounts))
 	builder.WriteString(", ")
 	if v := _m.ExpiresAt; v != nil {
 		builder.WriteString("expires_at=")

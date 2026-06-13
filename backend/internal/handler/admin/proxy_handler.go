@@ -27,33 +27,35 @@ func NewProxyHandler(adminService service.AdminService) *ProxyHandler {
 
 // CreateProxyRequest represents create proxy request
 type CreateProxyRequest struct {
-	Name           string `json:"name" binding:"required"`
-	Protocol       string `json:"protocol" binding:"required,oneof=http https socks5 socks5h"`
-	Host           string `json:"host" binding:"required"`
-	Port           int    `json:"port" binding:"required,min=1,max=65535"`
-	Username       string `json:"username"`
-	Password       string `json:"password"`
-	MaxAccounts    *int   `json:"max_accounts,omitempty" binding:"omitempty,min=1,max=100"`
-	ExpiresAt      *int64 `json:"expires_at"`
-	FallbackMode   string `json:"fallback_mode" binding:"omitempty,oneof=none proxy direct"`
-	BackupProxyID  *int64 `json:"backup_proxy_id"`
-	ExpiryWarnDays int    `json:"expiry_warn_days" binding:"omitempty,min=0"`
+	Name               string `json:"name" binding:"required"`
+	Protocol           string `json:"protocol" binding:"required,oneof=http https socks5 socks5h"`
+	Host               string `json:"host" binding:"required"`
+	Port               int    `json:"port" binding:"required,min=1,max=65535"`
+	Username           string `json:"username"`
+	Password           string `json:"password"`
+	MaxAccounts        *int   `json:"max_accounts,omitempty" binding:"omitempty,min=1,max=100"`
+	EnforceMaxAccounts *bool  `json:"enforce_max_accounts,omitempty"`
+	ExpiresAt          *int64 `json:"expires_at"`
+	FallbackMode       string `json:"fallback_mode" binding:"omitempty,oneof=none proxy direct"`
+	BackupProxyID      *int64 `json:"backup_proxy_id"`
+	ExpiryWarnDays     int    `json:"expiry_warn_days" binding:"omitempty,min=0"`
 }
 
 // UpdateProxyRequest represents update proxy request
 type UpdateProxyRequest struct {
-	Name           string `json:"name"`
-	Protocol       string `json:"protocol" binding:"omitempty,oneof=http https socks5 socks5h"`
-	Host           string `json:"host"`
-	Port           int    `json:"port" binding:"omitempty,min=1,max=65535"`
-	Username       string `json:"username"`
-	Password       string `json:"password"`
-	Status         string `json:"status" binding:"omitempty,oneof=active inactive"`
-	MaxAccounts    *int   `json:"max_accounts,omitempty" binding:"omitempty,min=1,max=100"`
-	ExpiresAt      *int64 `json:"expires_at"`
-	FallbackMode   string `json:"fallback_mode" binding:"omitempty,oneof=none proxy direct"`
-	BackupProxyID  *int64 `json:"backup_proxy_id"`
-	ExpiryWarnDays int    `json:"expiry_warn_days" binding:"omitempty,min=0"`
+	Name               string `json:"name"`
+	Protocol           string `json:"protocol" binding:"omitempty,oneof=http https socks5 socks5h"`
+	Host               string `json:"host"`
+	Port               int    `json:"port" binding:"omitempty,min=1,max=65535"`
+	Username           string `json:"username"`
+	Password           string `json:"password"`
+	Status             string `json:"status" binding:"omitempty,oneof=active inactive"`
+	MaxAccounts        *int   `json:"max_accounts,omitempty" binding:"omitempty,min=1,max=100"`
+	EnforceMaxAccounts *bool  `json:"enforce_max_accounts,omitempty"`
+	ExpiresAt          *int64 `json:"expires_at"`
+	FallbackMode       string `json:"fallback_mode" binding:"omitempty,oneof=none proxy direct"`
+	BackupProxyID      *int64 `json:"backup_proxy_id"`
+	ExpiryWarnDays     int    `json:"expiry_warn_days" binding:"omitempty,min=0"`
 }
 
 // List handles listing all proxies with pagination
@@ -151,17 +153,18 @@ func (h *ProxyHandler) Create(c *gin.Context) {
 			expiresAt = &t
 		}
 		proxy, err := h.adminService.CreateProxy(ctx, &service.CreateProxyInput{
-			Name:           strings.TrimSpace(req.Name),
-			Protocol:       strings.TrimSpace(req.Protocol),
-			Host:           strings.TrimSpace(req.Host),
-			Port:           req.Port,
-			Username:       strings.TrimSpace(req.Username),
-			Password:       strings.TrimSpace(req.Password),
-			MaxAccounts:    req.MaxAccounts,
-			ExpiresAt:      expiresAt,
-			FallbackMode:   strings.TrimSpace(req.FallbackMode),
-			BackupProxyID:  req.BackupProxyID,
-			ExpiryWarnDays: req.ExpiryWarnDays,
+			Name:               strings.TrimSpace(req.Name),
+			Protocol:           strings.TrimSpace(req.Protocol),
+			Host:               strings.TrimSpace(req.Host),
+			Port:               req.Port,
+			Username:           strings.TrimSpace(req.Username),
+			Password:           strings.TrimSpace(req.Password),
+			MaxAccounts:        req.MaxAccounts,
+			EnforceMaxAccounts: req.EnforceMaxAccounts,
+			ExpiresAt:          expiresAt,
+			FallbackMode:       strings.TrimSpace(req.FallbackMode),
+			BackupProxyID:      req.BackupProxyID,
+			ExpiryWarnDays:     req.ExpiryWarnDays,
 		})
 		if err != nil {
 			return nil, err
@@ -191,18 +194,19 @@ func (h *ProxyHandler) Update(c *gin.Context) {
 		expiresAt = &t
 	}
 	proxy, err := h.adminService.UpdateProxy(c.Request.Context(), proxyID, &service.UpdateProxyInput{
-		Name:           strings.TrimSpace(req.Name),
-		Protocol:       strings.TrimSpace(req.Protocol),
-		Host:           strings.TrimSpace(req.Host),
-		Port:           req.Port,
-		Username:       strings.TrimSpace(req.Username),
-		Password:       strings.TrimSpace(req.Password),
-		Status:         strings.TrimSpace(req.Status),
-		MaxAccounts:    req.MaxAccounts,
-		ExpiresAt:      expiresAt,
-		FallbackMode:   strings.TrimSpace(req.FallbackMode),
-		BackupProxyID:  req.BackupProxyID,
-		ExpiryWarnDays: req.ExpiryWarnDays,
+		Name:               strings.TrimSpace(req.Name),
+		Protocol:           strings.TrimSpace(req.Protocol),
+		Host:               strings.TrimSpace(req.Host),
+		Port:               req.Port,
+		Username:           strings.TrimSpace(req.Username),
+		Password:           strings.TrimSpace(req.Password),
+		Status:             strings.TrimSpace(req.Status),
+		MaxAccounts:        req.MaxAccounts,
+		EnforceMaxAccounts: req.EnforceMaxAccounts,
+		ExpiresAt:          expiresAt,
+		FallbackMode:       strings.TrimSpace(req.FallbackMode),
+		BackupProxyID:      req.BackupProxyID,
+		ExpiryWarnDays:     req.ExpiryWarnDays,
 	})
 	if err != nil {
 		response.ErrorFrom(c, err)

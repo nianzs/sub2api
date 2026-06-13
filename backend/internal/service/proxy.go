@@ -41,21 +41,22 @@ func (e *ProxyValidationError) Error() string {
 }
 
 type Proxy struct {
-	ID             int64
-	Name           string
-	Protocol       string
-	Host           string
-	Port           int
-	Username       string
-	Password       string
-	Status         string
-	MaxAccounts    int
-	CreatedAt      time.Time
-	UpdatedAt      time.Time
-	ExpiresAt      *time.Time
-	FallbackMode   string
-	BackupProxyID  *int64
-	ExpiryWarnDays int
+	ID                 int64
+	Name               string
+	Protocol           string
+	Host               string
+	Port               int
+	Username           string
+	Password           string
+	Status             string
+	MaxAccounts        int
+	EnforceMaxAccounts bool
+	CreatedAt          time.Time
+	UpdatedAt          time.Time
+	ExpiresAt          *time.Time
+	FallbackMode       string
+	BackupProxyID      *int64
+	ExpiryWarnDays     int
 }
 
 func (p *Proxy) IsActive() bool {

@@ -193,6 +193,20 @@ func (_u *ProxyUpdate) AddMaxAccounts(v int) *ProxyUpdate {
 	return _u
 }
 
+// SetEnforceMaxAccounts sets the "enforce_max_accounts" field.
+func (_u *ProxyUpdate) SetEnforceMaxAccounts(v bool) *ProxyUpdate {
+	_u.mutation.SetEnforceMaxAccounts(v)
+	return _u
+}
+
+// SetNillableEnforceMaxAccounts sets the "enforce_max_accounts" field if the given value is not nil.
+func (_u *ProxyUpdate) SetNillableEnforceMaxAccounts(v *bool) *ProxyUpdate {
+	if v != nil {
+		_u.SetEnforceMaxAccounts(*v)
+	}
+	return _u
+}
+
 // SetExpiresAt sets the "expires_at" field.
 func (_u *ProxyUpdate) SetExpiresAt(v time.Time) *ProxyUpdate {
 	_u.mutation.SetExpiresAt(v)
@@ -464,6 +478,9 @@ func (_u *ProxyUpdate) sqlSave(ctx context.Context) (_node int, err error) {
 	if value, ok := _u.mutation.AddedMaxAccounts(); ok {
 		_spec.AddField(proxy.FieldMaxAccounts, field.TypeInt, value)
 	}
+	if value, ok := _u.mutation.EnforceMaxAccounts(); ok {
+		_spec.SetField(proxy.FieldEnforceMaxAccounts, field.TypeBool, value)
+	}
 	if value, ok := _u.mutation.ExpiresAt(); ok {
 		_spec.SetField(proxy.FieldExpiresAt, field.TypeTime, value)
 	}
@@ -734,6 +751,20 @@ func (_u *ProxyUpdateOne) SetNillableMaxAccounts(v *int) *ProxyUpdateOne {
 // AddMaxAccounts adds value to the "max_accounts" field.
 func (_u *ProxyUpdateOne) AddMaxAccounts(v int) *ProxyUpdateOne {
 	_u.mutation.AddMaxAccounts(v)
+	return _u
+}
+
+// SetEnforceMaxAccounts sets the "enforce_max_accounts" field.
+func (_u *ProxyUpdateOne) SetEnforceMaxAccounts(v bool) *ProxyUpdateOne {
+	_u.mutation.SetEnforceMaxAccounts(v)
+	return _u
+}
+
+// SetNillableEnforceMaxAccounts sets the "enforce_max_accounts" field if the given value is not nil.
+func (_u *ProxyUpdateOne) SetNillableEnforceMaxAccounts(v *bool) *ProxyUpdateOne {
+	if v != nil {
+		_u.SetEnforceMaxAccounts(*v)
+	}
 	return _u
 }
 
@@ -1037,6 +1068,9 @@ func (_u *ProxyUpdateOne) sqlSave(ctx context.Context) (_node *Proxy, err error)
 	}
 	if value, ok := _u.mutation.AddedMaxAccounts(); ok {
 		_spec.AddField(proxy.FieldMaxAccounts, field.TypeInt, value)
+	}
+	if value, ok := _u.mutation.EnforceMaxAccounts(); ok {
+		_spec.SetField(proxy.FieldEnforceMaxAccounts, field.TypeBool, value)
 	}
 	if value, ok := _u.mutation.ExpiresAt(); ok {
 		_spec.SetField(proxy.FieldExpiresAt, field.TypeTime, value)
