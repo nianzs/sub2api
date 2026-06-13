@@ -2050,7 +2050,7 @@ func TestApplyKiroReverseScalingUsage_NoCredits(t *testing.T) {
 		KiroCredits:  0,
 	}
 	scaled := applyKiroReverseScalingUsage(orig, KiroRequestContext{
-		ReverseScalingTargetUSD: 0.1122,
+		ReverseScalingTargetUSD: 0.04,
 		ReverseScalingPrices:    [4]float64{5.0, 25.0, 6.25, 0.5},
 	})
 	require.Equal(t, orig.InputTokens, scaled.InputTokens)
@@ -2067,7 +2067,7 @@ func TestApplyKiroReverseScalingUsage_KOutOfRange(t *testing.T) {
 		KiroCredits:          1000000, // 极端值
 	}
 	scaled := applyKiroReverseScalingUsage(orig, KiroRequestContext{
-		ReverseScalingTargetUSD: 0.1122,
+		ReverseScalingTargetUSD: 0.04,
 		ReverseScalingPrices:    [4]float64{5.0, 25.0, 6.25, 0.5},
 	})
 	// K 异常时应该退回原值
@@ -2080,7 +2080,7 @@ func TestApplyKiroReverseScalingUsage_KOutOfRange(t *testing.T) {
 func TestApplyKiroReverseScalingUsage_ZeroTokensReturnsOriginal(t *testing.T) {
 	orig := Usage{KiroCredits: 5.0}
 	scaled := applyKiroReverseScalingUsage(orig, KiroRequestContext{
-		ReverseScalingTargetUSD: 0.1122,
+		ReverseScalingTargetUSD: 0.04,
 		ReverseScalingPrices:    [4]float64{5.0, 25.0, 6.25, 0.5},
 	})
 	require.Equal(t, orig, scaled)
