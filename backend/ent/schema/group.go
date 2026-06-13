@@ -179,6 +179,10 @@ func (Group) Fields() []ent.Field {
 			SchemaType(map[string]string{dialect.Postgres: "decimal(5,4)"}).
 			Default(1.0).
 			Comment("Kiro 模拟缓存生效比例，范围 0-1（仅 kiro 分组生效）"),
+		field.Float("kiro_cache_force_ratio_center").
+			SchemaType(map[string]string{dialect.Postgres: "decimal(5,4)"}).
+			Default(0).
+			Comment("Kiro 缓存强制比例中位数（0=禁用）。>0 时把模拟缓存分布重塑成 Anthropic-like 形态（input 极小、cache_read 占大头），纯展示口径美化，不改变真实计费总额"),
 	}
 }
 

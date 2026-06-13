@@ -74,6 +74,11 @@ type Group struct {
 	KiroStickySessionTTLSeconds int
 	KiroCacheEmulationRatio     float64
 
+	// Kiro 缓存强制比例中位数（仅 platform=kiro 生效）。
+	// 0 = 禁用；> 0 时把模拟缓存分布重塑成 Anthropic-like 形态（input 极小、
+	// cache_read 占大头），纯展示口径美化，不改变真实计费总额。
+	KiroCacheForceRatioCenter float64
+
 	CreatedAt time.Time
 	UpdatedAt time.Time
 
@@ -163,8 +168,49 @@ func normalizeKiroCacheEmulationFields(g *Group) {
 	g.KiroCacheEmulationRatio = normalizeKiroCacheEmulationRatio(g.KiroCacheEmulationRatio)
 }
 
+// kiroCacheForceRatioCenterMaxCap 是 KiroCacheForceRatioCenter 的安全上限。
+const kiroCacheForceRatioCenterMaxCap = 0.99
+
+// EffectiveKiroCacheForceRatioCenter 返回当前 group 实际使用的缓存强制比例中位数。
+// 仅当 Platform = kiro 且配置 > 0 时返回该值（含上限 cap），否则返回 0。
+func (g *Group) EffectiveKiroCacheForceRatioCenter() float64 {
+	if g == nil || g.Platform != PlatformKiro {
+		return 0
+	}
+	v := g.KiroCacheForceRatioCenter
+	if v <= 0 {
+		return 0
+	}
+	if v > kiroCacheForceRatioCenterMaxCap {
+		return kiroCacheForceRatioCenterMaxCap
+	}
+	return v
+}
+
+// KiroCacheForceEnabled 报告该 group 是否启用了缓存分布强制重塑。
+func (g *Group) KiroCacheForceEnabled() bool {
+	return g.EffectiveKiroCacheForceRatioCenter() > 0
+}
+
+func normalizeKiroCacheForceFields(g *Group) {
+	if g == nil {
+		return
+	}
+	if g.Platform != PlatformKiro {
+		g.KiroCacheForceRatioCenter = 0
+		return
+	}
+	if g.KiroCacheForceRatioCenter < 0 {
+		g.KiroCacheForceRatioCenter = 0
+	}
+	if g.KiroCacheForceRatioCenter > kiroCacheForceRatioCenterMaxCap {
+		g.KiroCacheForceRatioCenter = kiroCacheForceRatioCenterMaxCap
+	}
+}
+
 func NormalizeGroupRuntimeFields(g *Group) {
 	normalizeKiroCacheEmulationFields(g)
+	normalizeKiroCacheForceFields(g)
 }
 
 func (g *Group) IsActive() bool {

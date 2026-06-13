@@ -551,6 +551,20 @@ func (_c *GroupCreate) SetNillableKiroCacheEmulationRatio(v *float64) *GroupCrea
 	return _c
 }
 
+// SetKiroCacheForceRatioCenter sets the "kiro_cache_force_ratio_center" field.
+func (_c *GroupCreate) SetKiroCacheForceRatioCenter(v float64) *GroupCreate {
+	_c.mutation.SetKiroCacheForceRatioCenter(v)
+	return _c
+}
+
+// SetNillableKiroCacheForceRatioCenter sets the "kiro_cache_force_ratio_center" field if the given value is not nil.
+func (_c *GroupCreate) SetNillableKiroCacheForceRatioCenter(v *float64) *GroupCreate {
+	if v != nil {
+		_c.SetKiroCacheForceRatioCenter(*v)
+	}
+	return _c
+}
+
 // AddAPIKeyIDs adds the "api_keys" edge to the APIKey entity by IDs.
 func (_c *GroupCreate) AddAPIKeyIDs(ids ...int64) *GroupCreate {
 	_c.mutation.AddAPIKeyIDs(ids...)
@@ -792,6 +806,10 @@ func (_c *GroupCreate) defaults() error {
 		v := group.DefaultKiroCacheEmulationRatio
 		_c.mutation.SetKiroCacheEmulationRatio(v)
 	}
+	if _, ok := _c.mutation.KiroCacheForceRatioCenter(); !ok {
+		v := group.DefaultKiroCacheForceRatioCenter
+		_c.mutation.SetKiroCacheForceRatioCenter(v)
+	}
 	return nil
 }
 
@@ -905,6 +923,9 @@ func (_c *GroupCreate) check() error {
 	}
 	if _, ok := _c.mutation.KiroCacheEmulationRatio(); !ok {
 		return &ValidationError{Name: "kiro_cache_emulation_ratio", err: errors.New(`ent: missing required field "Group.kiro_cache_emulation_ratio"`)}
+	}
+	if _, ok := _c.mutation.KiroCacheForceRatioCenter(); !ok {
+		return &ValidationError{Name: "kiro_cache_force_ratio_center", err: errors.New(`ent: missing required field "Group.kiro_cache_force_ratio_center"`)}
 	}
 	return nil
 }
@@ -1088,6 +1109,10 @@ func (_c *GroupCreate) createSpec() (*Group, *sqlgraph.CreateSpec) {
 	if value, ok := _c.mutation.KiroCacheEmulationRatio(); ok {
 		_spec.SetField(group.FieldKiroCacheEmulationRatio, field.TypeFloat64, value)
 		_node.KiroCacheEmulationRatio = value
+	}
+	if value, ok := _c.mutation.KiroCacheForceRatioCenter(); ok {
+		_spec.SetField(group.FieldKiroCacheForceRatioCenter, field.TypeFloat64, value)
+		_node.KiroCacheForceRatioCenter = value
 	}
 	if nodes := _c.mutation.APIKeysIDs(); len(nodes) > 0 {
 		edge := &sqlgraph.EdgeSpec{
@@ -1857,6 +1882,24 @@ func (u *GroupUpsert) AddKiroCacheEmulationRatio(v float64) *GroupUpsert {
 	return u
 }
 
+// SetKiroCacheForceRatioCenter sets the "kiro_cache_force_ratio_center" field.
+func (u *GroupUpsert) SetKiroCacheForceRatioCenter(v float64) *GroupUpsert {
+	u.Set(group.FieldKiroCacheForceRatioCenter, v)
+	return u
+}
+
+// UpdateKiroCacheForceRatioCenter sets the "kiro_cache_force_ratio_center" field to the value that was provided on create.
+func (u *GroupUpsert) UpdateKiroCacheForceRatioCenter() *GroupUpsert {
+	u.SetExcluded(group.FieldKiroCacheForceRatioCenter)
+	return u
+}
+
+// AddKiroCacheForceRatioCenter adds v to the "kiro_cache_force_ratio_center" field.
+func (u *GroupUpsert) AddKiroCacheForceRatioCenter(v float64) *GroupUpsert {
+	u.Add(group.FieldKiroCacheForceRatioCenter, v)
+	return u
+}
+
 // UpdateNewValues updates the mutable fields using the new values that were set on create.
 // Using this option is equivalent to using:
 //
@@ -2613,6 +2656,27 @@ func (u *GroupUpsertOne) AddKiroCacheEmulationRatio(v float64) *GroupUpsertOne {
 func (u *GroupUpsertOne) UpdateKiroCacheEmulationRatio() *GroupUpsertOne {
 	return u.Update(func(s *GroupUpsert) {
 		s.UpdateKiroCacheEmulationRatio()
+	})
+}
+
+// SetKiroCacheForceRatioCenter sets the "kiro_cache_force_ratio_center" field.
+func (u *GroupUpsertOne) SetKiroCacheForceRatioCenter(v float64) *GroupUpsertOne {
+	return u.Update(func(s *GroupUpsert) {
+		s.SetKiroCacheForceRatioCenter(v)
+	})
+}
+
+// AddKiroCacheForceRatioCenter adds v to the "kiro_cache_force_ratio_center" field.
+func (u *GroupUpsertOne) AddKiroCacheForceRatioCenter(v float64) *GroupUpsertOne {
+	return u.Update(func(s *GroupUpsert) {
+		s.AddKiroCacheForceRatioCenter(v)
+	})
+}
+
+// UpdateKiroCacheForceRatioCenter sets the "kiro_cache_force_ratio_center" field to the value that was provided on create.
+func (u *GroupUpsertOne) UpdateKiroCacheForceRatioCenter() *GroupUpsertOne {
+	return u.Update(func(s *GroupUpsert) {
+		s.UpdateKiroCacheForceRatioCenter()
 	})
 }
 
@@ -3538,6 +3602,27 @@ func (u *GroupUpsertBulk) AddKiroCacheEmulationRatio(v float64) *GroupUpsertBulk
 func (u *GroupUpsertBulk) UpdateKiroCacheEmulationRatio() *GroupUpsertBulk {
 	return u.Update(func(s *GroupUpsert) {
 		s.UpdateKiroCacheEmulationRatio()
+	})
+}
+
+// SetKiroCacheForceRatioCenter sets the "kiro_cache_force_ratio_center" field.
+func (u *GroupUpsertBulk) SetKiroCacheForceRatioCenter(v float64) *GroupUpsertBulk {
+	return u.Update(func(s *GroupUpsert) {
+		s.SetKiroCacheForceRatioCenter(v)
+	})
+}
+
+// AddKiroCacheForceRatioCenter adds v to the "kiro_cache_force_ratio_center" field.
+func (u *GroupUpsertBulk) AddKiroCacheForceRatioCenter(v float64) *GroupUpsertBulk {
+	return u.Update(func(s *GroupUpsert) {
+		s.AddKiroCacheForceRatioCenter(v)
+	})
+}
+
+// UpdateKiroCacheForceRatioCenter sets the "kiro_cache_force_ratio_center" field to the value that was provided on create.
+func (u *GroupUpsertBulk) UpdateKiroCacheForceRatioCenter() *GroupUpsertBulk {
+	return u.Update(func(s *GroupUpsert) {
+		s.UpdateKiroCacheForceRatioCenter()
 	})
 }
 
