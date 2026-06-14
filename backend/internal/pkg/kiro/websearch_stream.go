@@ -179,6 +179,57 @@ func AdjustSSEChunk(chunk []byte, offset int) ([]byte, bool) {
 	return filterSSEChunk(chunk, -1, offset)
 }
 
+// RewriteFinalKiroCredits 把缓冲 chunks 里 message_delta 事件的
+// usage._sub2api_kiro_credits 设为 totalCredits（所有轮次累计总额）。多轮 web search 时
+// 每轮都会产生一个 message_delta（只有最后一轮会转发给客户端/计费层），但每个 message_delta
+// 只带本轮 credits；本函数在最后一轮转发前把它替换成累计总额，确保 gateway 捕获到的
+// kiro_credits 是全部轮次之和而非仅最后一轮。
+// 注意：本函数仅在 totalCredits>0（Kiro PRO 路径）时被调用，故对带 usage 的 message_delta
+// 一律**注入或覆写**该字段——若最后一轮无 metering 帧（本轮 credits=0）导致 message_delta
+// 缺该字段，仍要把前几轮累计的总额注入进去，否则计费层捕获到 0 → 漏计费。
+// totalCredits<=0 时原样返回（无 Kiro credits 场景，如非 PRO 账号）。
+func RewriteFinalKiroCredits(chunks [][]byte, totalCredits float64) [][]byte {
+	if totalCredits <= 0 {
+		return chunks
+	}
+	for ci, chunk := range chunks {
+		lines := strings.Split(string(chunk), "\n")
+		changed := false
+		for li, line := range lines {
+			if !strings.HasPrefix(line, "data: ") {
+				continue
+			}
+			payload := strings.TrimSpace(strings.TrimPrefix(line, "data: "))
+			if payload == "" || payload == "[DONE]" {
+				continue
+			}
+			var event map[string]any
+			if err := json.Unmarshal([]byte(payload), &event); err != nil {
+				continue
+			}
+			if eventType, _ := event["type"].(string); eventType != "message_delta" {
+				continue
+			}
+			usage, ok := event["usage"].(map[string]any)
+			if !ok {
+				continue
+			}
+			// 注入或覆写为累计总额（缺字段时注入，避免最后一轮零 credits 导致累计丢失）。
+			usage["_sub2api_kiro_credits"] = totalCredits
+			rewritten, err := json.Marshal(event)
+			if err != nil {
+				continue
+			}
+			lines[li] = "data: " + string(rewritten)
+			changed = true
+		}
+		if changed {
+			chunks[ci] = []byte(strings.Join(lines, "\n"))
+		}
+	}
+	return chunks
+}
+
 func MaxContentBlockIndex(chunks [][]byte) int {
 	maxIndex := -1
 	for _, chunk := range chunks {

@@ -97,6 +97,10 @@ type Group struct {
 	KiroStickySessionTTLSeconds int `json:"kiro_sticky_session_ttl_seconds,omitempty"`
 	// Kiro 模拟缓存生效比例，范围 0-1（仅 kiro 分组生效）
 	KiroCacheEmulationRatio float64 `json:"kiro_cache_emulation_ratio,omitempty"`
+	// Kiro 反向 token 缩放锚定单价：每 credit 对应 USD 余额（0=禁用）
+	KiroCreditTargetUsd float64 `json:"kiro_credit_target_usd,omitempty"`
+	// Kiro 缓存强制比例中位数（0=禁用）。>0 时把模拟缓存分布重塑成 Anthropic-like 形态（input 极小、cache_read 占大头）；配合 credit 反向缩放计费时为纯展示口径，不改变最终扣费（=credits×单价）
+	KiroCacheForceRatioCenter float64 `json:"kiro_cache_force_ratio_center,omitempty"`
 	// Edges holds the relations/edges for other nodes in the graph.
 	// The values are being populated by the GroupQuery when eager-loading is set.
 	Edges        GroupEdges `json:"edges"`
@@ -207,7 +211,7 @@ func (*Group) scanValues(columns []string) ([]any, error) {
 			values[i] = new([]byte)
 		case group.FieldIsExclusive, group.FieldAllowImageGeneration, group.FieldImageRateIndependent, group.FieldClaudeCodeOnly, group.FieldModelRoutingEnabled, group.FieldMcpXMLInject, group.FieldAllowMessagesDispatch, group.FieldRequireOauthOnly, group.FieldRequirePrivacySet, group.FieldKiroCacheEmulationEnabled, group.FieldKiroAutoStickyEnabled:
 			values[i] = new(sql.NullBool)
-		case group.FieldRateMultiplier, group.FieldDailyLimitUsd, group.FieldWeeklyLimitUsd, group.FieldMonthlyLimitUsd, group.FieldImageRateMultiplier, group.FieldImagePrice1k, group.FieldImagePrice2k, group.FieldImagePrice4k, group.FieldKiroCacheEmulationRatio:
+		case group.FieldRateMultiplier, group.FieldDailyLimitUsd, group.FieldWeeklyLimitUsd, group.FieldMonthlyLimitUsd, group.FieldImageRateMultiplier, group.FieldImagePrice1k, group.FieldImagePrice2k, group.FieldImagePrice4k, group.FieldKiroCacheEmulationRatio, group.FieldKiroCreditTargetUsd, group.FieldKiroCacheForceRatioCenter:
 			values[i] = new(sql.NullFloat64)
 		case group.FieldID, group.FieldDefaultValidityDays, group.FieldFallbackGroupID, group.FieldFallbackGroupIDOnInvalidRequest, group.FieldSortOrder, group.FieldRpmLimit, group.FieldKiroStickySessionTTLSeconds:
 			values[i] = new(sql.NullInt64)
@@ -488,6 +492,18 @@ func (_m *Group) assignValues(columns []string, values []any) error {
 			} else if value.Valid {
 				_m.KiroCacheEmulationRatio = value.Float64
 			}
+		case group.FieldKiroCreditTargetUsd:
+			if value, ok := values[i].(*sql.NullFloat64); !ok {
+				return fmt.Errorf("unexpected type %T for field kiro_credit_target_usd", values[i])
+			} else if value.Valid {
+				_m.KiroCreditTargetUsd = value.Float64
+			}
+		case group.FieldKiroCacheForceRatioCenter:
+			if value, ok := values[i].(*sql.NullFloat64); !ok {
+				return fmt.Errorf("unexpected type %T for field kiro_cache_force_ratio_center", values[i])
+			} else if value.Valid {
+				_m.KiroCacheForceRatioCenter = value.Float64
+			}
 		default:
 			_m.selectValues.Set(columns[i], values[i])
 		}
@@ -700,6 +716,12 @@ func (_m *Group) String() string {
 	builder.WriteString(", ")
 	builder.WriteString("kiro_cache_emulation_ratio=")
 	builder.WriteString(fmt.Sprintf("%v", _m.KiroCacheEmulationRatio))
+	builder.WriteString(", ")
+	builder.WriteString("kiro_credit_target_usd=")
+	builder.WriteString(fmt.Sprintf("%v", _m.KiroCreditTargetUsd))
+	builder.WriteString(", ")
+	builder.WriteString("kiro_cache_force_ratio_center=")
+	builder.WriteString(fmt.Sprintf("%v", _m.KiroCacheForceRatioCenter))
 	builder.WriteByte(')')
 	return builder.String()
 }

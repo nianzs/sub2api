@@ -125,6 +125,10 @@ type Group struct {
 	KiroAutoStickyEnabled       bool    `json:"kiro_auto_sticky_enabled"`
 	KiroStickySessionTTLSeconds int     `json:"kiro_sticky_session_ttl_seconds"`
 	KiroCacheEmulationRatio     float64 `json:"kiro_cache_emulation_ratio"`
+	KiroCacheForceRatioCenter   float64 `json:"kiro_cache_force_ratio_center"`
+
+	// Kiro 反向 token 缩放：每 credit 对应 USD 余额（0=禁用，仅 platform=kiro 生效）
+	KiroCreditTargetUSD float64 `json:"kiro_credit_target_usd"`
 
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`

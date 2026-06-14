@@ -550,6 +550,10 @@ type ClaudeUsage struct {
 	CacheCreation5mTokens    int // 5分钟缓存创建token（来自嵌套 cache_creation 对象）
 	CacheCreation1hTokens    int // 1小时缓存创建token（来自嵌套 cache_creation 对象）
 	ImageOutputTokens        int `json:"image_output_tokens,omitempty"`
+
+	// KiroCredits 来自 Kiro 上游 meteringEvent.usage（仅 Kiro 平台有值）。
+	// 透传给 usage_logs.kiro_credits 字段做事后对账用。
+	KiroCredits float64 `json:"-"`
 }
 
 // ForwardResult 转发结果
@@ -5935,6 +5939,7 @@ func (s *GatewayService) handleStreamingResponseAnthropicAPIKeyPassthrough(
 
 			if !clientDisconnected {
 				restored := string(reverseToolNamesIfPresent(c, []byte(line)))
+				restored = stripSub2apiInternalUsageFields(restored)
 				if _, err := io.WriteString(w, restored); err != nil {
 					clientDisconnected = true
 					logger.LegacyPrintf("service.gateway", "[Anthropic passthrough] Client disconnected during streaming, continue draining upstream for usage: account=%d", account.ID)
@@ -5997,6 +6002,24 @@ func extractAnthropicSSEDataLine(line string) (string, bool) {
 	return line[start:], true
 }
 
+// stripSub2apiInternalUsageFields 从出站 SSE 行中移除 sub2api 内部 usage 字段
+// （目前只有 _sub2api_kiro_credits：translator → 计费层的内部通道），
+// 确保不透传给客户端。非匹配行零开销。
+func stripSub2apiInternalUsageFields(line string) string {
+	if !strings.Contains(line, "_sub2api_kiro_credits") {
+		return line
+	}
+	data, ok := extractAnthropicSSEDataLine(line)
+	if !ok {
+		return line
+	}
+	cleaned, err := sjson.Delete(data, "usage._sub2api_kiro_credits")
+	if err != nil {
+		return line
+	}
+	return line[:len(line)-len(data)] + cleaned
+}
+
 func (s *GatewayService) parseSSEUsagePassthrough(data string, usage *ClaudeUsage) {
 	if usage == nil || data == "" || data == "[DONE]" {
 		return
@@ -6042,6 +6065,11 @@ func (s *GatewayService) parseSSEUsagePassthrough(data string, usage *ClaudeUsag
 			}
 			if cc1h.Exists() && cc1h.Int() > 0 {
 				usage.CacheCreation1hTokens = int(cc1h.Int())
+			}
+
+			// sub2api 内部通道：Kiro 反向缩放透传 credits（仅 Kiro 平台）
+			if v := deltaUsage.Get("_sub2api_kiro_credits"); v.Exists() && v.Float() > 0 {
+				usage.KiroCredits = v.Float()
 			}
 		}
 	}
@@ -8121,6 +8149,15 @@ func (s *GatewayService) handleStreamingResponse(ctx context.Context, resp *http
 		}
 
 		usagePatch := s.extractSSEUsagePatch(event)
+		// usagePatch 已捕获 _sub2api_kiro_credits（内部通道），转发客户端前剥离。
+		if eventType == "message_delta" {
+			if u, ok := event["usage"].(map[string]any); ok {
+				if _, exists := u["_sub2api_kiro_credits"]; exists {
+					delete(u, "_sub2api_kiro_credits")
+					eventChanged = true
+				}
+			}
+		}
 		if anthropicStreamEventIsTerminal(eventName, dataLine) {
 			sawTerminalEvent = true
 		}
@@ -8312,6 +8349,9 @@ type sseUsagePatch struct {
 	hasCacheCreation5m       bool
 	cacheCreation1hTokens    int
 	hasCacheCreation1h       bool
+	// Kiro 反向缩放：sub2api 内部通道，从 _sub2api_kiro_credits 解析
+	kiroCredits    float64
+	hasKiroCredits bool
 }
 
 func (s *GatewayService) extractSSEUsagePatch(event map[string]any) *sseUsagePatch {
@@ -8386,6 +8426,11 @@ func (s *GatewayService) extractSSEUsagePatch(event map[string]any) *sseUsagePat
 				patch.hasCacheCreation1h = true
 			}
 		}
+		// sub2api Kiro 反向缩放透传字段
+		if v, ok := parseSSEUsageFloat(usageObj["_sub2api_kiro_credits"]); ok && v > 0 {
+			patch.kiroCredits = v
+			patch.hasKiroCredits = true
+		}
 		return patch
 	}
 
@@ -8415,6 +8460,28 @@ func mergeSSEUsagePatch(usage *ClaudeUsage, patch *sseUsagePatch) {
 	if patch.hasCacheCreation1h {
 		usage.CacheCreation1hTokens = patch.cacheCreation1hTokens
 	}
+	if patch.hasKiroCredits {
+		usage.KiroCredits = patch.kiroCredits
+	}
+}
+
+// parseSSEUsageFloat 解析 SSE usage 字段中的浮点数（如 _sub2api_kiro_credits）。
+func parseSSEUsageFloat(value any) (float64, bool) {
+	switch v := value.(type) {
+	case float64:
+		return v, true
+	case float32:
+		return float64(v), true
+	case int:
+		return float64(v), true
+	case int64:
+		return float64(v), true
+	case json.Number:
+		if f, err := v.Float64(); err == nil {
+			return f, true
+		}
+	}
+	return 0, false
 }
 
 func parseSSEUsageInt(value any) (int, bool) {
@@ -8852,6 +8919,10 @@ func buildUsageBillingCommand(requestID string, usageLog *UsageLog, p *postUsage
 		cmd.APIKeyRateLimitCost = p.Cost.ActualCost
 	}
 	if p.shouldUpdateAccountQuota() {
+		// 账号侧配额成本用 AccountRateMultiplier（账号级独立倍率，与用户侧计费无关）。
+		// Kiro credit 直接计费已把 TotalCost 置为 credits×target_usd（最终价，已绕过
+		// group/user 倍率与渠道定价）；这里再乘的是账号侧倍率（默认 1），与普通计费
+		// "账号侧用 account 倍率、用户侧用 ActualCost" 的关系一致，非重复叠加。
 		cmd.AccountQuotaCost = p.Cost.TotalCost * p.AccountRateMultiplier
 	}
 
@@ -9193,6 +9264,44 @@ type recordUsageCoreInput struct {
 
 // recordUsageCore 是 RecordUsage 和 RecordUsageWithLongContext 的统一实现。
 // LongContextThreshold > 0 时 Token 计费回退走 CalculateCostWithLongContext。
+// applyKiroCreditDirectCost 把成本覆写为 Kiro credits × target_usd。
+// Kiro PRO 账号按 credits 计费，kiro_credit_target_usd 语义为"每 credit 最终扣费 USD"，
+// 是最终价，不再叠加 group/user rate multiplier 或 channel pricing。
+// 按比例缩放各成本子项以保持 sum(子项)==TotalCost 的不变式（供展示/账号统计），
+// 再把 TotalCost 与 ActualCost 都置为 target。credits 或 targetUSD<=0 时不动。
+// kiroCreditsPerRequestSanityCap 是单请求 credits 的安全上限。正常单请求 credits 为
+// 个位数；远超此值视为上游 metering 异常或被篡改，clamp 并打 ALERT，避免一次请求按
+// credits×target 扣掉用户巨额余额（反向缩放路径有 K∈[0.1,5] 围栏，直接计费路径需对等防护）。
+const kiroCreditsPerRequestSanityCap = 500.0
+
+func applyKiroCreditDirectCost(cost *CostBreakdown, credits, targetUSD float64) {
+	if cost == nil || credits <= 0 || targetUSD <= 0 {
+		return
+	}
+	if credits > kiroCreditsPerRequestSanityCap {
+		logger.LegacyPrintf("service.gateway", "ALERT kiro credits over per-request sanity cap, clamped: credits=%.4f cap=%.0f target_usd=%.4f", credits, kiroCreditsPerRequestSanityCap, targetUSD)
+		credits = kiroCreditsPerRequestSanityCap
+	}
+	target := credits * targetUSD
+	if cost.TotalCost > 0 {
+		ratio := target / cost.TotalCost
+		cost.InputCost *= ratio
+		cost.OutputCost *= ratio
+		cost.ImageOutputCost *= ratio
+		cost.CacheCreationCost *= ratio
+		cost.CacheReadCost *= ratio
+	} else {
+		// 无 token 成本兜底：全部归到 input 子项，保持 sum==Total。
+		cost.InputCost = target
+		cost.OutputCost = 0
+		cost.ImageOutputCost = 0
+		cost.CacheCreationCost = 0
+		cost.CacheReadCost = 0
+	}
+	cost.TotalCost = target
+	cost.ActualCost = target
+}
+
 func (s *GatewayService) recordUsageCore(ctx context.Context, input *recordUsageCoreInput, opts *recordUsageOpts) error {
 	result := input.Result
 	apiKey := input.APIKey
@@ -9247,6 +9356,14 @@ func (s *GatewayService) recordUsageCore(ctx context.Context, input *recordUsage
 	// 计算费用
 	opts.IsKiroAccount = account != nil && account.Platform == PlatformKiro
 	cost := s.calculateRecordUsageCost(ctx, result, apiKey, billingModel, multiplier, imageMultiplier, opts)
+
+	// Kiro credit 直接计费：group 配了 kiro_credit_target_usd 时，最终扣费严格等于
+	// credits × target_usd，绕过 rate multiplier / channel pricing 的二次改写
+	// （反向缩放后的 token 仅用于展示口径，真实成本以 Kiro credits 为准）。
+	if cost != nil && opts.IsKiroAccount && apiKey.Group != nil &&
+		apiKey.Group.KiroReverseScalingEnabled() && result.Usage.KiroCredits > 0 {
+		applyKiroCreditDirectCost(cost, result.Usage.KiroCredits, apiKey.Group.EffectiveKiroCreditTargetUSD())
+	}
 
 	// 判断计费方式：订阅模式 vs 余额模式
 	isSubscriptionBilling := subscription != nil && apiKey.Group != nil && apiKey.Group.IsSubscriptionType()
@@ -9510,6 +9627,7 @@ func (s *GatewayService) buildRecordUsageLog(
 		CacheReadTokens:       result.Usage.CacheReadInputTokens,
 		CacheCreation5mTokens: result.Usage.CacheCreation5mTokens,
 		CacheCreation1hTokens: result.Usage.CacheCreation1hTokens,
+		KiroCredits:           kiroCreditsPtr(result.Usage.KiroCredits),
 		ImageOutputTokens:     result.Usage.ImageOutputTokens,
 		RateMultiplier:        multiplier,
 		AccountRateMultiplier: &accountRateMultiplier,

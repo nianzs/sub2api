@@ -818,6 +818,8 @@ func groupEntityToService(g *dbent.Group) *service.Group {
 		KiroAutoStickyEnabled:           g.KiroAutoStickyEnabled,
 		KiroStickySessionTTLSeconds:     g.KiroStickySessionTTLSeconds,
 		KiroCacheEmulationRatio:         g.KiroCacheEmulationRatio,
+		KiroCreditTargetUSD:             g.KiroCreditTargetUsd,
+		KiroCacheForceRatioCenter:       g.KiroCacheForceRatioCenter,
 		CreatedAt:                       g.CreatedAt,
 		UpdatedAt:                       g.UpdatedAt,
 	}

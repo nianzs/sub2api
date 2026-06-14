@@ -230,6 +230,16 @@ func KiroCacheEmulationRatio(v float64) predicate.Group {
 	return predicate.Group(sql.FieldEQ(FieldKiroCacheEmulationRatio, v))
 }
 
+// KiroCreditTargetUsd applies equality check predicate on the "kiro_credit_target_usd" field. It's identical to KiroCreditTargetUsdEQ.
+func KiroCreditTargetUsd(v float64) predicate.Group {
+	return predicate.Group(sql.FieldEQ(FieldKiroCreditTargetUsd, v))
+}
+
+// KiroCacheForceRatioCenter applies equality check predicate on the "kiro_cache_force_ratio_center" field. It's identical to KiroCacheForceRatioCenterEQ.
+func KiroCacheForceRatioCenter(v float64) predicate.Group {
+	return predicate.Group(sql.FieldEQ(FieldKiroCacheForceRatioCenter, v))
+}
+
 // CreatedAtEQ applies the EQ predicate on the "created_at" field.
 func CreatedAtEQ(v time.Time) predicate.Group {
 	return predicate.Group(sql.FieldEQ(FieldCreatedAt, v))
@@ -1558,6 +1568,86 @@ func KiroCacheEmulationRatioLT(v float64) predicate.Group {
 // KiroCacheEmulationRatioLTE applies the LTE predicate on the "kiro_cache_emulation_ratio" field.
 func KiroCacheEmulationRatioLTE(v float64) predicate.Group {
 	return predicate.Group(sql.FieldLTE(FieldKiroCacheEmulationRatio, v))
+}
+
+// KiroCreditTargetUsdEQ applies the EQ predicate on the "kiro_credit_target_usd" field.
+func KiroCreditTargetUsdEQ(v float64) predicate.Group {
+	return predicate.Group(sql.FieldEQ(FieldKiroCreditTargetUsd, v))
+}
+
+// KiroCreditTargetUsdNEQ applies the NEQ predicate on the "kiro_credit_target_usd" field.
+func KiroCreditTargetUsdNEQ(v float64) predicate.Group {
+	return predicate.Group(sql.FieldNEQ(FieldKiroCreditTargetUsd, v))
+}
+
+// KiroCreditTargetUsdIn applies the In predicate on the "kiro_credit_target_usd" field.
+func KiroCreditTargetUsdIn(vs ...float64) predicate.Group {
+	return predicate.Group(sql.FieldIn(FieldKiroCreditTargetUsd, vs...))
+}
+
+// KiroCreditTargetUsdNotIn applies the NotIn predicate on the "kiro_credit_target_usd" field.
+func KiroCreditTargetUsdNotIn(vs ...float64) predicate.Group {
+	return predicate.Group(sql.FieldNotIn(FieldKiroCreditTargetUsd, vs...))
+}
+
+// KiroCreditTargetUsdGT applies the GT predicate on the "kiro_credit_target_usd" field.
+func KiroCreditTargetUsdGT(v float64) predicate.Group {
+	return predicate.Group(sql.FieldGT(FieldKiroCreditTargetUsd, v))
+}
+
+// KiroCreditTargetUsdGTE applies the GTE predicate on the "kiro_credit_target_usd" field.
+func KiroCreditTargetUsdGTE(v float64) predicate.Group {
+	return predicate.Group(sql.FieldGTE(FieldKiroCreditTargetUsd, v))
+}
+
+// KiroCreditTargetUsdLT applies the LT predicate on the "kiro_credit_target_usd" field.
+func KiroCreditTargetUsdLT(v float64) predicate.Group {
+	return predicate.Group(sql.FieldLT(FieldKiroCreditTargetUsd, v))
+}
+
+// KiroCreditTargetUsdLTE applies the LTE predicate on the "kiro_credit_target_usd" field.
+func KiroCreditTargetUsdLTE(v float64) predicate.Group {
+	return predicate.Group(sql.FieldLTE(FieldKiroCreditTargetUsd, v))
+}
+
+// KiroCacheForceRatioCenterEQ applies the EQ predicate on the "kiro_cache_force_ratio_center" field.
+func KiroCacheForceRatioCenterEQ(v float64) predicate.Group {
+	return predicate.Group(sql.FieldEQ(FieldKiroCacheForceRatioCenter, v))
+}
+
+// KiroCacheForceRatioCenterNEQ applies the NEQ predicate on the "kiro_cache_force_ratio_center" field.
+func KiroCacheForceRatioCenterNEQ(v float64) predicate.Group {
+	return predicate.Group(sql.FieldNEQ(FieldKiroCacheForceRatioCenter, v))
+}
+
+// KiroCacheForceRatioCenterIn applies the In predicate on the "kiro_cache_force_ratio_center" field.
+func KiroCacheForceRatioCenterIn(vs ...float64) predicate.Group {
+	return predicate.Group(sql.FieldIn(FieldKiroCacheForceRatioCenter, vs...))
+}
+
+// KiroCacheForceRatioCenterNotIn applies the NotIn predicate on the "kiro_cache_force_ratio_center" field.
+func KiroCacheForceRatioCenterNotIn(vs ...float64) predicate.Group {
+	return predicate.Group(sql.FieldNotIn(FieldKiroCacheForceRatioCenter, vs...))
+}
+
+// KiroCacheForceRatioCenterGT applies the GT predicate on the "kiro_cache_force_ratio_center" field.
+func KiroCacheForceRatioCenterGT(v float64) predicate.Group {
+	return predicate.Group(sql.FieldGT(FieldKiroCacheForceRatioCenter, v))
+}
+
+// KiroCacheForceRatioCenterGTE applies the GTE predicate on the "kiro_cache_force_ratio_center" field.
+func KiroCacheForceRatioCenterGTE(v float64) predicate.Group {
+	return predicate.Group(sql.FieldGTE(FieldKiroCacheForceRatioCenter, v))
+}
+
+// KiroCacheForceRatioCenterLT applies the LT predicate on the "kiro_cache_force_ratio_center" field.
+func KiroCacheForceRatioCenterLT(v float64) predicate.Group {
+	return predicate.Group(sql.FieldLT(FieldKiroCacheForceRatioCenter, v))
+}
+
+// KiroCacheForceRatioCenterLTE applies the LTE predicate on the "kiro_cache_force_ratio_center" field.
+func KiroCacheForceRatioCenterLTE(v float64) predicate.Group {
+	return predicate.Group(sql.FieldLTE(FieldKiroCacheForceRatioCenter, v))
 }
 
 // HasAPIKeys applies the HasEdge predicate on the "api_keys" edge.

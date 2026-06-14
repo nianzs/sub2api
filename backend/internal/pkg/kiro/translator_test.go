@@ -1969,3 +1969,134 @@ func TestBuildKiroPayloadTrailingAssistantThenSystemStillAttachesTools(t *testin
 	require.Greater(t, gjson.GetBytes(payload, "conversationState.currentMessage.userInputMessage.userInputMessageContext.tools.#").Int(), int64(0))
 	require.Contains(t, gjson.GetBytes(payload, "conversationState.history.0.userInputMessage.content").String(), "TRAILING NOTE")
 }
+
+// =====================================================================================
+// Reverse-token-scaling tests
+// =====================================================================================
+
+// TestUpdateUsageFromEvent_MeteringEventAccumulates 验证 meteringEvent 的 usage
+// 字段（浮点 credit 数）被正确累加到 Usage.KiroCredits。
+func TestUpdateUsageFromEvent_MeteringEventAccumulates(t *testing.T) {
+	usage := &Usage{}
+	updateUsageFromEvent(usage, "meteringEvent", map[string]any{
+		"meteringEvent": map[string]any{
+			"unit":        "credit",
+			"unitPlural":  "credits",
+			"usage":       0.6856651423548923,
+		},
+	})
+	updateUsageFromEvent(usage, "meteringEvent", map[string]any{
+		"meteringEvent": map[string]any{
+			"usage": 0.7295404395688226,
+		},
+	})
+	expected := 0.6856651423548923 + 0.7295404395688226
+	require.InDelta(t, expected, usage.KiroCredits, 1e-9)
+}
+
+// TestApplyKiroReverseScalingUsage_AnchorsToTarget 验证按 Anthropic Opus 4.x
+// 标准价（5/25/6.25/0.5 per M）反向缩放后，token×price = credits×targetUSD。
+func TestApplyKiroReverseScalingUsage_AnchorsToTarget(t *testing.T) {
+	// pulbey52 实测样本（v3 后缩放前总 token，credits=2900）
+	usage := Usage{
+		InputTokens:              57889300,
+		OutputTokens:             574900,
+		CacheCreationInputTokens: 19065700,
+		CacheReadInputTokens:     145792400,
+		KiroCredits:              2900,
+	}
+	ctx := KiroRequestContext{
+		ReverseScalingTargetUSD: 0.04, // 用 0.04 测试方便（target = 2900 * 0.04 = $116）
+		ReverseScalingPrices:    [4]float64{5.0, 25.0, 6.25, 0.5},
+	}
+	scaled := applyKiroReverseScalingUsage(usage, ctx)
+
+	// 验证：缩放后按 Anthropic 价算 cost ≈ target
+	pIn, pOut, pCC, pCR := 5.0, 25.0, 6.25, 0.5
+	cost := float64(scaled.InputTokens)*pIn/1e6 +
+		float64(scaled.OutputTokens)*pOut/1e6 +
+		float64(scaled.CacheCreationInputTokens)*pCC/1e6 +
+		float64(scaled.CacheReadInputTokens)*pCR/1e6
+	target := usage.KiroCredits * ctx.ReverseScalingTargetUSD
+	require.InDelta(t, target, cost, target*0.01, "scaled cost should match target within 1%%")
+
+	// 4 字段比例保持
+	require.True(t, scaled.InputTokens < usage.InputTokens, "input should be scaled down")
+	require.True(t, scaled.CacheReadInputTokens < usage.CacheReadInputTokens, "cache_read should be scaled down")
+}
+
+// TestApplyKiroReverseScalingUsage_DisabledNoChange 验证 TargetUSD=0 时不缩放。
+func TestApplyKiroReverseScalingUsage_DisabledNoChange(t *testing.T) {
+	orig := Usage{
+		InputTokens:          1000,
+		OutputTokens:         100,
+		CacheReadInputTokens: 500,
+		KiroCredits:          5.0,
+	}
+	scaled := applyKiroReverseScalingUsage(orig, KiroRequestContext{
+		ReverseScalingTargetUSD: 0,
+		ReverseScalingPrices:    [4]float64{5.0, 25.0, 6.25, 0.5},
+	})
+	require.Equal(t, orig.InputTokens, scaled.InputTokens)
+	require.Equal(t, orig.OutputTokens, scaled.OutputTokens)
+	require.Equal(t, orig.CacheReadInputTokens, scaled.CacheReadInputTokens)
+}
+
+// TestApplyKiroReverseScalingUsage_NoCredits 验证 KiroCredits=0 时不缩放。
+func TestApplyKiroReverseScalingUsage_NoCredits(t *testing.T) {
+	orig := Usage{
+		InputTokens:  1000,
+		OutputTokens: 100,
+		KiroCredits:  0,
+	}
+	scaled := applyKiroReverseScalingUsage(orig, KiroRequestContext{
+		ReverseScalingTargetUSD: 0.04,
+		ReverseScalingPrices:    [4]float64{5.0, 25.0, 6.25, 0.5},
+	})
+	require.Equal(t, orig.InputTokens, scaled.InputTokens)
+	require.Equal(t, orig.OutputTokens, scaled.OutputTokens)
+}
+
+// TestApplyKiroReverseScalingUsage_KOutOfRange 验证 K 超出 [0.1, 5] 范围时
+// 不缩放（防止上游异常导致计费失真）。
+func TestApplyKiroReverseScalingUsage_KOutOfRange(t *testing.T) {
+	// 极小 token + 极大 credits → K 会非常大
+	orig := Usage{
+		InputTokens:          1000,
+		CacheReadInputTokens: 500,
+		KiroCredits:          1000000, // 极端值
+	}
+	scaled := applyKiroReverseScalingUsage(orig, KiroRequestContext{
+		ReverseScalingTargetUSD: 0.04,
+		ReverseScalingPrices:    [4]float64{5.0, 25.0, 6.25, 0.5},
+	})
+	// K 异常时应该退回原值
+	require.Equal(t, orig.InputTokens, scaled.InputTokens)
+	require.Equal(t, orig.CacheReadInputTokens, scaled.CacheReadInputTokens)
+}
+
+// TestApplyKiroReverseScalingUsage_ZeroTokensReturnsOriginal 验证全 0 token 时
+// （origCost=0 防除 0）退回原值。
+func TestApplyKiroReverseScalingUsage_ZeroTokensReturnsOriginal(t *testing.T) {
+	orig := Usage{KiroCredits: 5.0}
+	scaled := applyKiroReverseScalingUsage(orig, KiroRequestContext{
+		ReverseScalingTargetUSD: 0.04,
+		ReverseScalingPrices:    [4]float64{5.0, 25.0, 6.25, 0.5},
+	})
+	require.Equal(t, orig, scaled)
+}
+
+// TestBuildKiroClaudeUsageMap_NoInternalCreditsField 验证非流式响应体的 usage
+// 不携带 _sub2api_kiro_credits（非流式计费走 ParseResult.Usage 返回值，
+// 响应体原样发给客户端，不得包含内部字段）。
+func TestBuildKiroClaudeUsageMap_NoInternalCreditsField(t *testing.T) {
+	usageMap := buildKiroClaudeUsageMap(Usage{
+		InputTokens:          100,
+		OutputTokens:         50,
+		CacheReadInputTokens: 30,
+		KiroCredits:          1.25,
+	})
+	_, exists := usageMap["_sub2api_kiro_credits"]
+	require.False(t, exists, "non-streaming usage map must not expose internal credits field")
+	require.Equal(t, 100, usageMap["input_tokens"])
+}

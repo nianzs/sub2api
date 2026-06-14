@@ -692,6 +692,30 @@
             />
             <p class="input-hint">{{ t("admin.groups.kiroCache.ratioHint") }}</p>
           </div>
+          <div class="mt-4">
+            <label class="input-label">Kiro credit 最终单价（USD/credit）</label>
+            <input
+              v-model.number="createForm.kiro_credit_target_usd"
+              type="number"
+              step="0.0001"
+              min="0"
+              max="1"
+              class="input"
+              placeholder="0.0000"
+            />
+            <p class="input-hint">每 credit 最终扣费的 USD（最终价，不再叠加分组/用户倍率或渠道定价）。0 = 禁用反向缩放（按 token × Anthropic 标准价计费）。</p>
+          </div>
+          <div v-if="createForm.kiro_cache_emulation_enabled" class="mt-3">
+            <label class="flex items-center gap-2 text-sm">
+              <input
+                type="checkbox"
+                :checked="(createForm.kiro_cache_force_ratio_center || 0) > 0"
+                @change="(e) => createForm.kiro_cache_force_ratio_center = (e.target as HTMLInputElement).checked ? 0.925 : 0"
+              />
+              {{ t("admin.groups.kiroCache.forceRatio") }}
+            </label>
+            <p class="input-hint">{{ t("admin.groups.kiroCache.forceRatioHint") }}</p>
+          </div>
         </div>
 
         <div class="border-t pt-4">
@@ -2026,6 +2050,30 @@
               placeholder="1"
             />
             <p class="input-hint">{{ t("admin.groups.kiroCache.ratioHint") }}</p>
+          </div>
+          <div class="mt-4">
+            <label class="input-label">Kiro credit 最终单价（USD/credit）</label>
+            <input
+              v-model.number="editForm.kiro_credit_target_usd"
+              type="number"
+              step="0.0001"
+              min="0"
+              max="1"
+              class="input"
+              placeholder="0.0000"
+            />
+            <p class="input-hint">每 credit 最终扣费的 USD（最终价，不再叠加分组/用户倍率或渠道定价）。0 = 禁用反向缩放（按 token × Anthropic 标准价计费）。</p>
+          </div>
+          <div v-if="editForm.kiro_cache_emulation_enabled" class="mt-3">
+            <label class="flex items-center gap-2 text-sm">
+              <input
+                type="checkbox"
+                :checked="(editForm.kiro_cache_force_ratio_center || 0) > 0"
+                @change="(e) => editForm.kiro_cache_force_ratio_center = (e.target as HTMLInputElement).checked ? 0.925 : 0"
+              />
+              {{ t("admin.groups.kiroCache.forceRatio") }}
+            </label>
+            <p class="input-hint">{{ t("admin.groups.kiroCache.forceRatioHint") }}</p>
           </div>
         </div>
 
@@ -3481,6 +3529,9 @@ const createForm = reactive({
   kiro_auto_sticky_enabled: true,
   kiro_sticky_session_ttl_seconds: 3600,
   kiro_cache_emulation_ratio: 1,
+  // Kiro 反向 token 缩放锚定单价（仅 Kiro 平台；0=禁用）
+  kiro_credit_target_usd: 0 as number,
+  kiro_cache_force_ratio_center: 0 as number,
 });
 
 // 简单账号类型（用于模型路由选择）
@@ -3818,6 +3869,9 @@ const editForm = reactive({
   kiro_auto_sticky_enabled: true,
   kiro_sticky_session_ttl_seconds: 3600,
   kiro_cache_emulation_ratio: 1,
+  // Kiro 反向 token 缩放锚定单价（仅 Kiro 平台；0=禁用）
+  kiro_credit_target_usd: 0 as number,
+  kiro_cache_force_ratio_center: 0 as number,
 });
 
 type ImagePricingFormState = {
@@ -4059,6 +4113,8 @@ const closeCreateModal = () => {
   createForm.kiro_auto_sticky_enabled = true;
   createForm.kiro_sticky_session_ttl_seconds = 3600;
   createForm.kiro_cache_emulation_ratio = 1;
+  createForm.kiro_credit_target_usd = 0;
+  createForm.kiro_cache_force_ratio_center = 0;
   resetModelsListState(createModelsListState);
   createModelRoutingRules.value = [];
 };
@@ -4153,6 +4209,8 @@ const handleCreateGroup = async () => {
       requestData.kiro_sticky_session_ttl_seconds = 0;
       requestData.kiro_cache_emulation_enabled = false;
       requestData.kiro_cache_emulation_ratio = 0;
+      requestData.kiro_credit_target_usd = 0;
+      requestData.kiro_cache_force_ratio_center = 0;
     } else {
       requestData.kiro_sticky_session_ttl_seconds = normalizeKiroStickySessionTTL(
         requestData.kiro_sticky_session_ttl_seconds,
@@ -4227,6 +4285,8 @@ const handleEdit = async (group: AdminGroup) => {
     group.kiro_sticky_session_ttl_seconds ?? 3600;
   editForm.kiro_cache_emulation_enabled = group.kiro_cache_emulation_enabled ?? false;
   editForm.kiro_cache_emulation_ratio = group.kiro_cache_emulation_ratio ?? 1;
+  editForm.kiro_credit_target_usd = group.kiro_credit_target_usd ?? 0;
+  editForm.kiro_cache_force_ratio_center = group.kiro_cache_force_ratio_center ?? 0;
   resetModelsListState(editModelsListState, group.models_list_config);
   // 加载模型路由规则（异步加载账号名称）
   editModelRoutingRules.value = await convertApiFormatToRoutingRules(
@@ -4308,6 +4368,8 @@ const handleUpdateGroup = async () => {
       payload.kiro_sticky_session_ttl_seconds = 0;
       payload.kiro_cache_emulation_enabled = false;
       payload.kiro_cache_emulation_ratio = 0;
+      payload.kiro_credit_target_usd = 0;
+      payload.kiro_cache_force_ratio_center = 0;
     } else {
       payload.kiro_sticky_session_ttl_seconds = normalizeKiroStickySessionTTL(
         payload.kiro_sticky_session_ttl_seconds,

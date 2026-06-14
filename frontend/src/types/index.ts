@@ -532,6 +532,8 @@ export interface Group {
   kiro_sticky_session_ttl_seconds: number
   kiro_cache_emulation_enabled: boolean
   kiro_cache_emulation_ratio: number
+  kiro_credit_target_usd?: number
+  kiro_cache_force_ratio_center?: number
   created_at: string
   updated_at: string
 }
@@ -658,6 +660,8 @@ export interface CreateGroupRequest {
   kiro_sticky_session_ttl_seconds?: number
   kiro_cache_emulation_enabled?: boolean
   kiro_cache_emulation_ratio?: number
+  kiro_credit_target_usd?: number
+  kiro_cache_force_ratio_center?: number
   // 从指定分组复制账号
   copy_accounts_from_group_ids?: number[]
 }
@@ -697,6 +701,8 @@ export interface UpdateGroupRequest {
   kiro_sticky_session_ttl_seconds?: number
   kiro_cache_emulation_enabled?: boolean
   kiro_cache_emulation_ratio?: number
+  kiro_credit_target_usd?: number
+  kiro_cache_force_ratio_center?: number
   copy_accounts_from_group_ids?: number[]
 }
 

@@ -94,6 +94,10 @@ const (
 	FieldKiroStickySessionTTLSeconds = "kiro_sticky_session_ttl_seconds"
 	// FieldKiroCacheEmulationRatio holds the string denoting the kiro_cache_emulation_ratio field in the database.
 	FieldKiroCacheEmulationRatio = "kiro_cache_emulation_ratio"
+	// FieldKiroCreditTargetUsd holds the string denoting the kiro_credit_target_usd field in the database.
+	FieldKiroCreditTargetUsd = "kiro_credit_target_usd"
+	// FieldKiroCacheForceRatioCenter holds the string denoting the kiro_cache_force_ratio_center field in the database.
+	FieldKiroCacheForceRatioCenter = "kiro_cache_force_ratio_center"
 	// EdgeAPIKeys holds the string denoting the api_keys edge name in mutations.
 	EdgeAPIKeys = "api_keys"
 	// EdgeRedeemCodes holds the string denoting the redeem_codes edge name in mutations.
@@ -208,6 +212,8 @@ var Columns = []string{
 	FieldKiroAutoStickyEnabled,
 	FieldKiroStickySessionTTLSeconds,
 	FieldKiroCacheEmulationRatio,
+	FieldKiroCreditTargetUsd,
+	FieldKiroCacheForceRatioCenter,
 }
 
 var (
@@ -303,6 +309,10 @@ var (
 	DefaultKiroStickySessionTTLSeconds int
 	// DefaultKiroCacheEmulationRatio holds the default value on creation for the "kiro_cache_emulation_ratio" field.
 	DefaultKiroCacheEmulationRatio float64
+	// DefaultKiroCreditTargetUsd holds the default value on creation for the "kiro_credit_target_usd" field.
+	DefaultKiroCreditTargetUsd float64
+	// DefaultKiroCacheForceRatioCenter holds the default value on creation for the "kiro_cache_force_ratio_center" field.
+	DefaultKiroCacheForceRatioCenter float64
 )
 
 // OrderOption defines the ordering options for the Group queries.
@@ -486,6 +496,16 @@ func ByKiroStickySessionTTLSeconds(opts ...sql.OrderTermOption) OrderOption {
 // ByKiroCacheEmulationRatio orders the results by the kiro_cache_emulation_ratio field.
 func ByKiroCacheEmulationRatio(opts ...sql.OrderTermOption) OrderOption {
 	return sql.OrderByField(FieldKiroCacheEmulationRatio, opts...).ToFunc()
+}
+
+// ByKiroCreditTargetUsd orders the results by the kiro_credit_target_usd field.
+func ByKiroCreditTargetUsd(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldKiroCreditTargetUsd, opts...).ToFunc()
+}
+
+// ByKiroCacheForceRatioCenter orders the results by the kiro_cache_force_ratio_center field.
+func ByKiroCacheForceRatioCenter(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldKiroCacheForceRatioCenter, opts...).ToFunc()
 }
 
 // ByAPIKeysCount orders the results by api_keys count.

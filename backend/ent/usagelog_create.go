@@ -253,6 +253,20 @@ func (_c *UsageLogCreate) SetNillableCacheCreation1hTokens(v *int) *UsageLogCrea
 	return _c
 }
 
+// SetKiroCredits sets the "kiro_credits" field.
+func (_c *UsageLogCreate) SetKiroCredits(v float64) *UsageLogCreate {
+	_c.mutation.SetKiroCredits(v)
+	return _c
+}
+
+// SetNillableKiroCredits sets the "kiro_credits" field if the given value is not nil.
+func (_c *UsageLogCreate) SetNillableKiroCredits(v *float64) *UsageLogCreate {
+	if v != nil {
+		_c.SetKiroCredits(*v)
+	}
+	return _c
+}
+
 // SetInputCost sets the "input_cost" field.
 func (_c *UsageLogCreate) SetInputCost(v float64) *UsageLogCreate {
 	_c.mutation.SetInputCost(v)
@@ -915,6 +929,10 @@ func (_c *UsageLogCreate) createSpec() (*UsageLog, *sqlgraph.CreateSpec) {
 		_spec.SetField(usagelog.FieldCacheCreation1hTokens, field.TypeInt, value)
 		_node.CacheCreation1hTokens = value
 	}
+	if value, ok := _c.mutation.KiroCredits(); ok {
+		_spec.SetField(usagelog.FieldKiroCredits, field.TypeFloat64, value)
+		_node.KiroCredits = &value
+	}
 	if value, ok := _c.mutation.InputCost(); ok {
 		_spec.SetField(usagelog.FieldInputCost, field.TypeFloat64, value)
 		_node.InputCost = value
@@ -1455,6 +1473,30 @@ func (u *UsageLogUpsert) UpdateCacheCreation1hTokens() *UsageLogUpsert {
 // AddCacheCreation1hTokens adds v to the "cache_creation_1h_tokens" field.
 func (u *UsageLogUpsert) AddCacheCreation1hTokens(v int) *UsageLogUpsert {
 	u.Add(usagelog.FieldCacheCreation1hTokens, v)
+	return u
+}
+
+// SetKiroCredits sets the "kiro_credits" field.
+func (u *UsageLogUpsert) SetKiroCredits(v float64) *UsageLogUpsert {
+	u.Set(usagelog.FieldKiroCredits, v)
+	return u
+}
+
+// UpdateKiroCredits sets the "kiro_credits" field to the value that was provided on create.
+func (u *UsageLogUpsert) UpdateKiroCredits() *UsageLogUpsert {
+	u.SetExcluded(usagelog.FieldKiroCredits)
+	return u
+}
+
+// AddKiroCredits adds v to the "kiro_credits" field.
+func (u *UsageLogUpsert) AddKiroCredits(v float64) *UsageLogUpsert {
+	u.Add(usagelog.FieldKiroCredits, v)
+	return u
+}
+
+// ClearKiroCredits clears the value of the "kiro_credits" field.
+func (u *UsageLogUpsert) ClearKiroCredits() *UsageLogUpsert {
+	u.SetNull(usagelog.FieldKiroCredits)
 	return u
 }
 
@@ -2255,6 +2297,34 @@ func (u *UsageLogUpsertOne) AddCacheCreation1hTokens(v int) *UsageLogUpsertOne {
 func (u *UsageLogUpsertOne) UpdateCacheCreation1hTokens() *UsageLogUpsertOne {
 	return u.Update(func(s *UsageLogUpsert) {
 		s.UpdateCacheCreation1hTokens()
+	})
+}
+
+// SetKiroCredits sets the "kiro_credits" field.
+func (u *UsageLogUpsertOne) SetKiroCredits(v float64) *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.SetKiroCredits(v)
+	})
+}
+
+// AddKiroCredits adds v to the "kiro_credits" field.
+func (u *UsageLogUpsertOne) AddKiroCredits(v float64) *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.AddKiroCredits(v)
+	})
+}
+
+// UpdateKiroCredits sets the "kiro_credits" field to the value that was provided on create.
+func (u *UsageLogUpsertOne) UpdateKiroCredits() *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.UpdateKiroCredits()
+	})
+}
+
+// ClearKiroCredits clears the value of the "kiro_credits" field.
+func (u *UsageLogUpsertOne) ClearKiroCredits() *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.ClearKiroCredits()
 	})
 }
 
@@ -3285,6 +3355,34 @@ func (u *UsageLogUpsertBulk) AddCacheCreation1hTokens(v int) *UsageLogUpsertBulk
 func (u *UsageLogUpsertBulk) UpdateCacheCreation1hTokens() *UsageLogUpsertBulk {
 	return u.Update(func(s *UsageLogUpsert) {
 		s.UpdateCacheCreation1hTokens()
+	})
+}
+
+// SetKiroCredits sets the "kiro_credits" field.
+func (u *UsageLogUpsertBulk) SetKiroCredits(v float64) *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.SetKiroCredits(v)
+	})
+}
+
+// AddKiroCredits adds v to the "kiro_credits" field.
+func (u *UsageLogUpsertBulk) AddKiroCredits(v float64) *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.AddKiroCredits(v)
+	})
+}
+
+// UpdateKiroCredits sets the "kiro_credits" field to the value that was provided on create.
+func (u *UsageLogUpsertBulk) UpdateKiroCredits() *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.UpdateKiroCredits()
+	})
+}
+
+// ClearKiroCredits clears the value of the "kiro_credits" field.
+func (u *UsageLogUpsertBulk) ClearKiroCredits() *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.ClearKiroCredits()
 	})
 }
 

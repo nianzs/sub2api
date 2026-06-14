@@ -78,6 +78,12 @@ func (UsageLog) Fields() []ent.Field {
 		field.Int("cache_creation_1h_tokens").
 			Default(0),
 
+		// Kiro 上游 meteringEvent.usage 累加值（仅 platform=kiro 有值，其他 nullable）
+		field.Float("kiro_credits").
+			SchemaType(map[string]string{dialect.Postgres: "decimal(10,4)"}).
+			Optional().
+			Nillable(),
+
 		// 成本字段
 		field.Float("input_cost").
 			Default(0).
