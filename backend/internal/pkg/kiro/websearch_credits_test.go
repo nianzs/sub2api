@@ -76,12 +76,16 @@ func TestRewriteFinalKiroCredits_ZeroTotalNoChange(t *testing.T) {
 	}
 }
 
-// TestRewriteFinalKiroCredits_NoCreditsFieldUntouched 验证不带内部 credits 字段的
-// message_delta（非 PRO 路径）不会被注入。
-func TestRewriteFinalKiroCredits_NoCreditsFieldUntouched(t *testing.T) {
-	chunks := [][]byte{messageDeltaChunk(0)} // 不带 _sub2api_kiro_credits
-	out := RewriteFinalKiroCredits(chunks, 4.2)
-	if _, has := creditsInChunk(t, out[0]); has {
-		t.Fatal("原本不带内部 credits 字段的 message_delta 不应被注入")
+// TestRewriteFinalKiroCredits_InjectsWhenMissing 验证最后一轮无 metering（message_delta
+// 不带 _sub2api_kiro_credits）时，累计总额仍被注入，避免漏计费。
+func TestRewriteFinalKiroCredits_InjectsWhenMissing(t *testing.T) {
+	chunks := [][]byte{messageDeltaChunk(0)} // 最后一轮 0 credits，不带字段
+	out := RewriteFinalKiroCredits(chunks, 4.2) // 但前几轮累计 4.2
+	got, has := creditsInChunk(t, out[0])
+	if !has {
+		t.Fatal("缺字段时应注入累计 credits，避免漏计费")
+	}
+	if got != 4.2 {
+		t.Fatalf("应注入累计总额 4.2，实际 %v", got)
 	}
 }

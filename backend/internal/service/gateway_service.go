@@ -8919,6 +8919,10 @@ func buildUsageBillingCommand(requestID string, usageLog *UsageLog, p *postUsage
 		cmd.APIKeyRateLimitCost = p.Cost.ActualCost
 	}
 	if p.shouldUpdateAccountQuota() {
+		// 账号侧配额成本用 AccountRateMultiplier（账号级独立倍率，与用户侧计费无关）。
+		// Kiro credit 直接计费已把 TotalCost 置为 credits×target_usd（最终价，已绕过
+		// group/user 倍率与渠道定价）；这里再乘的是账号侧倍率（默认 1），与普通计费
+		// "账号侧用 account 倍率、用户侧用 ActualCost" 的关系一致，非重复叠加。
 		cmd.AccountQuotaCost = p.Cost.TotalCost * p.AccountRateMultiplier
 	}
 
@@ -9265,9 +9269,18 @@ type recordUsageCoreInput struct {
 // 是最终价，不再叠加 group/user rate multiplier 或 channel pricing。
 // 按比例缩放各成本子项以保持 sum(子项)==TotalCost 的不变式（供展示/账号统计），
 // 再把 TotalCost 与 ActualCost 都置为 target。credits 或 targetUSD<=0 时不动。
+// kiroCreditsPerRequestSanityCap 是单请求 credits 的安全上限。正常单请求 credits 为
+// 个位数；远超此值视为上游 metering 异常或被篡改，clamp 并打 ALERT，避免一次请求按
+// credits×target 扣掉用户巨额余额（反向缩放路径有 K∈[0.1,5] 围栏，直接计费路径需对等防护）。
+const kiroCreditsPerRequestSanityCap = 500.0
+
 func applyKiroCreditDirectCost(cost *CostBreakdown, credits, targetUSD float64) {
 	if cost == nil || credits <= 0 || targetUSD <= 0 {
 		return
+	}
+	if credits > kiroCreditsPerRequestSanityCap {
+		logger.LegacyPrintf("service.gateway", "ALERT kiro credits over per-request sanity cap, clamped: credits=%.4f cap=%.0f target_usd=%.4f", credits, kiroCreditsPerRequestSanityCap, targetUSD)
+		credits = kiroCreditsPerRequestSanityCap
 	}
 	target := credits * targetUSD
 	if cost.TotalCost > 0 {

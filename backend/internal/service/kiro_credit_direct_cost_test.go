@@ -63,3 +63,14 @@ func TestApplyKiroCreditDirectCost_NoopOnZeroInputs(t *testing.T) {
 	}
 	applyKiroCreditDirectCost(nil, 1.0, 0.04) // 不应 panic
 }
+
+// TestApplyKiroCreditDirectCost_SanityCapClamps 验证畸高 credits 被 clamp 到上限，
+// 防止上游异常一次扣巨额。
+func TestApplyKiroCreditDirectCost_SanityCapClamps(t *testing.T) {
+	cost := &CostBreakdown{TotalCost: 0.10, ActualCost: 0.10}
+	applyKiroCreditDirectCost(cost, 100000, 1.0) // 畸高 credits
+	want := kiroCreditsPerRequestSanityCap * 1.0
+	if !approxEqual(cost.ActualCost, want) {
+		t.Fatalf("credits 应被 clamp 到 cap，ActualCost want=%.2f got=%.2f", want, cost.ActualCost)
+	}
+}

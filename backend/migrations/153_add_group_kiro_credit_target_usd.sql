@@ -13,6 +13,6 @@ BEGIN
   ) THEN
     ALTER TABLE groups
       ADD CONSTRAINT groups_kiro_credit_target_usd_range
-      CHECK (kiro_credit_target_usd >= 0 AND kiro_credit_target_usd <= 10);
+      CHECK (kiro_credit_target_usd >= 0 AND kiro_credit_target_usd <= 1);
   END IF;
 END $$;
