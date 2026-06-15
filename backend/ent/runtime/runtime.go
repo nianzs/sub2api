@@ -894,6 +894,12 @@ func init() {
 	groupDescKiroCacheEmulationRatio := groupFields[35].Descriptor()
 	// group.DefaultKiroCacheEmulationRatio holds the default value on creation for the kiro_cache_emulation_ratio field.
 	group.DefaultKiroCacheEmulationRatio = groupDescKiroCacheEmulationRatio.Default.(float64)
+	// groupDescKiroEndpointMode is the schema descriptor for kiro_endpoint_mode field.
+	groupDescKiroEndpointMode := groupFields[36].Descriptor()
+	// group.DefaultKiroEndpointMode holds the default value on creation for the kiro_endpoint_mode field.
+	group.DefaultKiroEndpointMode = groupDescKiroEndpointMode.Default.(string)
+	// group.KiroEndpointModeValidator is a validator for the "kiro_endpoint_mode" field. It is called by the builders before save.
+	group.KiroEndpointModeValidator = groupDescKiroEndpointMode.Validators[0].(func(string) error)
 	idempotencyrecordMixin := schema.IdempotencyRecord{}.Mixin()
 	idempotencyrecordMixinFields0 := idempotencyrecordMixin[0].Fields()
 	_ = idempotencyrecordMixinFields0

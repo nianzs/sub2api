@@ -74,6 +74,11 @@ type Group struct {
 	KiroStickySessionTTLSeconds int
 	KiroCacheEmulationRatio     float64
 
+	// Kiro 推理 endpoint 模式（仅 platform=kiro 生效）。
+	// "q"   = AWS Q (q.{region}.amazonaws.com)，默认，与其它工具共用限流池
+	// "krs" = Kiro Runtime Service (runtime.us-east-1.kiro.dev)，独立限流池
+	KiroEndpointMode string
+
 	CreatedAt time.Time
 	UpdatedAt time.Time
 
@@ -163,8 +168,50 @@ func normalizeKiroCacheEmulationFields(g *Group) {
 	g.KiroCacheEmulationRatio = normalizeKiroCacheEmulationRatio(g.KiroCacheEmulationRatio)
 }
 
+// Kiro 推理 endpoint 模式取值。
+const (
+	KiroEndpointModeQ   = "q"
+	KiroEndpointModeKRS = "krs"
+)
+
+// EffectiveKiroEndpointMode 返回当前 group 实际使用的 Kiro endpoint 模式。
+// 仅当 Platform = kiro 时返回 group 配置；非 kiro 平台、空值或未知字符串兜底返回 "q"。
+func (g *Group) EffectiveKiroEndpointMode() string {
+	if g == nil || g.Platform != PlatformKiro {
+		return KiroEndpointModeQ
+	}
+	switch g.KiroEndpointMode {
+	case KiroEndpointModeKRS:
+		return KiroEndpointModeKRS
+	default:
+		return KiroEndpointModeQ
+	}
+}
+
+// KiroKRSEnabled 报告该 group 是否启用了 Kiro KRS endpoint。
+func (g *Group) KiroKRSEnabled() bool {
+	return g.EffectiveKiroEndpointMode() == KiroEndpointModeKRS
+}
+
+func normalizeKiroEndpointFields(g *Group) {
+	if g == nil {
+		return
+	}
+	if g.Platform != PlatformKiro {
+		g.KiroEndpointMode = ""
+		return
+	}
+	switch g.KiroEndpointMode {
+	case KiroEndpointModeKRS:
+		// 合法值保留
+	default:
+		g.KiroEndpointMode = KiroEndpointModeQ
+	}
+}
+
 func NormalizeGroupRuntimeFields(g *Group) {
 	normalizeKiroCacheEmulationFields(g)
+	normalizeKiroEndpointFields(g)
 }
 
 func (g *Group) IsActive() bool {

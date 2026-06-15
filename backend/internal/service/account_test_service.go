@@ -477,7 +477,8 @@ func (s *AccountTestService) executeKiroTestUpstream(ctx context.Context, accoun
 	}
 	payload := buildResult.Payload
 
-	endpoints := buildKiroEndpoints(account)
+	// 账号连通性测试默认走 AWS Q endpoint（group 级 q/krs 选择作用于真实流量）。
+	endpoints := buildKiroEndpoints(account, KiroEndpointModeQ)
 	proxyURL := kiroProxyURL(account)
 	tlsProfile := s.tlsFPProfileService.ResolveTLSProfile(account)
 	accountKey := buildKiroAccountKey(account)

@@ -15017,6 +15017,7 @@ type GroupMutation struct {
 	addkiro_sticky_session_ttl_seconds      *int
 	kiro_cache_emulation_ratio              *float64
 	addkiro_cache_emulation_ratio           *float64
+	kiro_endpoint_mode                      *string
 	clearedFields                           map[string]struct{}
 	api_keys                                map[int64]struct{}
 	removedapi_keys                         map[int64]struct{}
@@ -17009,6 +17010,42 @@ func (m *GroupMutation) ResetKiroCacheEmulationRatio() {
 	m.addkiro_cache_emulation_ratio = nil
 }
 
+// SetKiroEndpointMode sets the "kiro_endpoint_mode" field.
+func (m *GroupMutation) SetKiroEndpointMode(s string) {
+	m.kiro_endpoint_mode = &s
+}
+
+// KiroEndpointMode returns the value of the "kiro_endpoint_mode" field in the mutation.
+func (m *GroupMutation) KiroEndpointMode() (r string, exists bool) {
+	v := m.kiro_endpoint_mode
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldKiroEndpointMode returns the old "kiro_endpoint_mode" field's value of the Group entity.
+// If the Group object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *GroupMutation) OldKiroEndpointMode(ctx context.Context) (v string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldKiroEndpointMode is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldKiroEndpointMode requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldKiroEndpointMode: %w", err)
+	}
+	return oldValue.KiroEndpointMode, nil
+}
+
+// ResetKiroEndpointMode resets all changes to the "kiro_endpoint_mode" field.
+func (m *GroupMutation) ResetKiroEndpointMode() {
+	m.kiro_endpoint_mode = nil
+}
+
 // AddAPIKeyIDs adds the "api_keys" edge to the APIKey entity by ids.
 func (m *GroupMutation) AddAPIKeyIDs(ids ...int64) {
 	if m.api_keys == nil {
@@ -17367,7 +17404,7 @@ func (m *GroupMutation) Type() string {
 // order to get all numeric fields that were incremented/decremented, call
 // AddedFields().
 func (m *GroupMutation) Fields() []string {
-	fields := make([]string, 0, 39)
+	fields := make([]string, 0, 40)
 	if m.created_at != nil {
 		fields = append(fields, group.FieldCreatedAt)
 	}
@@ -17485,6 +17522,9 @@ func (m *GroupMutation) Fields() []string {
 	if m.kiro_cache_emulation_ratio != nil {
 		fields = append(fields, group.FieldKiroCacheEmulationRatio)
 	}
+	if m.kiro_endpoint_mode != nil {
+		fields = append(fields, group.FieldKiroEndpointMode)
+	}
 	return fields
 }
 
@@ -17571,6 +17611,8 @@ func (m *GroupMutation) Field(name string) (ent.Value, bool) {
 		return m.KiroStickySessionTTLSeconds()
 	case group.FieldKiroCacheEmulationRatio:
 		return m.KiroCacheEmulationRatio()
+	case group.FieldKiroEndpointMode:
+		return m.KiroEndpointMode()
 	}
 	return nil, false
 }
@@ -17658,6 +17700,8 @@ func (m *GroupMutation) OldField(ctx context.Context, name string) (ent.Value, e
 		return m.OldKiroStickySessionTTLSeconds(ctx)
 	case group.FieldKiroCacheEmulationRatio:
 		return m.OldKiroCacheEmulationRatio(ctx)
+	case group.FieldKiroEndpointMode:
+		return m.OldKiroEndpointMode(ctx)
 	}
 	return nil, fmt.Errorf("unknown Group field %s", name)
 }
@@ -17939,6 +17983,13 @@ func (m *GroupMutation) SetField(name string, value ent.Value) error {
 			return fmt.Errorf("unexpected type %T for field %s", value, name)
 		}
 		m.SetKiroCacheEmulationRatio(v)
+		return nil
+	case group.FieldKiroEndpointMode:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetKiroEndpointMode(v)
 		return nil
 	}
 	return fmt.Errorf("unknown Group field %s", name)
@@ -18357,6 +18408,9 @@ func (m *GroupMutation) ResetField(name string) error {
 		return nil
 	case group.FieldKiroCacheEmulationRatio:
 		m.ResetKiroCacheEmulationRatio()
+		return nil
+	case group.FieldKiroEndpointMode:
+		m.ResetKiroEndpointMode()
 		return nil
 	}
 	return fmt.Errorf("unknown Group field %s", name)

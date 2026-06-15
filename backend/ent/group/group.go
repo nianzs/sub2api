@@ -94,6 +94,8 @@ const (
 	FieldKiroStickySessionTTLSeconds = "kiro_sticky_session_ttl_seconds"
 	// FieldKiroCacheEmulationRatio holds the string denoting the kiro_cache_emulation_ratio field in the database.
 	FieldKiroCacheEmulationRatio = "kiro_cache_emulation_ratio"
+	// FieldKiroEndpointMode holds the string denoting the kiro_endpoint_mode field in the database.
+	FieldKiroEndpointMode = "kiro_endpoint_mode"
 	// EdgeAPIKeys holds the string denoting the api_keys edge name in mutations.
 	EdgeAPIKeys = "api_keys"
 	// EdgeRedeemCodes holds the string denoting the redeem_codes edge name in mutations.
@@ -208,6 +210,7 @@ var Columns = []string{
 	FieldKiroAutoStickyEnabled,
 	FieldKiroStickySessionTTLSeconds,
 	FieldKiroCacheEmulationRatio,
+	FieldKiroEndpointMode,
 }
 
 var (
@@ -303,6 +306,10 @@ var (
 	DefaultKiroStickySessionTTLSeconds int
 	// DefaultKiroCacheEmulationRatio holds the default value on creation for the "kiro_cache_emulation_ratio" field.
 	DefaultKiroCacheEmulationRatio float64
+	// DefaultKiroEndpointMode holds the default value on creation for the "kiro_endpoint_mode" field.
+	DefaultKiroEndpointMode string
+	// KiroEndpointModeValidator is a validator for the "kiro_endpoint_mode" field. It is called by the builders before save.
+	KiroEndpointModeValidator func(string) error
 )
 
 // OrderOption defines the ordering options for the Group queries.
@@ -486,6 +493,11 @@ func ByKiroStickySessionTTLSeconds(opts ...sql.OrderTermOption) OrderOption {
 // ByKiroCacheEmulationRatio orders the results by the kiro_cache_emulation_ratio field.
 func ByKiroCacheEmulationRatio(opts ...sql.OrderTermOption) OrderOption {
 	return sql.OrderByField(FieldKiroCacheEmulationRatio, opts...).ToFunc()
+}
+
+// ByKiroEndpointMode orders the results by the kiro_endpoint_mode field.
+func ByKiroEndpointMode(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldKiroEndpointMode, opts...).ToFunc()
 }
 
 // ByAPIKeysCount orders the results by api_keys count.

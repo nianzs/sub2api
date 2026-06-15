@@ -125,6 +125,7 @@ type Group struct {
 	KiroAutoStickyEnabled       bool    `json:"kiro_auto_sticky_enabled"`
 	KiroStickySessionTTLSeconds int     `json:"kiro_sticky_session_ttl_seconds"`
 	KiroCacheEmulationRatio     float64 `json:"kiro_cache_emulation_ratio"`
+	KiroEndpointMode            string  `json:"kiro_endpoint_mode"`
 
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`

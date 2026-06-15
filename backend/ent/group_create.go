@@ -551,6 +551,20 @@ func (_c *GroupCreate) SetNillableKiroCacheEmulationRatio(v *float64) *GroupCrea
 	return _c
 }
 
+// SetKiroEndpointMode sets the "kiro_endpoint_mode" field.
+func (_c *GroupCreate) SetKiroEndpointMode(v string) *GroupCreate {
+	_c.mutation.SetKiroEndpointMode(v)
+	return _c
+}
+
+// SetNillableKiroEndpointMode sets the "kiro_endpoint_mode" field if the given value is not nil.
+func (_c *GroupCreate) SetNillableKiroEndpointMode(v *string) *GroupCreate {
+	if v != nil {
+		_c.SetKiroEndpointMode(*v)
+	}
+	return _c
+}
+
 // AddAPIKeyIDs adds the "api_keys" edge to the APIKey entity by IDs.
 func (_c *GroupCreate) AddAPIKeyIDs(ids ...int64) *GroupCreate {
 	_c.mutation.AddAPIKeyIDs(ids...)
@@ -792,6 +806,10 @@ func (_c *GroupCreate) defaults() error {
 		v := group.DefaultKiroCacheEmulationRatio
 		_c.mutation.SetKiroCacheEmulationRatio(v)
 	}
+	if _, ok := _c.mutation.KiroEndpointMode(); !ok {
+		v := group.DefaultKiroEndpointMode
+		_c.mutation.SetKiroEndpointMode(v)
+	}
 	return nil
 }
 
@@ -905,6 +923,14 @@ func (_c *GroupCreate) check() error {
 	}
 	if _, ok := _c.mutation.KiroCacheEmulationRatio(); !ok {
 		return &ValidationError{Name: "kiro_cache_emulation_ratio", err: errors.New(`ent: missing required field "Group.kiro_cache_emulation_ratio"`)}
+	}
+	if _, ok := _c.mutation.KiroEndpointMode(); !ok {
+		return &ValidationError{Name: "kiro_endpoint_mode", err: errors.New(`ent: missing required field "Group.kiro_endpoint_mode"`)}
+	}
+	if v, ok := _c.mutation.KiroEndpointMode(); ok {
+		if err := group.KiroEndpointModeValidator(v); err != nil {
+			return &ValidationError{Name: "kiro_endpoint_mode", err: fmt.Errorf(`ent: validator failed for field "Group.kiro_endpoint_mode": %w`, err)}
+		}
 	}
 	return nil
 }
@@ -1088,6 +1114,10 @@ func (_c *GroupCreate) createSpec() (*Group, *sqlgraph.CreateSpec) {
 	if value, ok := _c.mutation.KiroCacheEmulationRatio(); ok {
 		_spec.SetField(group.FieldKiroCacheEmulationRatio, field.TypeFloat64, value)
 		_node.KiroCacheEmulationRatio = value
+	}
+	if value, ok := _c.mutation.KiroEndpointMode(); ok {
+		_spec.SetField(group.FieldKiroEndpointMode, field.TypeString, value)
+		_node.KiroEndpointMode = value
 	}
 	if nodes := _c.mutation.APIKeysIDs(); len(nodes) > 0 {
 		edge := &sqlgraph.EdgeSpec{
@@ -1857,6 +1887,18 @@ func (u *GroupUpsert) AddKiroCacheEmulationRatio(v float64) *GroupUpsert {
 	return u
 }
 
+// SetKiroEndpointMode sets the "kiro_endpoint_mode" field.
+func (u *GroupUpsert) SetKiroEndpointMode(v string) *GroupUpsert {
+	u.Set(group.FieldKiroEndpointMode, v)
+	return u
+}
+
+// UpdateKiroEndpointMode sets the "kiro_endpoint_mode" field to the value that was provided on create.
+func (u *GroupUpsert) UpdateKiroEndpointMode() *GroupUpsert {
+	u.SetExcluded(group.FieldKiroEndpointMode)
+	return u
+}
+
 // UpdateNewValues updates the mutable fields using the new values that were set on create.
 // Using this option is equivalent to using:
 //
@@ -2613,6 +2655,20 @@ func (u *GroupUpsertOne) AddKiroCacheEmulationRatio(v float64) *GroupUpsertOne {
 func (u *GroupUpsertOne) UpdateKiroCacheEmulationRatio() *GroupUpsertOne {
 	return u.Update(func(s *GroupUpsert) {
 		s.UpdateKiroCacheEmulationRatio()
+	})
+}
+
+// SetKiroEndpointMode sets the "kiro_endpoint_mode" field.
+func (u *GroupUpsertOne) SetKiroEndpointMode(v string) *GroupUpsertOne {
+	return u.Update(func(s *GroupUpsert) {
+		s.SetKiroEndpointMode(v)
+	})
+}
+
+// UpdateKiroEndpointMode sets the "kiro_endpoint_mode" field to the value that was provided on create.
+func (u *GroupUpsertOne) UpdateKiroEndpointMode() *GroupUpsertOne {
+	return u.Update(func(s *GroupUpsert) {
+		s.UpdateKiroEndpointMode()
 	})
 }
 
@@ -3538,6 +3594,20 @@ func (u *GroupUpsertBulk) AddKiroCacheEmulationRatio(v float64) *GroupUpsertBulk
 func (u *GroupUpsertBulk) UpdateKiroCacheEmulationRatio() *GroupUpsertBulk {
 	return u.Update(func(s *GroupUpsert) {
 		s.UpdateKiroCacheEmulationRatio()
+	})
+}
+
+// SetKiroEndpointMode sets the "kiro_endpoint_mode" field.
+func (u *GroupUpsertBulk) SetKiroEndpointMode(v string) *GroupUpsertBulk {
+	return u.Update(func(s *GroupUpsert) {
+		s.SetKiroEndpointMode(v)
+	})
+}
+
+// UpdateKiroEndpointMode sets the "kiro_endpoint_mode" field to the value that was provided on create.
+func (u *GroupUpsertBulk) UpdateKiroEndpointMode() *GroupUpsertBulk {
+	return u.Update(func(s *GroupUpsert) {
+		s.UpdateKiroEndpointMode()
 	})
 }
 

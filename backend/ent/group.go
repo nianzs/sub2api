@@ -97,6 +97,8 @@ type Group struct {
 	KiroStickySessionTTLSeconds int `json:"kiro_sticky_session_ttl_seconds,omitempty"`
 	// Kiro 模拟缓存生效比例，范围 0-1（仅 kiro 分组生效）
 	KiroCacheEmulationRatio float64 `json:"kiro_cache_emulation_ratio,omitempty"`
+	// Kiro 推理 endpoint：q=AWS Q (q.{region}.amazonaws.com), krs=Kiro Runtime Service (runtime.us-east-1.kiro.dev)
+	KiroEndpointMode string `json:"kiro_endpoint_mode,omitempty"`
 	// Edges holds the relations/edges for other nodes in the graph.
 	// The values are being populated by the GroupQuery when eager-loading is set.
 	Edges        GroupEdges `json:"edges"`
@@ -211,7 +213,7 @@ func (*Group) scanValues(columns []string) ([]any, error) {
 			values[i] = new(sql.NullFloat64)
 		case group.FieldID, group.FieldDefaultValidityDays, group.FieldFallbackGroupID, group.FieldFallbackGroupIDOnInvalidRequest, group.FieldSortOrder, group.FieldRpmLimit, group.FieldKiroStickySessionTTLSeconds:
 			values[i] = new(sql.NullInt64)
-		case group.FieldName, group.FieldDescription, group.FieldStatus, group.FieldPlatform, group.FieldSubscriptionType, group.FieldDefaultMappedModel:
+		case group.FieldName, group.FieldDescription, group.FieldStatus, group.FieldPlatform, group.FieldSubscriptionType, group.FieldDefaultMappedModel, group.FieldKiroEndpointMode:
 			values[i] = new(sql.NullString)
 		case group.FieldCreatedAt, group.FieldUpdatedAt, group.FieldDeletedAt:
 			values[i] = new(sql.NullTime)
@@ -488,6 +490,12 @@ func (_m *Group) assignValues(columns []string, values []any) error {
 			} else if value.Valid {
 				_m.KiroCacheEmulationRatio = value.Float64
 			}
+		case group.FieldKiroEndpointMode:
+			if value, ok := values[i].(*sql.NullString); !ok {
+				return fmt.Errorf("unexpected type %T for field kiro_endpoint_mode", values[i])
+			} else if value.Valid {
+				_m.KiroEndpointMode = value.String
+			}
 		default:
 			_m.selectValues.Set(columns[i], values[i])
 		}
@@ -700,6 +708,9 @@ func (_m *Group) String() string {
 	builder.WriteString(", ")
 	builder.WriteString("kiro_cache_emulation_ratio=")
 	builder.WriteString(fmt.Sprintf("%v", _m.KiroCacheEmulationRatio))
+	builder.WriteString(", ")
+	builder.WriteString("kiro_endpoint_mode=")
+	builder.WriteString(_m.KiroEndpointMode)
 	builder.WriteByte(')')
 	return builder.String()
 }

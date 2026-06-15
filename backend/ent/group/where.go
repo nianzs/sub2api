@@ -230,6 +230,11 @@ func KiroCacheEmulationRatio(v float64) predicate.Group {
 	return predicate.Group(sql.FieldEQ(FieldKiroCacheEmulationRatio, v))
 }
 
+// KiroEndpointMode applies equality check predicate on the "kiro_endpoint_mode" field. It's identical to KiroEndpointModeEQ.
+func KiroEndpointMode(v string) predicate.Group {
+	return predicate.Group(sql.FieldEQ(FieldKiroEndpointMode, v))
+}
+
 // CreatedAtEQ applies the EQ predicate on the "created_at" field.
 func CreatedAtEQ(v time.Time) predicate.Group {
 	return predicate.Group(sql.FieldEQ(FieldCreatedAt, v))
@@ -1558,6 +1563,71 @@ func KiroCacheEmulationRatioLT(v float64) predicate.Group {
 // KiroCacheEmulationRatioLTE applies the LTE predicate on the "kiro_cache_emulation_ratio" field.
 func KiroCacheEmulationRatioLTE(v float64) predicate.Group {
 	return predicate.Group(sql.FieldLTE(FieldKiroCacheEmulationRatio, v))
+}
+
+// KiroEndpointModeEQ applies the EQ predicate on the "kiro_endpoint_mode" field.
+func KiroEndpointModeEQ(v string) predicate.Group {
+	return predicate.Group(sql.FieldEQ(FieldKiroEndpointMode, v))
+}
+
+// KiroEndpointModeNEQ applies the NEQ predicate on the "kiro_endpoint_mode" field.
+func KiroEndpointModeNEQ(v string) predicate.Group {
+	return predicate.Group(sql.FieldNEQ(FieldKiroEndpointMode, v))
+}
+
+// KiroEndpointModeIn applies the In predicate on the "kiro_endpoint_mode" field.
+func KiroEndpointModeIn(vs ...string) predicate.Group {
+	return predicate.Group(sql.FieldIn(FieldKiroEndpointMode, vs...))
+}
+
+// KiroEndpointModeNotIn applies the NotIn predicate on the "kiro_endpoint_mode" field.
+func KiroEndpointModeNotIn(vs ...string) predicate.Group {
+	return predicate.Group(sql.FieldNotIn(FieldKiroEndpointMode, vs...))
+}
+
+// KiroEndpointModeGT applies the GT predicate on the "kiro_endpoint_mode" field.
+func KiroEndpointModeGT(v string) predicate.Group {
+	return predicate.Group(sql.FieldGT(FieldKiroEndpointMode, v))
+}
+
+// KiroEndpointModeGTE applies the GTE predicate on the "kiro_endpoint_mode" field.
+func KiroEndpointModeGTE(v string) predicate.Group {
+	return predicate.Group(sql.FieldGTE(FieldKiroEndpointMode, v))
+}
+
+// KiroEndpointModeLT applies the LT predicate on the "kiro_endpoint_mode" field.
+func KiroEndpointModeLT(v string) predicate.Group {
+	return predicate.Group(sql.FieldLT(FieldKiroEndpointMode, v))
+}
+
+// KiroEndpointModeLTE applies the LTE predicate on the "kiro_endpoint_mode" field.
+func KiroEndpointModeLTE(v string) predicate.Group {
+	return predicate.Group(sql.FieldLTE(FieldKiroEndpointMode, v))
+}
+
+// KiroEndpointModeContains applies the Contains predicate on the "kiro_endpoint_mode" field.
+func KiroEndpointModeContains(v string) predicate.Group {
+	return predicate.Group(sql.FieldContains(FieldKiroEndpointMode, v))
+}
+
+// KiroEndpointModeHasPrefix applies the HasPrefix predicate on the "kiro_endpoint_mode" field.
+func KiroEndpointModeHasPrefix(v string) predicate.Group {
+	return predicate.Group(sql.FieldHasPrefix(FieldKiroEndpointMode, v))
+}
+
+// KiroEndpointModeHasSuffix applies the HasSuffix predicate on the "kiro_endpoint_mode" field.
+func KiroEndpointModeHasSuffix(v string) predicate.Group {
+	return predicate.Group(sql.FieldHasSuffix(FieldKiroEndpointMode, v))
+}
+
+// KiroEndpointModeEqualFold applies the EqualFold predicate on the "kiro_endpoint_mode" field.
+func KiroEndpointModeEqualFold(v string) predicate.Group {
+	return predicate.Group(sql.FieldEqualFold(FieldKiroEndpointMode, v))
+}
+
+// KiroEndpointModeContainsFold applies the ContainsFold predicate on the "kiro_endpoint_mode" field.
+func KiroEndpointModeContainsFold(v string) predicate.Group {
+	return predicate.Group(sql.FieldContainsFold(FieldKiroEndpointMode, v))
 }
 
 // HasAPIKeys applies the HasEdge predicate on the "api_keys" edge.

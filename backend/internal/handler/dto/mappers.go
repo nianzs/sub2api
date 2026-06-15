@@ -195,6 +195,7 @@ func groupFromServiceBase(g *service.Group) Group {
 		KiroAutoStickyEnabled:           g.EffectiveKiroAutoStickyEnabled(),
 		KiroStickySessionTTLSeconds:     g.EffectiveKiroStickySessionTTLSeconds(),
 		KiroCacheEmulationRatio:         g.EffectiveKiroCacheEmulationRatio(),
+		KiroEndpointMode:                g.EffectiveKiroEndpointMode(),
 		CreatedAt:                       g.CreatedAt,
 		UpdatedAt:                       g.UpdatedAt,
 	}

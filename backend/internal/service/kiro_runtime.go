@@ -365,7 +365,7 @@ func (s *GatewayService) executeKiroUpstreamWithParsed(ctx context.Context, acco
 	requestCtx = buildResult.Context
 	logKiroStatelessReplay(account, buildResult.Payload)
 
-	endpoints := buildKiroEndpoints(account)
+	endpoints := buildKiroEndpoints(account, kiroEndpointModeForRequest(parsed))
 	proxyURL := kiroProxyURL(account)
 	tlsProfile := s.tlsFPProfileService.ResolveTLSProfile(account)
 	accountKey := buildKiroAccountKey(account)
@@ -513,7 +513,19 @@ func (s *GatewayService) executeKiroUpstreamWithParsed(ctx context.Context, acco
 	return nil, requestCtx, fmt.Errorf("kiro upstream endpoints exhausted")
 }
 
-func buildKiroEndpoints(account *Account) []kiroEndpointConfig {
+// kiroKRSEndpointURL 是 Kiro 自家前置网关（KRS = Kiro Runtime Service）的固定 URL。
+// KRS 仅支持 us-east-1 / eu-central-1 两个 region；这里固定走 us-east-1。
+const kiroKRSEndpointURL = "https://runtime.us-east-1.kiro.dev/generateAssistantResponse"
+
+func buildKiroEndpoints(account *Account, mode string) []kiroEndpointConfig {
+	if mode == KiroEndpointModeKRS {
+		return []kiroEndpointConfig{
+			{
+				URL:  kiroKRSEndpointURL,
+				Name: "KiroRuntime",
+			},
+		}
+	}
 	region := kiroAPIRegion(account)
 	return []kiroEndpointConfig{
 		{
@@ -521,6 +533,15 @@ func buildKiroEndpoints(account *Account) []kiroEndpointConfig {
 			Name: "AmazonQ",
 		},
 	}
+}
+
+// kiroEndpointModeForRequest 从 ParsedRequest 取 group 配置的 Kiro endpoint 模式；
+// parsed/Group 为 nil 时安全兜底为 "q"。
+func kiroEndpointModeForRequest(parsed *ParsedRequest) string {
+	if parsed == nil || parsed.Group == nil {
+		return KiroEndpointModeQ
+	}
+	return parsed.Group.EffectiveKiroEndpointMode()
 }
 
 func (s *GatewayService) buildKiroPayloadForAccount(ctx context.Context, account *Account, parsed *ParsedRequest, anthropicBody []byte, modelID, token, requestModel string, headers http.Header) (*kiropkg.KiroBuildResult, error) {

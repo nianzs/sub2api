@@ -179,6 +179,10 @@ func (Group) Fields() []ent.Field {
 			SchemaType(map[string]string{dialect.Postgres: "decimal(5,4)"}).
 			Default(1.0).
 			Comment("Kiro 模拟缓存生效比例，范围 0-1（仅 kiro 分组生效）"),
+		field.String("kiro_endpoint_mode").
+			MaxLen(8).
+			Default("q").
+			Comment("Kiro 推理 endpoint：q=AWS Q (q.{region}.amazonaws.com), krs=Kiro Runtime Service (runtime.us-east-1.kiro.dev)"),
 	}
 }
 

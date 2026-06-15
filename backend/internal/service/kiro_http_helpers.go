@@ -141,7 +141,13 @@ func newKiroJSONRequest(ctx context.Context, endpointURL string, payload []byte,
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "*/*")
 	req.Header.Set("Authorization", "Bearer "+token)
-	req.Header.Set("User-Agent", kiropkg.BuildRuntimeUserAgent(accountKey, machineID))
+	// KRS endpoint 用 Kiro IDE 实际 UA 格式 ("KiroIDE <version> <machineId>")；
+	// AWS Q endpoint 继续用 AWS SDK 风格 UA。按 URL 区分以避免再加一个参数。
+	if endpointURL == kiroKRSEndpointURL {
+		req.Header.Set("User-Agent", kiropkg.BuildKiroIDERuntimeUserAgent(accountKey, machineID))
+	} else {
+		req.Header.Set("User-Agent", kiropkg.BuildRuntimeUserAgent(accountKey, machineID))
+	}
 	req.Header.Set("X-Amz-User-Agent", kiropkg.BuildRuntimeAmzUserAgent(accountKey, machineID))
 	req.Header.Set("x-amzn-kiro-agent-mode", "vibe")
 	req.Header.Set("x-amzn-codewhisperer-optout", "true")

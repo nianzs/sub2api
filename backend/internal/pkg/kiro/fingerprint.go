@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"math/rand"
+	"os"
 	"runtime"
 	"strings"
 	"sync"
@@ -197,6 +198,21 @@ func fingerprintLookupKey(accountKey, fallback string) string {
 		return key
 	}
 	return fallback
+}
+
+// kiroIDEUserAgentVersion 是 KRS endpoint 用的 Kiro IDE 版本号，可用 KIRO_IDE_VERSION 覆盖。
+var kiroIDEUserAgentVersion = func() string {
+	if v := strings.TrimSpace(os.Getenv("KIRO_IDE_VERSION")); v != "" {
+		return v
+	}
+	return "0.12.301"
+}()
+
+// BuildKiroIDERuntimeUserAgent 构造 KRS endpoint 的 User-Agent，格式为
+// "KiroIDE <version> <machineId>"，对齐抓包到的 Kiro IDE 真实 runtime 请求。
+func BuildKiroIDERuntimeUserAgent(accountKey, machineID string) string {
+	fp := globalRuntimeFingerprints().Get(accountKey, machineID)
+	return fmt.Sprintf("KiroIDE %s %s", kiroIDEUserAgentVersion, fp.KiroHash)
 }
 
 func BuildRuntimeUserAgent(accountKey, machineID string) string {
