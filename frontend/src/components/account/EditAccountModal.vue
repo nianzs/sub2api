@@ -1433,7 +1433,7 @@
 
       <div>
         <label class="input-label">{{ t('admin.accounts.proxy') }}</label>
-        <ProxySelector v-model="form.proxy_id" :proxies="proxies" />
+        <ProxySelector v-model="form.proxy_id" :proxies="proxies" :platform="account.platform" />
       </div>
 
       <div class="grid grid-cols-2 gap-4 lg:grid-cols-4">

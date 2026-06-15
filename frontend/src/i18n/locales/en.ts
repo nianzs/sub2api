@@ -4272,6 +4272,13 @@ export default {
     proxies: {
       title: 'Proxy Management',
       description: 'Manage proxy servers for accounts',
+      inactive: 'Inactive',
+      full: 'Quota full',
+      daysLeft: '{days}d left',
+      maxAccounts: 'Max accounts',
+      maxAccountsHint: 'Maximum accounts that may bind to this proxy.',
+      enforceMaxAccounts: 'Enforce max accounts as a hard limit',
+      enforceMaxAccountsHint: 'When checked, bindings over the limit are rejected; default is a soft limit (logged as a warning, allowed).',
       createProxy: 'Create Proxy',
       editProxy: 'Edit Proxy',
       deleteProxy: 'Delete Proxy',

@@ -295,10 +295,12 @@ type Proxy struct {
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
 
-	ExpiresAt      *time.Time `json:"expires_at"`
-	FallbackMode   string     `json:"fallback_mode"`
-	BackupProxyID  *int64     `json:"backup_proxy_id"`
-	ExpiryWarnDays int        `json:"expiry_warn_days"`
+	MaxAccounts        int        `json:"max_accounts"`
+	EnforceMaxAccounts bool       `json:"enforce_max_accounts"`
+	ExpiresAt          *time.Time `json:"expires_at"`
+	FallbackMode       string     `json:"fallback_mode"`
+	BackupProxyID      *int64     `json:"backup_proxy_id"`
+	ExpiryWarnDays     int        `json:"expiry_warn_days"`
 }
 
 type ProxyWithAccountCount struct {

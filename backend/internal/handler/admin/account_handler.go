@@ -578,6 +578,14 @@ func (h *AccountHandler) Create(c *gin.Context) {
 			})
 			return
 		}
+		var proxyErr *service.ProxyValidationError
+		if errors.As(err, &proxyErr) {
+			c.JSON(422, gin.H{
+				"error":  "proxy_validation_failed",
+				"reason": proxyErr.Reason,
+			})
+			return
+		}
 
 		if retryAfter := service.RetryAfterSecondsFromError(err); retryAfter > 0 {
 			c.Header("Retry-After", strconv.Itoa(retryAfter))
@@ -644,6 +652,14 @@ func (h *AccountHandler) Update(c *gin.Context) {
 			c.JSON(409, gin.H{
 				"error":   "mixed_channel_warning",
 				"message": mixedErr.Error(),
+			})
+			return
+		}
+		var proxyErr *service.ProxyValidationError
+		if errors.As(err, &proxyErr) {
+			c.JSON(422, gin.H{
+				"error":  "proxy_validation_failed",
+				"reason": proxyErr.Reason,
 			})
 			return
 		}
@@ -1590,6 +1606,14 @@ func (h *AccountHandler) BulkUpdate(c *gin.Context) {
 					"current_platform": mixedErr.CurrentPlatform,
 					"other_platform":   mixedErr.OtherPlatform,
 				},
+			})
+			return
+		}
+		var proxyErr *service.ProxyValidationError
+		if errors.As(err, &proxyErr) {
+			c.JSON(422, gin.H{
+				"error":  "proxy_validation_failed",
+				"reason": proxyErr.Reason,
 			})
 			return
 		}

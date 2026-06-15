@@ -4363,6 +4363,13 @@ export default {
     proxies: {
       title: 'IP管理',
       description: '管理代理服务器配置',
+      inactive: '已停用',
+      full: '配额已满',
+      daysLeft: '剩 {days} 天',
+      maxAccounts: '最大账号数',
+      maxAccountsHint: '该代理最多可绑定的账号数。',
+      enforceMaxAccounts: '硬性限制最大账号数',
+      enforceMaxAccountsHint: '勾选后超出最大账号数将拒绝绑定；默认软限制（仅记录告警并放行）。',
       createProxy: '添加代理',
       editProxy: '编辑代理',
       deleteProxy: '删除代理',

@@ -172,6 +172,41 @@ func (_u *ProxyUpdate) SetNillableStatus(v *string) *ProxyUpdate {
 	return _u
 }
 
+// SetMaxAccounts sets the "max_accounts" field.
+func (_u *ProxyUpdate) SetMaxAccounts(v int) *ProxyUpdate {
+	_u.mutation.ResetMaxAccounts()
+	_u.mutation.SetMaxAccounts(v)
+	return _u
+}
+
+// SetNillableMaxAccounts sets the "max_accounts" field if the given value is not nil.
+func (_u *ProxyUpdate) SetNillableMaxAccounts(v *int) *ProxyUpdate {
+	if v != nil {
+		_u.SetMaxAccounts(*v)
+	}
+	return _u
+}
+
+// AddMaxAccounts adds value to the "max_accounts" field.
+func (_u *ProxyUpdate) AddMaxAccounts(v int) *ProxyUpdate {
+	_u.mutation.AddMaxAccounts(v)
+	return _u
+}
+
+// SetEnforceMaxAccounts sets the "enforce_max_accounts" field.
+func (_u *ProxyUpdate) SetEnforceMaxAccounts(v bool) *ProxyUpdate {
+	_u.mutation.SetEnforceMaxAccounts(v)
+	return _u
+}
+
+// SetNillableEnforceMaxAccounts sets the "enforce_max_accounts" field if the given value is not nil.
+func (_u *ProxyUpdate) SetNillableEnforceMaxAccounts(v *bool) *ProxyUpdate {
+	if v != nil {
+		_u.SetEnforceMaxAccounts(*v)
+	}
+	return _u
+}
+
 // SetExpiresAt sets the "expires_at" field.
 func (_u *ProxyUpdate) SetExpiresAt(v time.Time) *ProxyUpdate {
 	_u.mutation.SetExpiresAt(v)
@@ -373,6 +408,11 @@ func (_u *ProxyUpdate) check() error {
 			return &ValidationError{Name: "status", err: fmt.Errorf(`ent: validator failed for field "Proxy.status": %w`, err)}
 		}
 	}
+	if v, ok := _u.mutation.MaxAccounts(); ok {
+		if err := proxy.MaxAccountsValidator(v); err != nil {
+			return &ValidationError{Name: "max_accounts", err: fmt.Errorf(`ent: validator failed for field "Proxy.max_accounts": %w`, err)}
+		}
+	}
 	if v, ok := _u.mutation.FallbackMode(); ok {
 		if err := proxy.FallbackModeValidator(v); err != nil {
 			return &ValidationError{Name: "fallback_mode", err: fmt.Errorf(`ent: validator failed for field "Proxy.fallback_mode": %w`, err)}
@@ -431,6 +471,15 @@ func (_u *ProxyUpdate) sqlSave(ctx context.Context) (_node int, err error) {
 	}
 	if value, ok := _u.mutation.Status(); ok {
 		_spec.SetField(proxy.FieldStatus, field.TypeString, value)
+	}
+	if value, ok := _u.mutation.MaxAccounts(); ok {
+		_spec.SetField(proxy.FieldMaxAccounts, field.TypeInt, value)
+	}
+	if value, ok := _u.mutation.AddedMaxAccounts(); ok {
+		_spec.AddField(proxy.FieldMaxAccounts, field.TypeInt, value)
+	}
+	if value, ok := _u.mutation.EnforceMaxAccounts(); ok {
+		_spec.SetField(proxy.FieldEnforceMaxAccounts, field.TypeBool, value)
 	}
 	if value, ok := _u.mutation.ExpiresAt(); ok {
 		_spec.SetField(proxy.FieldExpiresAt, field.TypeTime, value)
@@ -684,6 +733,41 @@ func (_u *ProxyUpdateOne) SetNillableStatus(v *string) *ProxyUpdateOne {
 	return _u
 }
 
+// SetMaxAccounts sets the "max_accounts" field.
+func (_u *ProxyUpdateOne) SetMaxAccounts(v int) *ProxyUpdateOne {
+	_u.mutation.ResetMaxAccounts()
+	_u.mutation.SetMaxAccounts(v)
+	return _u
+}
+
+// SetNillableMaxAccounts sets the "max_accounts" field if the given value is not nil.
+func (_u *ProxyUpdateOne) SetNillableMaxAccounts(v *int) *ProxyUpdateOne {
+	if v != nil {
+		_u.SetMaxAccounts(*v)
+	}
+	return _u
+}
+
+// AddMaxAccounts adds value to the "max_accounts" field.
+func (_u *ProxyUpdateOne) AddMaxAccounts(v int) *ProxyUpdateOne {
+	_u.mutation.AddMaxAccounts(v)
+	return _u
+}
+
+// SetEnforceMaxAccounts sets the "enforce_max_accounts" field.
+func (_u *ProxyUpdateOne) SetEnforceMaxAccounts(v bool) *ProxyUpdateOne {
+	_u.mutation.SetEnforceMaxAccounts(v)
+	return _u
+}
+
+// SetNillableEnforceMaxAccounts sets the "enforce_max_accounts" field if the given value is not nil.
+func (_u *ProxyUpdateOne) SetNillableEnforceMaxAccounts(v *bool) *ProxyUpdateOne {
+	if v != nil {
+		_u.SetEnforceMaxAccounts(*v)
+	}
+	return _u
+}
+
 // SetExpiresAt sets the "expires_at" field.
 func (_u *ProxyUpdateOne) SetExpiresAt(v time.Time) *ProxyUpdateOne {
 	_u.mutation.SetExpiresAt(v)
@@ -898,6 +982,11 @@ func (_u *ProxyUpdateOne) check() error {
 			return &ValidationError{Name: "status", err: fmt.Errorf(`ent: validator failed for field "Proxy.status": %w`, err)}
 		}
 	}
+	if v, ok := _u.mutation.MaxAccounts(); ok {
+		if err := proxy.MaxAccountsValidator(v); err != nil {
+			return &ValidationError{Name: "max_accounts", err: fmt.Errorf(`ent: validator failed for field "Proxy.max_accounts": %w`, err)}
+		}
+	}
 	if v, ok := _u.mutation.FallbackMode(); ok {
 		if err := proxy.FallbackModeValidator(v); err != nil {
 			return &ValidationError{Name: "fallback_mode", err: fmt.Errorf(`ent: validator failed for field "Proxy.fallback_mode": %w`, err)}
@@ -973,6 +1062,15 @@ func (_u *ProxyUpdateOne) sqlSave(ctx context.Context) (_node *Proxy, err error)
 	}
 	if value, ok := _u.mutation.Status(); ok {
 		_spec.SetField(proxy.FieldStatus, field.TypeString, value)
+	}
+	if value, ok := _u.mutation.MaxAccounts(); ok {
+		_spec.SetField(proxy.FieldMaxAccounts, field.TypeInt, value)
+	}
+	if value, ok := _u.mutation.AddedMaxAccounts(); ok {
+		_spec.AddField(proxy.FieldMaxAccounts, field.TypeInt, value)
+	}
+	if value, ok := _u.mutation.EnforceMaxAccounts(); ok {
+		_spec.SetField(proxy.FieldEnforceMaxAccounts, field.TypeBool, value)
 	}
 	if value, ok := _u.mutation.ExpiresAt(); ok {
 		_spec.SetField(proxy.FieldExpiresAt, field.TypeTime, value)
