@@ -694,10 +694,10 @@
           </div>
           <div class="mt-3">
             <label class="input-label">{{ t("admin.groups.kiroCache.endpointMode") }}</label>
-            <select v-model="createForm.kiro_endpoint_mode" class="input">
-              <option value="q">{{ t("admin.groups.kiroCache.endpointModeQ") }}</option>
-              <option value="krs">{{ t("admin.groups.kiroCache.endpointModeKRS") }}</option>
-            </select>
+            <Select
+              v-model="createForm.kiro_endpoint_mode"
+              :options="kiroEndpointModeOptions"
+            />
             <p class="input-hint">{{ t("admin.groups.kiroCache.endpointModeHint") }}</p>
           </div>
         </div>
@@ -2037,10 +2037,10 @@
           </div>
           <div class="mt-3">
             <label class="input-label">{{ t("admin.groups.kiroCache.endpointMode") }}</label>
-            <select v-model="editForm.kiro_endpoint_mode" class="input">
-              <option value="q">{{ t("admin.groups.kiroCache.endpointModeQ") }}</option>
-              <option value="krs">{{ t("admin.groups.kiroCache.endpointModeKRS") }}</option>
-            </select>
+            <Select
+              v-model="editForm.kiro_endpoint_mode"
+              :options="kiroEndpointModeOptions"
+            />
             <p class="input-hint">{{ t("admin.groups.kiroCache.endpointModeHint") }}</p>
           </div>
         </div>
@@ -3269,6 +3269,11 @@ const editStatusOptions = computed(() => [
 const subscriptionTypeOptions = computed(() => [
   { value: "standard", label: t("admin.groups.subscription.standard") },
   { value: "subscription", label: t("admin.groups.subscription.subscription") },
+]);
+
+const kiroEndpointModeOptions = computed(() => [
+  { value: "q", label: t("admin.groups.kiroCache.endpointModeQ") },
+  { value: "krs", label: t("admin.groups.kiroCache.endpointModeKRS") },
 ]);
 
 // 降级分组选项（创建时）- 仅包含 anthropic 平台且未启用 claude_code_only 的分组
