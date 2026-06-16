@@ -194,7 +194,7 @@
             class="input"
           />
         </div>
-        <div class="grid gap-4 sm:grid-cols-2">
+        <div class="grid gap-4 sm:grid-cols-3">
           <div>
             <label class="input-label">
               {{ t('admin.promo.firstRechargeBonusAmount') }}
@@ -226,6 +226,18 @@
               />
               <span class="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-gray-400">{{ t('admin.promo.discountUnit') }}</span>
             </div>
+          </div>
+          <div>
+            <label class="input-label">
+              {{ t('admin.promo.rechargeDiscountTimes') }}
+            </label>
+            <input
+              v-model.number="createForm.first_recharge_discount_times"
+              type="number"
+              min="0"
+              class="input"
+              :placeholder="t('admin.promo.rechargeDiscountTimesPlaceholder')"
+            />
           </div>
         </div>
         <div>
@@ -303,7 +315,7 @@
             class="input"
           />
         </div>
-        <div class="grid gap-4 sm:grid-cols-2">
+        <div class="grid gap-4 sm:grid-cols-3">
           <div>
             <label class="input-label">
               {{ t('admin.promo.firstRechargeBonusAmount') }}
@@ -335,6 +347,18 @@
               />
               <span class="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-gray-400">{{ t('admin.promo.discountUnit') }}</span>
             </div>
+          </div>
+          <div>
+            <label class="input-label">
+              {{ t('admin.promo.rechargeDiscountTimes') }}
+            </label>
+            <input
+              v-model.number="editForm.first_recharge_discount_times"
+              type="number"
+              min="0"
+              class="input"
+              :placeholder="t('admin.promo.rechargeDiscountTimesPlaceholder')"
+            />
           </div>
         </div>
         <div>
@@ -528,6 +552,7 @@ const createForm = reactive({
   bonus_amount: 1,
   first_recharge_bonus_amount: '' as string | number,
   first_recharge_discount_rate: '' as string | number,
+  first_recharge_discount_times: 1 as string | number,
   max_uses: 0,
   expires_at_str: '',
   notes: ''
@@ -538,6 +563,7 @@ const editForm = reactive({
   bonus_amount: 0,
   first_recharge_bonus_amount: '' as string | number,
   first_recharge_discount_rate: '' as string | number,
+  first_recharge_discount_times: 1 as string | number,
   max_uses: 0,
   status: 'active' as 'active' | 'disabled',
   expires_at_str: '',
@@ -615,7 +641,12 @@ const formatFirstRechargePromo = (code: PromoCode): string => {
     parts.push(t('admin.promo.firstRechargeBonusDisplay', { amount: bonus.toFixed(2) }))
   }
   if (discount > 0) {
-    parts.push(t('admin.promo.firstRechargeDiscountDisplay', { rate: formatDiscountRate(discount) }))
+    const times = Number(code.first_recharge_discount_times ?? 1)
+    const timesLabel =
+      times === 0
+        ? t('admin.promo.rechargeDiscountUnlimited')
+        : t('admin.promo.rechargeDiscountTimesDisplay', { count: times })
+    parts.push(t('admin.promo.firstRechargeDiscountDisplay', { rate: formatDiscountRate(discount), times: timesLabel }))
   }
   return parts.join(' / ')
 }
@@ -624,12 +655,14 @@ const applyFirstRechargePromoPayload = (
   payload: {
     first_recharge_bonus_amount?: number | null
     first_recharge_discount_percent?: number | null
+    first_recharge_discount_times?: number
     clear_first_recharge_bonus?: boolean
     clear_first_recharge_discount?: boolean
   },
   form: {
     first_recharge_bonus_amount: string | number
     first_recharge_discount_rate: string | number
+    first_recharge_discount_times: string | number
   },
   existing?: PromoCode | null
 ): boolean => {
@@ -661,6 +694,21 @@ const applyFirstRechargePromoPayload = (
     }
   } else {
     payload.first_recharge_discount_percent = Number((discountRate * 10).toFixed(2))
+  }
+
+  const discountTimes = parseOptionalNumber(
+    form.first_recharge_discount_times,
+    0,
+    Number.MAX_SAFE_INTEGER,
+    'admin.promo.errorBadRechargeDiscountTimes'
+  )
+  if (discountTimes === undefined) return false
+  if (discountTimes !== null) {
+    if (!Number.isInteger(discountTimes)) {
+      appStore.showError(t('admin.promo.errorBadRechargeDiscountTimes'))
+      return false
+    }
+    payload.first_recharge_discount_times = discountTimes
   }
   return true
 }
@@ -777,6 +825,7 @@ const resetCreateForm = () => {
   createForm.bonus_amount = 1
   createForm.first_recharge_bonus_amount = ''
   createForm.first_recharge_discount_rate = ''
+  createForm.first_recharge_discount_times = 1
   createForm.max_uses = 0
   createForm.expires_at_str = ''
   createForm.notes = ''
@@ -791,6 +840,7 @@ const handleEdit = (code: PromoCode) => {
     code.first_recharge_bonus_amount != null ? String(code.first_recharge_bonus_amount) : ''
   editForm.first_recharge_discount_rate =
     code.first_recharge_discount_percent != null ? formatDiscountRate(code.first_recharge_discount_percent) : ''
+  editForm.first_recharge_discount_times = code.first_recharge_discount_times ?? 1
   editForm.max_uses = code.max_uses
   editForm.status = code.status
   editForm.expires_at_str = code.expires_at ? new Date(code.expires_at).toISOString().slice(0, 16) : ''

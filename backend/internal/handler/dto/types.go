@@ -628,6 +628,7 @@ type PromoCode struct {
 	BonusAmount                  float64    `json:"bonus_amount"`
 	FirstRechargeBonusAmount     *float64   `json:"first_recharge_bonus_amount,omitempty"`
 	FirstRechargeDiscountPercent *float64   `json:"first_recharge_discount_percent,omitempty"`
+	FirstRechargeDiscountTimes   int        `json:"first_recharge_discount_times"`
 	MaxUses                      int        `json:"max_uses"`
 	UsedCount                    int        `json:"used_count"`
 	Status                       string     `json:"status"`

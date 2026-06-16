@@ -26,6 +26,7 @@ type CreatePromoCodeRequest struct {
 	BonusAmount                  float64  `json:"bonus_amount" binding:"required,min=0"`
 	FirstRechargeBonusAmount     *float64 `json:"first_recharge_bonus_amount" binding:"omitempty,min=0"`
 	FirstRechargeDiscountPercent *float64 `json:"first_recharge_discount_percent" binding:"omitempty,min=0.01,max=100"`
+	FirstRechargeDiscountTimes   *int     `json:"first_recharge_discount_times" binding:"omitempty,min=0"`
 	MaxUses                      int      `json:"max_uses" binding:"min=0"`
 	ExpiresAt                    *int64   `json:"expires_at"`
 	Notes                        string   `json:"notes"`
@@ -36,6 +37,7 @@ type UpdatePromoCodeRequest struct {
 	BonusAmount                  *float64 `json:"bonus_amount" binding:"omitempty,min=0"`
 	FirstRechargeBonusAmount     *float64 `json:"first_recharge_bonus_amount" binding:"omitempty,min=0"`
 	FirstRechargeDiscountPercent *float64 `json:"first_recharge_discount_percent" binding:"omitempty,min=0.01,max=100"`
+	FirstRechargeDiscountTimes   *int     `json:"first_recharge_discount_times" binding:"omitempty,min=0"`
 	ClearFirstRechargeBonus      bool     `json:"clear_first_recharge_bonus"`
 	ClearFirstRechargeDiscount   bool     `json:"clear_first_recharge_discount"`
 	MaxUses                      *int     `json:"max_uses" binding:"omitempty,min=0"`
@@ -100,6 +102,7 @@ func (h *PromoHandler) Create(c *gin.Context) {
 		BonusAmount:                  req.BonusAmount,
 		FirstRechargeBonusAmount:     req.FirstRechargeBonusAmount,
 		FirstRechargeDiscountPercent: req.FirstRechargeDiscountPercent,
+		FirstRechargeDiscountTimes:   req.FirstRechargeDiscountTimes,
 		MaxUses:                      req.MaxUses,
 		Notes:                        req.Notes,
 	}
@@ -136,6 +139,7 @@ func (h *PromoHandler) Update(c *gin.Context) {
 		FirstRechargeBonusAmount:     req.FirstRechargeBonusAmount,
 		ClearFirstRechargeBonus:      req.ClearFirstRechargeBonus,
 		FirstRechargeDiscountPercent: req.FirstRechargeDiscountPercent,
+		FirstRechargeDiscountTimes:   req.FirstRechargeDiscountTimes,
 		ClearFirstRechargeDiscount:   req.ClearFirstRechargeDiscount,
 		MaxUses:                      req.MaxUses,
 		Status:                       req.Status,

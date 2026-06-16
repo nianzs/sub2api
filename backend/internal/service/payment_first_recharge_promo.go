@@ -7,6 +7,7 @@ import (
 	"math"
 
 	dbent "github.com/Wei-Shaw/sub2api/ent"
+	"github.com/Wei-Shaw/sub2api/ent/paymentorder"
 	"github.com/Wei-Shaw/sub2api/ent/user"
 	"github.com/Wei-Shaw/sub2api/internal/payment"
 )
@@ -29,6 +30,7 @@ type firstRechargePromo struct {
 	PromoCode       string
 	BonusAmount     float64
 	DiscountPercent float64
+	DiscountTimes   int
 	DiscountSet     bool
 }
 
@@ -38,6 +40,7 @@ type firstRechargeAmountPlan struct {
 	BaseCreditAmount float64
 	BonusAmount      float64
 	DiscountPercent  float64
+	DiscountTimes    int
 	DiscountSet      bool
 	CreditAmount     float64
 	PaymentAmount    float64
@@ -51,13 +54,14 @@ func (s *PaymentService) resolveFirstRechargePromo(ctx context.Context, userID i
 	if s == nil || s.promoRepo == nil {
 		return nil, nil
 	}
+	firstRechargeAvailable := true
 	if s.userRepo != nil {
 		user, err := s.userRepo.GetByID(ctx, userID)
 		if err != nil {
 			return nil, err
 		}
 		if user.TotalRecharged > 0 {
-			return nil, nil
+			firstRechargeAvailable = false
 		}
 	}
 	promoCode, err := s.promoRepo.GetFirstRechargePromoByUser(ctx, userID)
@@ -71,12 +75,20 @@ func (s *PaymentService) resolveFirstRechargePromo(ctx context.Context, userID i
 		PromoCodeID: promoCode.ID,
 		PromoCode:   promoCode.Code,
 	}
-	if promoCode.FirstRechargeBonusAmount != nil {
+	if firstRechargeAvailable && promoCode.FirstRechargeBonusAmount != nil {
 		promo.BonusAmount = roundTo(*promoCode.FirstRechargeBonusAmount, 8)
 	}
 	if promoCode.FirstRechargeDiscountPercent != nil {
-		promo.DiscountPercent = clampFirstRechargeDiscount(*promoCode.FirstRechargeDiscountPercent)
-		promo.DiscountSet = true
+		discountTimes := promoCode.FirstRechargeDiscountTimes
+		discountUsed, err := countPromoRechargeDiscountOrders(ctx, s.entClient, userID, promoCode.ID)
+		if err != nil {
+			return nil, err
+		}
+		if discountTimes == 0 || discountUsed < discountTimes {
+			promo.DiscountPercent = clampFirstRechargeDiscount(*promoCode.FirstRechargeDiscountPercent)
+			promo.DiscountTimes = discountTimes
+			promo.DiscountSet = true
+		}
 	}
 	if !promo.active() {
 		return nil, nil
@@ -107,6 +119,7 @@ func buildFirstRechargeAmountPlan(requestAmount, baseCreditAmount float64, promo
 	plan.PromoCode = promo.PromoCode
 	plan.BonusAmount = math.Max(0, promo.BonusAmount)
 	plan.DiscountPercent = clampFirstRechargeDiscount(promo.DiscountPercent)
+	plan.DiscountTimes = promo.DiscountTimes
 	plan.DiscountSet = promo.DiscountSet
 	if plan.DiscountSet {
 		plan.PaymentAmount = roundTo(requestAmount*(plan.DiscountPercent/100), 8)
@@ -143,6 +156,7 @@ func appendFirstRechargePromoSnapshot(snapshot map[string]any, plan firstRecharg
 		"base_amount":      plan.BaseCreditAmount,
 		"bonus_amount":     plan.BonusAmount,
 		"discount_percent": plan.DiscountPercent,
+		"discount_times":   plan.DiscountTimes,
 		"discount_set":     plan.DiscountSet,
 		"credited_amount":  plan.CreditAmount,
 		"payment_amount":   plan.PaymentAmount,
@@ -171,6 +185,7 @@ func firstRechargeAmountPlanFromSnapshot(snapshot map[string]any) (firstRecharge
 		BaseCreditAmount: numberFromSnapshot(data["base_amount"]),
 		BonusAmount:      numberFromSnapshot(data["bonus_amount"]),
 		DiscountPercent:  clampFirstRechargeDiscount(numberFromSnapshot(data["discount_percent"])),
+		DiscountTimes:    int(numberFromSnapshot(data["discount_times"])),
 		DiscountSet:      discountSet,
 		CreditAmount:     numberFromSnapshot(data["credited_amount"]),
 		PaymentAmount:    numberFromSnapshot(data["payment_amount"]),
@@ -228,6 +243,52 @@ func firstRechargePromoPlanForOrder(o *dbent.PaymentOrder) (firstRechargeAmountP
 	return firstRechargeAmountPlanFromSnapshot(o.ProviderSnapshot)
 }
 
+func countPromoRechargeDiscountOrders(ctx context.Context, client *dbent.Client, userID, promoCodeID int64) (int, error) {
+	if client == nil || promoCodeID <= 0 {
+		return 0, nil
+	}
+	orders, err := client.PaymentOrder.Query().
+		Where(
+			paymentorder.UserIDEQ(userID),
+			paymentorder.OrderTypeEQ(payment.OrderTypeBalance),
+			paymentorder.StatusIn(
+				OrderStatusPending,
+				OrderStatusPaid,
+				OrderStatusRecharging,
+				OrderStatusCompleted,
+				OrderStatusRefundRequested,
+				OrderStatusRefunding,
+				OrderStatusPartiallyRefunded,
+				OrderStatusRefunded,
+				OrderStatusRefundFailed,
+			),
+			paymentorder.ProviderSnapshotNotNil(),
+		).
+		All(ctx)
+	if err != nil {
+		return 0, fmt.Errorf("count promo recharge discount orders: %w", err)
+	}
+	count := 0
+	for _, order := range orders {
+		plan, ok := firstRechargePromoPlanForOrder(order)
+		if ok && plan.PromoCodeID == promoCodeID && plan.DiscountSet && plan.DiscountPercent < 100 {
+			count++
+		}
+	}
+	return count, nil
+}
+
+func firstRechargePromoDiscountLimitReached(ctx context.Context, client *dbent.Client, userID int64, plan firstRechargeAmountPlan) (bool, error) {
+	if !plan.DiscountSet || plan.DiscountTimes <= 0 || plan.PromoCodeID <= 0 {
+		return false, nil
+	}
+	used, err := countPromoRechargeDiscountOrders(ctx, client, userID, plan.PromoCodeID)
+	if err != nil {
+		return false, err
+	}
+	return used >= plan.DiscountTimes, nil
+}
+
 func firstRechargePromoFallbackCreditAmount(o *dbent.PaymentOrder) (float64, bool) {
 	plan, ok := firstRechargePromoPlanForOrder(o)
 	if !ok {
@@ -261,6 +322,9 @@ func (s *PaymentService) applyFirstRechargePromoBalance(ctx context.Context, tx 
 	if !ok {
 		return firstRechargePromoBalanceNone, nil
 	}
+	if plan.BonusAmount <= 0 {
+		return firstRechargePromoBalanceNone, nil
+	}
 
 	userQuery := tx.User.Query().Where(user.IDEQ(o.UserID))
 	if paymentTxSupportsForUpdate(tx) {
@@ -290,6 +354,7 @@ func (s *PaymentService) applyFirstRechargePromoBalance(ctx context.Context, tx 
 		"base_amount":      baseAmount,
 		"bonus_amount":     plan.BonusAmount,
 		"discount_percent": plan.DiscountPercent,
+		"discount_times":   plan.DiscountTimes,
 		"credited_amount":  creditAmount,
 		"pay_amount":       o.PayAmount,
 		"recharge_code":    o.RechargeCode,

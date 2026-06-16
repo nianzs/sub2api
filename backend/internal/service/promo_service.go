@@ -23,6 +23,8 @@ var (
 	ErrPromoCodeInvalid     = infraerrors.BadRequest("PROMO_CODE_INVALID", "invalid promo code")
 )
 
+const PromoRechargeDiscountTimesDefault = 1
+
 func validatePromoFirstRechargeValue(value *float64, min, max float64, code, message string) error {
 	if value == nil {
 		return nil
@@ -32,6 +34,20 @@ func validatePromoFirstRechargeValue(value *float64, min, max float64, code, mes
 		return infraerrors.BadRequest(code, message)
 	}
 	return nil
+}
+
+func validatePromoRechargeDiscountTimes(value *int) error {
+	if value != nil && *value < 0 {
+		return infraerrors.BadRequest("INVALID_RECHARGE_DISCOUNT_TIMES", "recharge discount times must be non-negative")
+	}
+	return nil
+}
+
+func promoRechargeDiscountTimes(value *int) int {
+	if value == nil {
+		return PromoRechargeDiscountTimesDefault
+	}
+	return *value
 }
 
 // PromoService 优惠码服务
@@ -207,12 +223,16 @@ func (s *PromoService) Create(ctx context.Context, input *CreatePromoCodeInput) 
 	if err := validatePromoFirstRechargeValue(input.FirstRechargeDiscountPercent, 0.01, 100, "INVALID_FIRST_RECHARGE_DISCOUNT", "first recharge payment percentage must be between 0.01 and 100"); err != nil {
 		return nil, err
 	}
+	if err := validatePromoRechargeDiscountTimes(input.FirstRechargeDiscountTimes); err != nil {
+		return nil, err
+	}
 
 	promoCode := &PromoCode{
 		Code:                         strings.ToUpper(code),
 		BonusAmount:                  input.BonusAmount,
 		FirstRechargeBonusAmount:     input.FirstRechargeBonusAmount,
 		FirstRechargeDiscountPercent: input.FirstRechargeDiscountPercent,
+		FirstRechargeDiscountTimes:   promoRechargeDiscountTimes(input.FirstRechargeDiscountTimes),
 		MaxUses:                      input.MaxUses,
 		UsedCount:                    0,
 		Status:                       PromoCodeStatusActive,
@@ -255,6 +275,9 @@ func (s *PromoService) Update(ctx context.Context, id int64, input *UpdatePromoC
 	if err := validatePromoFirstRechargeValue(input.FirstRechargeDiscountPercent, 0.01, 100, "INVALID_FIRST_RECHARGE_DISCOUNT", "first recharge payment percentage must be between 0.01 and 100"); err != nil {
 		return nil, err
 	}
+	if err := validatePromoRechargeDiscountTimes(input.FirstRechargeDiscountTimes); err != nil {
+		return nil, err
+	}
 	if input.ClearFirstRechargeBonus {
 		promoCode.FirstRechargeBonusAmount = nil
 	} else if input.FirstRechargeBonusAmount != nil {
@@ -264,6 +287,9 @@ func (s *PromoService) Update(ctx context.Context, id int64, input *UpdatePromoC
 		promoCode.FirstRechargeDiscountPercent = nil
 	} else if input.FirstRechargeDiscountPercent != nil {
 		promoCode.FirstRechargeDiscountPercent = input.FirstRechargeDiscountPercent
+	}
+	if input.FirstRechargeDiscountTimes != nil {
+		promoCode.FirstRechargeDiscountTimes = *input.FirstRechargeDiscountTimes
 	}
 	if input.MaxUses != nil {
 		promoCode.MaxUses = *input.MaxUses

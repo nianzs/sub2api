@@ -39,12 +39,14 @@ func scanPromoCode(rows interface {
 	var notes sql.NullString
 	var firstRechargeBonus sql.NullFloat64
 	var firstRechargeDiscount sql.NullFloat64
+	var firstRechargeDiscountTimes sql.NullInt64
 	if err := rows.Scan(
 		&out.ID,
 		&out.Code,
 		&out.BonusAmount,
 		&firstRechargeBonus,
 		&firstRechargeDiscount,
+		&firstRechargeDiscountTimes,
 		&out.MaxUses,
 		&out.UsedCount,
 		&out.Status,
@@ -63,6 +65,11 @@ func scanPromoCode(rows interface {
 		v := firstRechargeDiscount.Float64
 		out.FirstRechargeDiscountPercent = &v
 	}
+	if firstRechargeDiscountTimes.Valid {
+		out.FirstRechargeDiscountTimes = int(firstRechargeDiscountTimes.Int64)
+	} else {
+		out.FirstRechargeDiscountTimes = service.PromoRechargeDiscountTimesDefault
+	}
 	if expiresAt.Valid {
 		out.ExpiresAt = &expiresAt.Time
 	}
@@ -79,7 +86,7 @@ func (r *promoCodeRepository) hydratePromoCodeFirstRechargeFields(ctx context.Co
 	client := clientFromContext(ctx, r.client)
 	for i := range codes {
 		query := fmt.Sprintf(`
-SELECT first_recharge_bonus_amount, first_recharge_discount_percent
+SELECT first_recharge_bonus_amount, first_recharge_discount_percent, first_recharge_discount_times
 FROM promo_codes
 WHERE id = %s`, r.placeholder(1))
 		rows, err := client.QueryContext(ctx, query, codes[i].ID)
@@ -88,8 +95,9 @@ WHERE id = %s`, r.placeholder(1))
 		}
 		var bonus sql.NullFloat64
 		var discount sql.NullFloat64
+		var discountTimes sql.NullInt64
 		if rows.Next() {
-			if err := rows.Scan(&bonus, &discount); err != nil {
+			if err := rows.Scan(&bonus, &discount, &discountTimes); err != nil {
 				_ = rows.Close()
 				return err
 			}
@@ -107,6 +115,11 @@ WHERE id = %s`, r.placeholder(1))
 			v := discount.Float64
 			codes[i].FirstRechargeDiscountPercent = &v
 		}
+		if discountTimes.Valid {
+			codes[i].FirstRechargeDiscountTimes = int(discountTimes.Int64)
+		} else {
+			codes[i].FirstRechargeDiscountTimes = service.PromoRechargeDiscountTimesDefault
+		}
 	}
 	return nil
 }
@@ -116,9 +129,10 @@ func (r *promoCodeRepository) savePromoCodeFirstRechargeFields(ctx context.Conte
 	query := fmt.Sprintf(`
 UPDATE promo_codes
 SET first_recharge_bonus_amount = %s,
-    first_recharge_discount_percent = %s
-WHERE id = %s`, r.placeholder(1), r.placeholder(2), r.placeholder(3))
-	_, err := client.ExecContext(ctx, query, nullableFloatArg(code.FirstRechargeBonusAmount), nullableFloatArg(code.FirstRechargeDiscountPercent), code.ID)
+    first_recharge_discount_percent = %s,
+    first_recharge_discount_times = %s
+WHERE id = %s`, r.placeholder(1), r.placeholder(2), r.placeholder(3), r.placeholder(4))
+	_, err := client.ExecContext(ctx, query, nullableFloatArg(code.FirstRechargeBonusAmount), nullableFloatArg(code.FirstRechargeDiscountPercent), code.FirstRechargeDiscountTimes, code.ID)
 	return err
 }
 
@@ -280,6 +294,7 @@ SELECT id,
        bonus_amount,
        first_recharge_bonus_amount,
        first_recharge_discount_percent,
+       first_recharge_discount_times,
        max_uses,
        used_count,
        status,
@@ -373,6 +388,7 @@ SELECT pc.id,
        pc.bonus_amount,
        pc.first_recharge_bonus_amount,
        pc.first_recharge_discount_percent,
+       pc.first_recharge_discount_times,
        pc.max_uses,
        pc.used_count,
        pc.status,

@@ -798,6 +798,7 @@ func PromoCodeFromService(pc *service.PromoCode) *PromoCode {
 		BonusAmount:                  pc.BonusAmount,
 		FirstRechargeBonusAmount:     pc.FirstRechargeBonusAmount,
 		FirstRechargeDiscountPercent: pc.FirstRechargeDiscountPercent,
+		FirstRechargeDiscountTimes:   pc.FirstRechargeDiscountTimes,
 		MaxUses:                      pc.MaxUses,
 		UsedCount:                    pc.UsedCount,
 		Status:                       pc.Status,

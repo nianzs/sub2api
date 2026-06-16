@@ -4602,10 +4602,14 @@ export default {
       bonusAmount: 'Bonus Amount ($)',
       firstRechargeBonusAmount: 'First Recharge Bonus',
       firstRechargeBonusPlaceholder: 'e.g. 10',
-      firstRechargeDiscountRate: 'First Recharge Discount',
+      firstRechargeDiscountRate: 'Payment Discount',
       firstRechargeDiscountPlaceholder: 'e.g. 8',
+      rechargeDiscountTimes: 'Discount Uses',
+      rechargeDiscountTimesPlaceholder: '0 = unlimited',
       firstRechargeBonusDisplay: '+${amount}',
-      firstRechargeDiscountDisplay: '{rate}x',
+      firstRechargeDiscountDisplay: '{rate}x {times}',
+      rechargeDiscountTimesDisplay: 'x{count}',
+      rechargeDiscountUnlimited: 'unlimited',
       discountUnit: 'x',
       noFirstRechargePromo: 'none',
       maxUses: 'Max Uses',
@@ -4641,7 +4645,8 @@ export default {
       failedToDelete: 'Failed to delete promo code',
       failedToLoadUsages: 'Failed to load usage records',
       errorBadFirstRechargeBonus: 'Please enter a non-negative first recharge bonus',
-      errorBadFirstRechargeDiscount: 'Please enter a first recharge discount between 0.01 and 10'
+      errorBadFirstRechargeDiscount: 'Please enter a payment discount between 0.01 and 10',
+      errorBadRechargeDiscountTimes: 'Please enter non-negative discount uses'
     },
 
     // Usage Records

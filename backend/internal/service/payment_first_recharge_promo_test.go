@@ -14,6 +14,7 @@ func TestBuildFirstRechargeAmountPlan_UsesPaymentPercentage(t *testing.T) {
 		PromoCode:       "PARTNER8",
 		BonusAmount:     10,
 		DiscountPercent: 80,
+		DiscountTimes:   3,
 		DiscountSet:     true,
 	})
 
@@ -22,6 +23,7 @@ func TestBuildFirstRechargeAmountPlan_UsesPaymentPercentage(t *testing.T) {
 	require.Equal(t, 100.0, plan.BaseCreditAmount)
 	require.Equal(t, 10.0, plan.BonusAmount)
 	require.Equal(t, 80.0, plan.DiscountPercent)
+	require.Equal(t, 3, plan.DiscountTimes)
 	require.Equal(t, 110.0, plan.CreditAmount)
 	require.Equal(t, 80.0, plan.PaymentAmount)
 }
@@ -46,6 +48,7 @@ func TestFirstRechargeAmountPlanFromSnapshot_UsesDiscountSetFlag(t *testing.T) {
 			"base_amount":      100,
 			"bonus_amount":     10,
 			"discount_percent": 0,
+			"discount_times":   3,
 			"discount_set":     false,
 			"credited_amount":  110,
 			"payment_amount":   100,
@@ -57,5 +60,6 @@ func TestFirstRechargeAmountPlanFromSnapshot_UsesDiscountSetFlag(t *testing.T) {
 	require.Equal(t, int64(9), plan.PromoCodeID)
 	require.Equal(t, "PARTNER8", plan.PromoCode)
 	require.Equal(t, 10.0, plan.BonusAmount)
+	require.Equal(t, 3, plan.DiscountTimes)
 	require.Equal(t, 100.0, plan.PaymentAmount)
 }

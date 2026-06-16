@@ -158,6 +158,7 @@ func TestCreateOrderInTx_WritesFirstRechargePromoSnapshot(t *testing.T) {
 			BaseCreditAmount: 100,
 			BonusAmount:      10,
 			DiscountPercent:  80,
+			DiscountTimes:    3,
 			DiscountSet:      true,
 			CreditAmount:     110,
 			PaymentAmount:    80,
@@ -172,6 +173,7 @@ func TestCreateOrderInTx_WritesFirstRechargePromoSnapshot(t *testing.T) {
 	require.Equal(t, 100.0, plan.BaseCreditAmount)
 	require.Equal(t, 10.0, plan.BonusAmount)
 	require.Equal(t, 80.0, plan.DiscountPercent)
+	require.Equal(t, 3, plan.DiscountTimes)
 	require.Equal(t, 110.0, plan.CreditAmount)
 	require.Equal(t, 80.0, plan.PaymentAmount)
 	require.Equal(t, 100.0, affiliateRebateBaseAmountForOrder(order))
@@ -194,6 +196,7 @@ func TestCreateOrderInTx_BlocksSecondPendingFirstRechargePromoOrder(t *testing.T
 		BaseCreditAmount: 100,
 		BonusAmount:      10,
 		DiscountPercent:  80,
+		DiscountTimes:    3,
 		DiscountSet:      true,
 		CreditAmount:     110,
 		PaymentAmount:    80,
@@ -262,6 +265,93 @@ func TestCreateOrderInTx_BlocksSecondPendingFirstRechargePromoOrder(t *testing.T
 	require.Error(t, err)
 	require.True(t, infraerrors.IsConflict(err))
 	require.Equal(t, "FIRST_RECHARGE_ORDER_PENDING", infraerrors.Reason(err))
+}
+
+func TestCreateOrderInTx_BlocksWhenRechargeDiscountLimitReached(t *testing.T) {
+	ctx := context.Background()
+	client := newPaymentConfigServiceTestClient(t)
+
+	user, err := client.User.Create().
+		SetEmail("recharge-discount-limit@example.com").
+		SetPasswordHash("hash").
+		SetUsername("recharge-discount-limit-user").
+		Save(ctx)
+	require.NoError(t, err)
+
+	promoPlan := firstRechargeAmountPlan{
+		PromoCodeID:      9,
+		PromoCode:        "PARTNER8",
+		BaseCreditAmount: 100,
+		DiscountPercent:  80,
+		DiscountTimes:    1,
+		DiscountSet:      true,
+		CreditAmount:     100,
+		PaymentAmount:    80,
+	}
+	svc := &PaymentService{entClient: client}
+	_, err = svc.createOrderInTx(
+		ctx,
+		CreateOrderRequest{
+			UserID:      user.ID,
+			PaymentType: payment.TypeAlipay,
+			OrderType:   payment.OrderTypeBalance,
+			ClientIP:    "127.0.0.1",
+			SrcHost:     "app.example.com",
+		},
+		&User{
+			ID:       user.ID,
+			Email:    user.Email,
+			Username: user.Username,
+		},
+		nil,
+		&PaymentConfig{
+			MaxPendingOrders: 3,
+			OrderTimeoutMin:  30,
+		},
+		100,
+		80,
+		0,
+		80,
+		&payment.InstanceSelection{
+			ProviderKey: payment.TypeAlipay,
+			PaymentMode: "redirect",
+		},
+		promoPlan,
+	)
+	require.NoError(t, err)
+
+	_, err = svc.createOrderInTx(
+		ctx,
+		CreateOrderRequest{
+			UserID:      user.ID,
+			PaymentType: payment.TypeAlipay,
+			OrderType:   payment.OrderTypeBalance,
+			ClientIP:    "127.0.0.1",
+			SrcHost:     "app.example.com",
+		},
+		&User{
+			ID:       user.ID,
+			Email:    user.Email,
+			Username: user.Username,
+		},
+		nil,
+		&PaymentConfig{
+			MaxPendingOrders: 3,
+			OrderTimeoutMin:  30,
+		},
+		100,
+		80,
+		0,
+		80,
+		&payment.InstanceSelection{
+			ProviderKey: payment.TypeAlipay,
+			PaymentMode: "redirect",
+		},
+		promoPlan,
+	)
+	require.Error(t, err)
+	require.True(t, infraerrors.IsConflict(err))
+	require.Equal(t, "RECHARGE_DISCOUNT_LIMIT_REACHED", infraerrors.Reason(err))
 }
 
 func TestBuildPaymentOrderProviderSnapshot_UsesWxpayJSAPIAppIDForOpenIDOrders(t *testing.T) {

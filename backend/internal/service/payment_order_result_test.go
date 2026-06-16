@@ -243,6 +243,7 @@ func TestMaybeBuildWeChatOAuthRequiredResponseIncludesFirstRechargePromo(t *test
 		BaseCreditAmount: 100,
 		BonusAmount:      10,
 		DiscountPercent:  80,
+		DiscountTimes:    3,
 		DiscountSet:      true,
 		CreditAmount:     110,
 		PaymentAmount:    80,

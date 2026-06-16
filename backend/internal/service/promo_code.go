@@ -8,6 +8,7 @@ type PromoCode struct {
 	BonusAmount                  float64
 	FirstRechargeBonusAmount     *float64
 	FirstRechargeDiscountPercent *float64
+	FirstRechargeDiscountTimes   int
 	MaxUses                      int
 	UsedCount                    int
 	Status                       string
@@ -52,6 +53,7 @@ type CreatePromoCodeInput struct {
 	BonusAmount                  float64
 	FirstRechargeBonusAmount     *float64
 	FirstRechargeDiscountPercent *float64
+	FirstRechargeDiscountTimes   *int
 	MaxUses                      int
 	ExpiresAt                    *time.Time
 	Notes                        string
@@ -64,6 +66,7 @@ type UpdatePromoCodeInput struct {
 	ClearFirstRechargeBonus      bool
 	FirstRechargeDiscountPercent *float64
 	ClearFirstRechargeDiscount   bool
+	FirstRechargeDiscountTimes   *int
 	MaxUses                      *int
 	Status                       *string
 	ExpiresAt                    *time.Time

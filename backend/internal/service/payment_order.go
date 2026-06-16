@@ -276,23 +276,30 @@ func (s *PaymentService) checkFirstRechargePromoOrderLimit(ctx context.Context, 
 	if err != nil {
 		return fmt.Errorf("get user for first recharge promo order: %w", err)
 	}
-	if currentUser.TotalRecharged > 0 {
+	if plan.BonusAmount > 0 && currentUser.TotalRecharged > 0 {
 		return infraerrors.Conflict("FIRST_RECHARGE_ALREADY_USED", "first recharge promotion has already been used")
 	}
-	orders, err := tx.PaymentOrder.Query().
-		Where(
-			paymentorder.UserIDEQ(userID),
-			paymentorder.OrderTypeEQ(payment.OrderTypeBalance),
-			paymentorder.StatusEQ(OrderStatusPending),
-			paymentorder.ProviderSnapshotNotNil(),
-		).
-		All(ctx)
-	if err != nil {
-		return fmt.Errorf("query pending first recharge promo orders: %w", err)
+	if reached, err := firstRechargePromoDiscountLimitReached(ctx, tx.Client(), userID, plan); err != nil {
+		return err
+	} else if reached {
+		return infraerrors.Conflict("RECHARGE_DISCOUNT_LIMIT_REACHED", "recharge discount limit has been reached")
 	}
-	for _, order := range orders {
-		if _, ok := firstRechargePromoPlanForOrder(order); ok {
-			return infraerrors.Conflict("FIRST_RECHARGE_ORDER_PENDING", "first recharge promotion order is pending")
+	if plan.BonusAmount > 0 {
+		orders, err := tx.PaymentOrder.Query().
+			Where(
+				paymentorder.UserIDEQ(userID),
+				paymentorder.OrderTypeEQ(payment.OrderTypeBalance),
+				paymentorder.StatusEQ(OrderStatusPending),
+				paymentorder.ProviderSnapshotNotNil(),
+			).
+			All(ctx)
+		if err != nil {
+			return fmt.Errorf("query pending first recharge promo orders: %w", err)
+		}
+		for _, order := range orders {
+			if promoPlan, ok := firstRechargePromoPlanForOrder(order); ok && promoPlan.BonusAmount > 0 {
+				return infraerrors.Conflict("FIRST_RECHARGE_ORDER_PENDING", "first recharge promotion order is pending")
+			}
 		}
 	}
 	return nil

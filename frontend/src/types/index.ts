@@ -1838,6 +1838,7 @@ export interface PromoCode {
   bonus_amount: number
   first_recharge_bonus_amount?: number | null
   first_recharge_discount_percent?: number | null
+  first_recharge_discount_times: number
   max_uses: number
   used_count: number
   status: 'active' | 'disabled'
@@ -1861,6 +1862,7 @@ export interface CreatePromoCodeRequest {
   bonus_amount: number
   first_recharge_bonus_amount?: number | null
   first_recharge_discount_percent?: number | null
+  first_recharge_discount_times?: number
   max_uses?: number
   expires_at?: number | null
   notes?: string
@@ -1871,6 +1873,7 @@ export interface UpdatePromoCodeRequest {
   bonus_amount?: number
   first_recharge_bonus_amount?: number | null
   first_recharge_discount_percent?: number | null
+  first_recharge_discount_times?: number
   clear_first_recharge_bonus?: boolean
   clear_first_recharge_discount?: boolean
   max_uses?: number

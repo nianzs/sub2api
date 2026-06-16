@@ -4754,10 +4754,14 @@ export default {
       bonusAmount: '赠送金额 ($)',
       firstRechargeBonusAmount: '首充赠送额度',
       firstRechargeBonusPlaceholder: '例如 10',
-      firstRechargeDiscountRate: '首充支付折扣',
+      firstRechargeDiscountRate: '支付折扣',
       firstRechargeDiscountPlaceholder: '例如 8',
+      rechargeDiscountTimes: '折扣次数',
+      rechargeDiscountTimesPlaceholder: '0 表示长期',
       firstRechargeBonusDisplay: '赠 ${amount}',
-      firstRechargeDiscountDisplay: '{rate} 折',
+      firstRechargeDiscountDisplay: '{rate} 折 {times}',
+      rechargeDiscountTimesDisplay: 'x{count}',
+      rechargeDiscountUnlimited: '长期',
       discountUnit: '折',
       noFirstRechargePromo: '无',
       maxUses: '最大使用次数',
@@ -4793,7 +4797,8 @@ export default {
       failedToDelete: '删除优惠码失败',
       failedToLoadUsages: '加载使用记录失败',
       errorBadFirstRechargeBonus: '请输入非负首充赠送额度',
-      errorBadFirstRechargeDiscount: '请输入 0.01-10 之间的首充折扣'
+      errorBadFirstRechargeDiscount: '请输入 0.01-10 之间的支付折扣',
+      errorBadRechargeDiscountTimes: '请输入非负折扣次数'
     },
 
     // Usage Records
