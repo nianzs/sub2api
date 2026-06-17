@@ -13,6 +13,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"os"
 	"regexp"
@@ -82,6 +83,7 @@ type Usage struct {
 	CacheCreationInputTokens   int
 	CacheCreation5mInputTokens int
 	CacheCreation1hInputTokens int
+	KiroCredits                float64
 }
 
 type StreamResult struct {
@@ -1183,6 +1185,9 @@ func StreamEventStreamAsAnthropicWithContext(ctx context.Context, body io.Reader
 		"output_tokens":               usage.OutputTokens,
 		"cache_read_input_tokens":     usage.CacheReadInputTokens,
 		"cache_creation_input_tokens": usage.CacheCreationInputTokens,
+	}
+	if usage.KiroCredits > 0 {
+		finalUsageMap["_sub2api_kiro_credits"] = usage.KiroCredits
 	}
 	addKiroCacheUsageFields(finalUsageMap, usage)
 	if err := writeEvent("message_delta", map[string]any{
@@ -3641,7 +3646,7 @@ func extractSemanticEvents(eventType string, event map[string]any, lastContentFr
 				SourceStopReason: sourceStopReason,
 			})
 		}
-	case "messageMetadataEvent", "metadataEvent", "supplementaryWebLinksEvent", "usageEvent", "messageStopEvent", "message_stop":
+	case "messageMetadataEvent", "metadataEvent", "supplementaryWebLinksEvent", "usageEvent", "messageStopEvent", "message_stop", "meteringEvent":
 		out = append(out, kiroSemanticEvent{
 			Type:             kiroSemanticUsage,
 			SourceEventType:  eventType,
@@ -4048,7 +4053,10 @@ func updateUsageFromEvent(usage *Usage, eventType string, event map[string]any) 
 		if value, ok := toInt(tokenUsage["cacheReadInputTokens"]); ok {
 			usage.CacheReadInputTokens = value
 		}
+		updateKiroCreditsFromMap(usage, tokenUsage)
 	}
+	updateKiroCreditsFromMap(usage, event)
+	updateKiroCreditsFromMap(usage, meta)
 	if value, ok := toInt(event["inputTokens"]); ok && value > 0 {
 		usage.InputTokens = value
 	}
@@ -4066,6 +4074,13 @@ func updateUsageFromEvent(usage *Usage, eventType string, event map[string]any) 
 	}
 	if value, ok := toInt(meta["totalTokens"]); ok && value > 0 {
 		usage.TotalTokens = value
+	}
+	if eventType == "meteringEvent" {
+		if value, ok := toPositiveFiniteFloat(meta["usage"]); ok {
+			usage.KiroCredits += value
+		} else if value, ok := toPositiveFiniteFloat(event["usage"]); ok {
+			usage.KiroCredits += value
+		}
 	}
 }
 
@@ -4129,6 +4144,60 @@ func toInt(value any) (int, bool) {
 	default:
 		return 0, false
 	}
+}
+
+var kiroCreditUsageFieldNames = [...]string{
+	"kiroCredits",
+	"credits",
+	"creditsUsed",
+	"creditUsage",
+	"consumedCredits",
+}
+
+func updateKiroCreditsFromMap(usage *Usage, values map[string]any) {
+	if usage == nil || len(values) == 0 {
+		return
+	}
+	for _, field := range kiroCreditUsageFieldNames {
+		value, ok := toPositiveFiniteFloat(values[field])
+		if !ok {
+			continue
+		}
+		usage.KiroCredits = value
+		return
+	}
+}
+
+func toPositiveFiniteFloat(value any) (float64, bool) {
+	var out float64
+	switch v := value.(type) {
+	case float64:
+		out = v
+	case float32:
+		out = float64(v)
+	case int:
+		out = float64(v)
+	case int64:
+		out = float64(v)
+	case json.Number:
+		parsed, err := v.Float64()
+		if err != nil {
+			return 0, false
+		}
+		out = parsed
+	case string:
+		parsed, err := strconv.ParseFloat(strings.TrimSpace(v), 64)
+		if err != nil {
+			return 0, false
+		}
+		out = parsed
+	default:
+		return 0, false
+	}
+	if math.IsNaN(out) || math.IsInf(out, 0) || out <= 0 {
+		return 0, false
+	}
+	return out, true
 }
 
 func mergeKiroCacheEmulationUsage(base Usage, simulated *Usage) Usage {

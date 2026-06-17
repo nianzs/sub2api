@@ -749,6 +749,7 @@ func kiroUsageToClaude(usage kiropkg.Usage, fallbackInput int) ClaudeUsage {
 		CacheCreationInputTokens: usage.CacheCreationInputTokens,
 		CacheCreation5mTokens:    usage.CacheCreation5mInputTokens,
 		CacheCreation1hTokens:    usage.CacheCreation1hInputTokens,
+		KiroCredits:              usage.KiroCredits,
 	}
 }
 

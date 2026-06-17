@@ -210,6 +210,9 @@
           <template #cell-select="{ row }">
             <input type="checkbox" :checked="isSelected(row.id)" @change="toggleSel(row.id)" class="rounded border-gray-300 text-primary-600 focus:ring-primary-500" />
           </template>
+          <template #cell-id="{ value }">
+            <span class="font-mono text-xs text-gray-500 dark:text-gray-400">#{{ value }}</span>
+          </template>
           <template #cell-name="{ row, value }">
             <div class="flex flex-col">
               <span class="font-medium text-gray-900 dark:text-white">{{ value }}</span>
@@ -273,6 +276,8 @@
           <template #cell-today_stats="{ row }">
             <AccountTodayStatsCell
               :stats="todayStatsByAccountId[String(row.id)] ?? null"
+              :platform="row.platform"
+              :kiro-credit-unit-price-usd="getKiroCreditUnitPriceUsd(row)"
               :loading="todayStatsLoading"
               :error="todayStatsError"
             />
@@ -540,6 +545,7 @@ type AccountSortState = {
   sort_order: AccountSortOrder
 }
 const ACCOUNT_SORTABLE_KEYS = new Set([
+  'id',
   'name',
   'status',
   'schedulable',
@@ -592,7 +598,8 @@ const buildDefaultTodayStats = (): WindowStats => ({
   tokens: 0,
   cost: 0,
   standard_cost: 0,
-  user_cost: 0
+  user_cost: 0,
+  kiro_credits: 0
 })
 
 const refreshTodayStatsBatch = async () => {
@@ -937,6 +944,13 @@ const handleKiroUsageMeta = (account: Account, meta: { plan_type?: string; kiro_
   }
 }
 
+const getKiroCreditUnitPriceUsd = (account: Account): number => {
+  if (account.platform !== 'kiro') return 0
+  const raw = account.extra?.kiro_credit_unit_price_usd
+  const value = typeof raw === 'number' ? raw : typeof raw === 'string' ? Number(raw) : 0
+  return Number.isFinite(value) && value > 0 ? value : 0
+}
+
 const syncAccountRefs = (nextAccount: Account) => {
   if (edAcc.value?.id === nextAccount.id) edAcc.value = nextAccount
   if (reAuthAcc.value?.id === nextAccount.id) reAuthAcc.value = nextAccount
@@ -1169,6 +1183,7 @@ const allColumns = computed(() => {
   const c = [
     { key: 'select', label: '', sortable: false },
     { key: 'name', label: t('admin.accounts.columns.name'), sortable: true },
+    { key: 'id', label: t('admin.accounts.columns.id'), sortable: true },
     { key: 'platform_type', label: t('admin.accounts.columns.platformType'), sortable: false },
     { key: 'capacity', label: t('admin.accounts.columns.capacity'), sortable: false },
     { key: 'status', label: t('admin.accounts.columns.status'), sortable: true },

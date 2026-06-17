@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"hash/fnv"
 	"log/slog"
+	"math"
 	"reflect"
 	"sort"
 	"strconv"
@@ -1580,6 +1581,48 @@ func validateAccountCustomHeadersFromExtra(extra map[string]any) error {
 		return nil
 	}
 	return ValidateAccountCustomHeaders(parsed)
+}
+
+// ValidateKiroCreditUnitPriceFromExtra rejects invalid account-level Kiro credit pricing.
+func ValidateKiroCreditUnitPriceFromExtra(extra map[string]any) error {
+	if extra == nil {
+		return nil
+	}
+	raw, ok := extra["kiro_credit_unit_price_usd"]
+	if !ok || raw == nil {
+		return nil
+	}
+
+	var value float64
+	switch v := raw.(type) {
+	case float64:
+		value = v
+	case float32:
+		value = float64(v)
+	case int:
+		value = float64(v)
+	case int64:
+		value = float64(v)
+	case json.Number:
+		parsed, err := v.Float64()
+		if err != nil {
+			return fmt.Errorf("kiro_credit_unit_price_usd must be a number")
+		}
+		value = parsed
+	case string:
+		parsed, err := strconv.ParseFloat(strings.TrimSpace(v), 64)
+		if err != nil {
+			return fmt.Errorf("kiro_credit_unit_price_usd must be a number")
+		}
+		value = parsed
+	default:
+		return fmt.Errorf("kiro_credit_unit_price_usd must be a number")
+	}
+	if math.IsNaN(value) || math.IsInf(value, 0) || value < 0 {
+		return fmt.Errorf("kiro_credit_unit_price_usd must be a finite number >= 0")
+	}
+	extra["kiro_credit_unit_price_usd"] = value
+	return nil
 }
 
 // WebSearch 模拟三态常量

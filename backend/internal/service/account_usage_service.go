@@ -148,6 +148,7 @@ type WindowStats struct {
 	Cost         float64 `json:"cost"`
 	StandardCost float64 `json:"standard_cost"`
 	UserCost     float64 `json:"user_cost"`
+	KiroCredits  float64 `json:"kiro_credits"`
 }
 
 // UsageProgress 使用量进度
@@ -1021,6 +1022,7 @@ func (s *AccountUsageService) addWindowStats(ctx context.Context, account *Accou
 			Cost:         stats.Cost,
 			StandardCost: stats.StandardCost,
 			UserCost:     stats.UserCost,
+			KiroCredits:  stats.KiroCredits,
 		}
 
 		// 缓存窗口统计（1 分钟）
@@ -1049,6 +1051,7 @@ func (s *AccountUsageService) GetTodayStats(ctx context.Context, accountID int64
 		Cost:         stats.Cost,
 		StandardCost: stats.StandardCost,
 		UserCost:     stats.UserCost,
+		KiroCredits:  stats.KiroCredits,
 	}, nil
 }
 
@@ -1121,6 +1124,7 @@ func windowStatsFromAccountStats(stats *usagestats.AccountStats) *WindowStats {
 		Cost:         stats.Cost,
 		StandardCost: stats.StandardCost,
 		UserCost:     stats.UserCost,
+		KiroCredits:  stats.KiroCredits,
 	}
 }
 

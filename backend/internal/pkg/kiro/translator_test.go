@@ -571,6 +571,119 @@ func TestParseNonStreamingEventStream(t *testing.T) {
 	require.True(t, strings.Contains(firstText, "hello from kiro"))
 }
 
+func TestParseNonStreamingEventStreamCapturesKiroCredits(t *testing.T) {
+	stream := bytes.NewBuffer(nil)
+	_, _ = stream.Write(buildEventStreamFrame(t, "assistantResponseEvent", map[string]any{
+		"assistantResponseEvent": map[string]any{
+			"content": "hello from kiro",
+		},
+	}))
+	_, _ = stream.Write(buildEventStreamFrame(t, "messageMetadataEvent", map[string]any{
+		"messageMetadataEvent": map[string]any{
+			"tokenUsage": map[string]any{
+				"uncachedInputTokens": 12,
+				"outputTokens":        7,
+			},
+		},
+	}))
+	_, _ = stream.Write(buildEventStreamFrame(t, "meteringEvent", map[string]any{
+		"meteringEvent": map[string]any{
+			"usage": 0.12,
+		},
+	}))
+	_, _ = stream.Write(buildEventStreamFrame(t, "meteringEvent", map[string]any{
+		"meteringEvent": map[string]any{
+			"usage": "0.05",
+		},
+	}))
+
+	result, err := ParseNonStreamingEventStreamWithContext(stream, "claude-sonnet-4-5", KiroRequestContext{})
+	require.NoError(t, err)
+	require.InDelta(t, 0.17, result.Usage.KiroCredits, 0.000001)
+	require.False(t, gjson.GetBytes(result.ResponseBody, "usage.kiro_credits").Exists())
+	require.False(t, gjson.GetBytes(result.ResponseBody, "usage._sub2api_kiro_credits").Exists())
+}
+
+func TestUpdateUsageFromEventCapturesKiroCreditsAliases(t *testing.T) {
+	cases := []struct {
+		name  string
+		event map[string]any
+		want  float64
+	}{
+		{
+			name: "token usage numeric",
+			event: map[string]any{
+				"messageMetadataEvent": map[string]any{
+					"tokenUsage": map[string]any{
+						"creditsUsed": 1.25,
+					},
+				},
+			},
+			want: 1.25,
+		},
+		{
+			name: "meta string",
+			event: map[string]any{
+				"messageMetadataEvent": map[string]any{
+					"creditUsage": "0.071",
+				},
+			},
+			want: 0.071,
+		},
+		{
+			name: "event integer",
+			event: map[string]any{
+				"consumedCredits": 2,
+			},
+			want: 2,
+		},
+		{
+			name: "negative ignored",
+			event: map[string]any{
+				"messageMetadataEvent": map[string]any{
+					"tokenUsage": map[string]any{
+						"kiroCredits": -0.1,
+					},
+				},
+			},
+			want: 0,
+		},
+		{
+			name: "nan ignored",
+			event: map[string]any{
+				"messageMetadataEvent": map[string]any{
+					"credits": "NaN",
+				},
+			},
+			want: 0,
+		},
+	}
+
+	for _, tt := range cases {
+		t.Run(tt.name, func(t *testing.T) {
+			var usage Usage
+			updateUsageFromEvent(&usage, "messageMetadataEvent", tt.event)
+			require.InDelta(t, tt.want, usage.KiroCredits, 0.000001)
+		})
+	}
+}
+
+func TestUpdateUsageFromEventAccumulatesMeteringCredits(t *testing.T) {
+	var usage Usage
+
+	updateUsageFromEvent(&usage, "meteringEvent", map[string]any{
+		"meteringEvent": map[string]any{"usage": 0.12},
+	})
+	updateUsageFromEvent(&usage, "meteringEvent", map[string]any{
+		"meteringEvent": map[string]any{"usage": "0.05"},
+	})
+	updateUsageFromEvent(&usage, "meteringEvent", map[string]any{
+		"meteringEvent": map[string]any{"usage": -1},
+	})
+
+	require.InDelta(t, 0.17, usage.KiroCredits, 0.000001)
+}
+
 func TestExtractThinkingBlocksIgnoresLiteralTags(t *testing.T) {
 	content := strings.Join([]string{
 		"Use `<thinking>` literally.",
@@ -1786,6 +1899,49 @@ func TestStreamEventStreamAsAnthropicEstimatesOutputTokensWhenMissing(t *testing
 	deltaSection := output[deltaIdx:]
 	require.NotContains(t, deltaSection, `"output_tokens":0`, "message_delta output_tokens should not be 0")
 	require.Contains(t, deltaSection, `"output_tokens":`, "output_tokens should be present in message_delta")
+}
+
+func TestStreamEventStreamAsAnthropicCapturesKiroCredits(t *testing.T) {
+	stream := bytes.NewBuffer(nil)
+	var out bytes.Buffer
+
+	_, _ = stream.Write(buildEventStreamFrame(t, "assistantResponseEvent", map[string]any{
+		"assistantResponseEvent": map[string]any{"content": "hello world"},
+	}))
+	_, _ = stream.Write(buildEventStreamFrame(t, "messageMetadataEvent", map[string]any{
+		"messageMetadataEvent": map[string]any{
+			"tokenUsage": map[string]any{
+				"uncachedInputTokens": 10,
+				"outputTokens":        5,
+			},
+		},
+	}))
+	_, _ = stream.Write(buildEventStreamFrame(t, "meteringEvent", map[string]any{
+		"meteringEvent": map[string]any{"usage": 0.12},
+	}))
+	_, _ = stream.Write(buildEventStreamFrame(t, "meteringEvent", map[string]any{
+		"meteringEvent": map[string]any{"usage": 0.05},
+	}))
+
+	result, err := StreamEventStreamAsAnthropicWithContext(context.Background(), stream, &out, "claude-sonnet-4-5", 10, KiroRequestContext{})
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.InDelta(t, 0.17, result.Usage.KiroCredits, 0.000001)
+	require.Contains(t, out.String(), "_sub2api_kiro_credits")
+
+	var delta map[string]any
+	for _, line := range strings.Split(out.String(), "\n") {
+		data, ok := strings.CutPrefix(line, "data: ")
+		if !ok || !strings.Contains(data, "_sub2api_kiro_credits") {
+			continue
+		}
+		require.NoError(t, json.Unmarshal([]byte(data), &delta))
+		break
+	}
+	require.NotNil(t, delta)
+	usageMap, ok := delta["usage"].(map[string]any)
+	require.True(t, ok)
+	require.InDelta(t, 0.17, usageMap["_sub2api_kiro_credits"].(float64), 0.000001)
 }
 
 func TestStreamEventStreamAsAnthropicStreamingToolInputCountsOutputTokens(t *testing.T) {

@@ -3,12 +3,18 @@
 package service
 
 import (
+	"bytes"
 	"context"
+	"encoding/binary"
 	"encoding/json"
 	"io"
 	"net/http"
+	"net/http/httptest"
 	"testing"
+	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/config"
+	"github.com/Wei-Shaw/sub2api/internal/domain"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 	"github.com/tidwall/gjson"
@@ -292,6 +298,99 @@ func TestBuildKiroPayloadForAccount_KiroBuilderIDUsesCredentialProfileArn(t *tes
 	require.NoError(t, err)
 	kiroPayload := buildResult.Payload
 	require.Contains(t, string(kiroPayload), `"profileArn":"arn:aws:codewhisperer:us-east-1:123456789012:profile/CACHED"`)
+}
+
+func TestForwardKiroMessagesStreamCapturesMeteringCredits(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
+
+	account := &Account{
+		ID:          21,
+		Name:        "kiro-stream-credits",
+		Platform:    PlatformKiro,
+		Type:        AccountTypeOAuth,
+		Status:      StatusActive,
+		Schedulable: true,
+		Concurrency: 1,
+		Credentials: map[string]any{
+			"access_token": "kiro-access-token",
+			"profile_arn":  "arn:aws:codewhisperer:us-east-1:123456789012:profile/STREAMCREDITS",
+		},
+	}
+	upstreamBody := bytes.NewBuffer(nil)
+	_, _ = upstreamBody.Write(buildKiroEventStreamFrame(t, "assistantResponseEvent", map[string]any{
+		"assistantResponseEvent": map[string]any{"content": "hello"},
+	}))
+	_, _ = upstreamBody.Write(buildKiroEventStreamFrame(t, "messageMetadataEvent", map[string]any{
+		"messageMetadataEvent": map[string]any{
+			"tokenUsage": map[string]any{
+				"uncachedInputTokens": 7,
+				"outputTokens":        3,
+			},
+		},
+	}))
+	_, _ = upstreamBody.Write(buildKiroEventStreamFrame(t, "meteringEvent", map[string]any{
+		"meteringEvent": map[string]any{"usage": 0.17},
+	}))
+	upstream := &queuedHTTPUpstream{
+		responses: []*http.Response{{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"application/vnd.amazon.eventstream"}},
+			Body:       io.NopCloser(upstreamBody),
+		}},
+	}
+	svc := &GatewayService{
+		httpUpstream:        upstream,
+		kiroCooldownStore:   &stubKiroCooldownStore{},
+		tlsFPProfileService: &TLSFingerprintProfileService{},
+		cfg: &config.Config{
+			Gateway: config.GatewayConfig{
+				StreamDataIntervalTimeout: 0,
+				MaxLineSize:               defaultMaxLineSize,
+			},
+		},
+		rateLimitService: &RateLimitService{},
+	}
+	requestBody := []byte(`{"model":"claude-sonnet-4-6","stream":true,"messages":[{"role":"user","content":"hi"}]}`)
+	parsed, err := ParseGatewayRequest(NewRequestBodyRef(requestBody), domain.PlatformAnthropic)
+	require.NoError(t, err)
+
+	result, err := svc.forwardKiroMessages(context.Background(), c, account, parsed, time.Now())
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.True(t, result.Stream)
+	require.InDelta(t, 0.17, result.Usage.KiroCredits, 0.000001)
+	require.Equal(t, 3, result.Usage.OutputTokens)
+	require.NotContains(t, rec.Body.String(), "_sub2api_kiro_credits")
+}
+
+func buildKiroEventStreamFrame(t *testing.T, eventType string, payload map[string]any) []byte {
+	t.Helper()
+	payloadBytes, err := json.Marshal(payload)
+	require.NoError(t, err)
+
+	headerName := []byte(":event-type")
+	headerValue := []byte(eventType)
+	headersLen := 1 + len(headerName) + 1 + 2 + len(headerValue)
+	totalLen := 12 + headersLen + len(payloadBytes) + 4
+	frame := make([]byte, totalLen)
+	binary.BigEndian.PutUint32(frame[0:4], uint32(totalLen))
+	binary.BigEndian.PutUint32(frame[4:8], uint32(headersLen))
+	offset := 12
+	frame[offset] = byte(len(headerName))
+	offset++
+	copy(frame[offset:], headerName)
+	offset += len(headerName)
+	frame[offset] = 7 // string header
+	offset++
+	binary.BigEndian.PutUint16(frame[offset:offset+2], uint16(len(headerValue)))
+	offset += 2
+	copy(frame[offset:], headerValue)
+	offset += len(headerValue)
+	copy(frame[offset:], payloadBytes)
+	return frame
 }
 
 func TestBuildKiroPayloadForAccount_KiroEnterpriseIDCOmitsMissingProfileArn(t *testing.T) {

@@ -17,6 +17,11 @@ type dataResponse struct {
 	Data dataPayload `json:"data"`
 }
 
+type dataImportResponse struct {
+	Code int              `json:"code"`
+	Data DataImportResult `json:"data"`
+}
+
 type dataPayload struct {
 	Type     string        `json:"type"`
 	Version  int           `json:"version"`
@@ -274,4 +279,130 @@ func TestImportDataReusesProxyAndSkipsDefaultGroup(t *testing.T) {
 	require.Len(t, adminSvc.createdProxies, 0)
 	require.Len(t, adminSvc.createdAccounts, 1)
 	require.True(t, adminSvc.createdAccounts[0].SkipDefaultGroupBind)
+}
+
+func TestImportDataSupportsKiroAccountManagerJSON(t *testing.T) {
+	router, adminSvc := setupAccountDataRouter()
+
+	dataPayload := map[string]any{
+		"data": []map[string]any{
+			{
+				"id":           "source-id-1",
+				"email":        "builder@example.com",
+				"label":        "Kiro BuilderId 账号",
+				"status":       "inactive",
+				"addedAt":      "2026/06/15 13:59:19",
+				"accessToken":  "access-token",
+				"refreshToken": "refresh-token",
+				"provider":     "BuilderId",
+				"userId":       "d-user-id",
+				"authMethod":   "IdC",
+				"clientId":     "client-id",
+				"clientSecret": "client-secret",
+				"region":       "us-east-1",
+				"clientIdHash": "client-id-hash",
+				"profileArn":   "arn:aws:codewhisperer:us-east-1:123456789012:profile/test",
+				"machineId":    "2582956e-cc88-4669-b546-07adbffcb894",
+				"enabled":      false,
+			},
+		},
+		"skip_default_group_bind": true,
+	}
+
+	body, _ := json.Marshal(dataPayload)
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/accounts/data", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code)
+
+	var resp dataImportResponse
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+	require.Equal(t, 0, resp.Code)
+	require.Equal(t, 1, resp.Data.AccountCreated)
+	require.Equal(t, 0, resp.Data.AccountFailed)
+	require.Len(t, adminSvc.createdAccounts, 1)
+
+	created := adminSvc.createdAccounts[0]
+	require.Equal(t, "builder@example.com", created.Name)
+	require.Equal(t, service.PlatformKiro, created.Platform)
+	require.Equal(t, service.AccountTypeOAuth, created.Type)
+	require.Equal(t, 3, created.Concurrency)
+	require.Equal(t, 50, created.Priority)
+	require.True(t, created.SkipDefaultGroupBind)
+	require.Equal(t, "access-token", created.Credentials["access_token"])
+	require.Equal(t, "refresh-token", created.Credentials["refresh_token"])
+	require.Equal(t, "idc", created.Credentials["auth_method"])
+	require.Equal(t, "BuilderId", created.Credentials["provider"])
+	require.Equal(t, "client-id", created.Credentials["client_id"])
+	require.Equal(t, "client-secret", created.Credentials["client_secret"])
+	require.Equal(t, "client-id-hash", created.Credentials["client_id_hash"])
+	require.Equal(t, "builder@example.com", created.Credentials["email"])
+	require.Equal(t, "us-east-1", created.Credentials["region"])
+	require.Equal(t, "arn:aws:codewhisperer:us-east-1:123456789012:profile/test", created.Credentials["profile_arn"])
+	require.Equal(t, "2582956e-cc88-4669-b546-07adbffcb894", created.Credentials["machineId"])
+	require.Equal(t, dataImportSourceKiroAccountManager, created.Extra["import_source"])
+	require.Equal(t, "source-id-1", created.Extra["source_id"])
+	require.Equal(t, "Kiro BuilderId 账号", created.Extra["label"])
+	require.Equal(t, "d-user-id", created.Extra["user_id"])
+	require.Equal(t, "inactive", created.Extra["source_status"])
+}
+
+func TestImportDataKiroAccountManagerAllowsRefreshTokenOnly(t *testing.T) {
+	router, adminSvc := setupAccountDataRouter()
+
+	dataPayload := map[string]any{
+		"data": []map[string]any{
+			{
+				"email":        "refresh-only@example.com",
+				"refreshToken": "refresh-token",
+				"clientIdHash": "client-id-hash",
+				"authMethod":   "IdC",
+			},
+		},
+	}
+
+	body, _ := json.Marshal(dataPayload)
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/accounts/data", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code)
+
+	var resp dataImportResponse
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+	require.Equal(t, 1, resp.Data.AccountCreated)
+	require.Equal(t, 0, resp.Data.AccountFailed)
+	require.Len(t, adminSvc.createdAccounts, 1)
+	require.Equal(t, "refresh-token", adminSvc.createdAccounts[0].Credentials["refresh_token"])
+	require.NotContains(t, adminSvc.createdAccounts[0].Credentials, "access_token")
+}
+
+func TestImportDataKiroAccountManagerFailsWithoutAccessOrRefreshToken(t *testing.T) {
+	router, adminSvc := setupAccountDataRouter()
+
+	dataPayload := map[string]any{
+		"data": []map[string]any{
+			{
+				"email":        "missing-token@example.com",
+				"clientIdHash": "client-id-hash",
+				"authMethod":   "IdC",
+			},
+		},
+	}
+
+	body, _ := json.Marshal(dataPayload)
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/accounts/data", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code)
+
+	var resp dataImportResponse
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+	require.Equal(t, 0, resp.Data.AccountCreated)
+	require.Equal(t, 1, resp.Data.AccountFailed)
+	require.Len(t, resp.Data.Errors, 1)
+	require.Contains(t, resp.Data.Errors[0].Message, "accessToken 或 refreshToken")
+	require.Len(t, adminSvc.createdAccounts, 0)
 }
