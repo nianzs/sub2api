@@ -367,6 +367,9 @@ export interface SystemSettings {
   signup_ip_risk_control_threshold: number;
   signup_ip_disable_previous_accounts: boolean;
   signup_ip_keep_previous_accounts: number;
+  api_usage_ip_ua_risk_control_threshold: number;
+  api_usage_ip_ua_disable_previous_accounts: boolean;
+  api_usage_ip_ua_keep_previous_accounts: number;
   totp_enabled: boolean; // TOTP 双因素认证
   totp_encryption_key_configured: boolean; // TOTP 加密密钥是否已配置
   login_agreement_enabled: boolean;
@@ -631,6 +634,9 @@ export interface UpdateSettingsRequest {
   signup_ip_risk_control_threshold?: number;
   signup_ip_disable_previous_accounts?: boolean;
   signup_ip_keep_previous_accounts?: number;
+  api_usage_ip_ua_risk_control_threshold?: number;
+  api_usage_ip_ua_disable_previous_accounts?: boolean;
+  api_usage_ip_ua_keep_previous_accounts?: number;
   totp_enabled?: boolean; // TOTP 双因素认证
   login_agreement_enabled?: boolean;
   login_agreement_mode?: "modal" | "checkbox" | string;

@@ -354,6 +354,7 @@ type OpenAIGatewayService struct {
 	channelService        *ChannelService
 	balanceNotifyService  *BalanceNotifyService
 	settingService        *SettingService
+	authCacheInvalidator  APIKeyAuthCacheInvalidator
 	userPlatformQuotaRepo UserPlatformQuotaRepository
 
 	openaiWSPoolOnce              sync.Once
@@ -399,6 +400,7 @@ func NewOpenAIGatewayService(
 	channelService *ChannelService,
 	balanceNotifyService *BalanceNotifyService,
 	settingService *SettingService,
+	authCacheInvalidator APIKeyAuthCacheInvalidator,
 	userPlatformQuotaRepo UserPlatformQuotaRepository,
 ) *OpenAIGatewayService {
 	svc := &OpenAIGatewayService{
@@ -431,6 +433,7 @@ func NewOpenAIGatewayService(
 		channelService:        channelService,
 		balanceNotifyService:  balanceNotifyService,
 		settingService:        settingService,
+		authCacheInvalidator:  authCacheInvalidator,
 		userPlatformQuotaRepo: userPlatformQuotaRepo,
 		responseHeaderFilter:  compileResponseHeaderFilter(cfg),
 		codexSnapshotThrottle: newAccountWriteThrottle(openAICodexSnapshotPersistMinInterval),
@@ -5949,8 +5952,23 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 		return billingErr
 	}
 	writeUsageLogBestEffort(ctx, s.usageLogRepo, usageLog, "service.openai_gateway")
+	if s.gatewayRiskController() != nil {
+		s.gatewayRiskController().applyAPIUsageIPUARiskControl(ctx, usageLog.UserID, input.IPAddress, input.UserAgent)
+	}
 
 	return nil
+}
+
+func (s *OpenAIGatewayService) gatewayRiskController() *GatewayService {
+	if s == nil {
+		return nil
+	}
+	return &GatewayService{
+		usageLogRepo:         s.usageLogRepo,
+		userRepo:             s.userRepo,
+		settingService:       s.settingService,
+		authCacheInvalidator: s.authCacheInvalidator,
+	}
 }
 
 func (s *OpenAIGatewayService) calculateOpenAIRecordUsageCost(

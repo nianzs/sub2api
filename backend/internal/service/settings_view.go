@@ -12,21 +12,24 @@ func firstNonEmpty(values ...string) string {
 }
 
 type SystemSettings struct {
-	RegistrationEnabled              bool
-	EmailVerifyEnabled               bool
-	RegistrationEmailSuffixWhitelist []string
-	PromoCodeEnabled                 bool
-	PasswordResetEnabled             bool
-	FrontendURL                      string
-	InvitationCodeEnabled            bool
-	SignupIPRiskControlThreshold     int
-	SignupIPDisablePreviousAccounts  bool
-	SignupIPKeepPreviousAccounts     int
-	TotpEnabled                      bool // TOTP 双因素认证
-	LoginAgreementEnabled            bool
-	LoginAgreementMode               string
-	LoginAgreementUpdatedAt          string
-	LoginAgreementDocuments          []LoginAgreementDocument
+	RegistrationEnabled                 bool
+	EmailVerifyEnabled                  bool
+	RegistrationEmailSuffixWhitelist    []string
+	PromoCodeEnabled                    bool
+	PasswordResetEnabled                bool
+	FrontendURL                         string
+	InvitationCodeEnabled               bool
+	SignupIPRiskControlThreshold        int
+	SignupIPDisablePreviousAccounts     bool
+	SignupIPKeepPreviousAccounts        int
+	APIUsageIPUARiskControlThreshold    int
+	APIUsageIPUADisablePreviousAccounts bool
+	APIUsageIPUAKeepPreviousAccounts    int
+	TotpEnabled                         bool // TOTP 双因素认证
+	LoginAgreementEnabled               bool
+	LoginAgreementMode                  string
+	LoginAgreementUpdatedAt             string
+	LoginAgreementDocuments             []LoginAgreementDocument
 
 	SMTPHost               string
 	SMTPPort               int

@@ -15,11 +15,16 @@ import (
 type openAIRecordUsageLogRepoStub struct {
 	UsageLogRepository
 
-	inserted   bool
-	err        error
-	calls      int
-	lastLog    *UsageLog
-	lastCtxErr error
+	inserted          bool
+	err               error
+	calls             int
+	lastLog           *UsageLog
+	lastCtxErr        error
+	riskQueryResult   []UsageLogUserFirstSeen
+	riskQueryErr      error
+	riskQueryCalls    int
+	riskLastIP        string
+	riskLastUserAgent string
 }
 
 func (s *openAIRecordUsageLogRepoStub) Create(ctx context.Context, log *UsageLog) (bool, error) {
@@ -27,6 +32,16 @@ func (s *openAIRecordUsageLogRepoStub) Create(ctx context.Context, log *UsageLog
 	s.lastLog = log
 	s.lastCtxErr = ctx.Err()
 	return s.inserted, s.err
+}
+
+func (s *openAIRecordUsageLogRepoStub) ListDistinctUsersByIPAndUserAgentSince(ctx context.Context, ipAddress, userAgent string, startTime time.Time) ([]UsageLogUserFirstSeen, error) {
+	s.riskQueryCalls++
+	s.riskLastIP = ipAddress
+	s.riskLastUserAgent = userAgent
+	if s.riskQueryErr != nil {
+		return nil, s.riskQueryErr
+	}
+	return s.riskQueryResult, nil
 }
 
 type openAIRecordUsageBillingRepoStub struct {
@@ -65,6 +80,9 @@ type openAIRecordUsageUserRepoStub struct {
 	deductErr   error
 	lastAmount  float64
 	lastCtxErr  error
+	users       map[int64]*User
+	updateCalls int
+	updatedIDs  []int64
 }
 
 func (s *openAIRecordUsageUserRepoStub) DeductBalance(ctx context.Context, id int64, amount float64) error {
@@ -72,6 +90,85 @@ func (s *openAIRecordUsageUserRepoStub) DeductBalance(ctx context.Context, id in
 	s.lastAmount = amount
 	s.lastCtxErr = ctx.Err()
 	return s.deductErr
+}
+
+func (s *openAIRecordUsageUserRepoStub) GetByID(ctx context.Context, id int64) (*User, error) {
+	if s.users == nil {
+		return &User{ID: id, Status: StatusActive}, nil
+	}
+	user, ok := s.users[id]
+	if !ok {
+		return nil, ErrUserNotFound
+	}
+	cloned := *user
+	return &cloned, nil
+}
+
+func (s *openAIRecordUsageUserRepoStub) Update(ctx context.Context, user *User) error {
+	s.updateCalls++
+	s.updatedIDs = append(s.updatedIDs, user.ID)
+	if s.users == nil {
+		s.users = map[int64]*User{}
+	}
+	cloned := *user
+	s.users[user.ID] = &cloned
+	return nil
+}
+
+type openAIRecordUsageAuthCacheInvalidatorStub struct {
+	invalidatedUserIDs []int64
+}
+
+func (s *openAIRecordUsageAuthCacheInvalidatorStub) InvalidateAuthCacheByKey(ctx context.Context, key string) {
+}
+
+func (s *openAIRecordUsageAuthCacheInvalidatorStub) InvalidateAuthCacheByUserID(ctx context.Context, userID int64) {
+	s.invalidatedUserIDs = append(s.invalidatedUserIDs, userID)
+}
+
+func (s *openAIRecordUsageAuthCacheInvalidatorStub) InvalidateAuthCacheByGroupID(ctx context.Context, groupID int64) {
+}
+
+type openAIRecordUsageSettingRepoStub struct {
+	values map[string]string
+}
+
+func (s *openAIRecordUsageSettingRepoStub) Get(ctx context.Context, key string) (*Setting, error) {
+	return nil, nil
+}
+
+func (s *openAIRecordUsageSettingRepoStub) GetValue(ctx context.Context, key string) (string, error) {
+	if s.values == nil {
+		return "", errors.New("not found")
+	}
+	value, ok := s.values[key]
+	if !ok {
+		return "", errors.New("not found")
+	}
+	return value, nil
+}
+
+func (s *openAIRecordUsageSettingRepoStub) Set(ctx context.Context, key, value string) error {
+	return nil
+}
+
+func (s *openAIRecordUsageSettingRepoStub) GetMultiple(ctx context.Context, keys []string) (map[string]string, error) {
+	return map[string]string{}, nil
+}
+
+func (s *openAIRecordUsageSettingRepoStub) SetMultiple(ctx context.Context, settings map[string]string) error {
+	return nil
+}
+
+func (s *openAIRecordUsageSettingRepoStub) GetAll(ctx context.Context) (map[string]string, error) {
+	if s.values == nil {
+		return map[string]string{}, nil
+	}
+	return s.values, nil
+}
+
+func (s *openAIRecordUsageSettingRepoStub) Delete(ctx context.Context, key string) error {
+	return nil
 }
 
 type openAIRecordUsageSubRepoStub struct {
@@ -134,6 +231,8 @@ func i64p(v int64) *int64 {
 func newOpenAIRecordUsageServiceForTest(usageRepo UsageLogRepository, userRepo UserRepository, subRepo UserSubscriptionRepository, rateRepo UserGroupRateRepository) *OpenAIGatewayService {
 	cfg := &config.Config{}
 	cfg.Default.RateMultiplier = 1.1
+	authCache := &openAIRecordUsageAuthCacheInvalidatorStub{}
+	settingService := NewSettingService(&openAIRecordUsageSettingRepoStub{values: map[string]string{}}, cfg)
 	svc := NewOpenAIGatewayService(
 		nil,
 		usageRepo,
@@ -154,7 +253,8 @@ func newOpenAIRecordUsageServiceForTest(usageRepo UsageLogRepository, userRepo U
 		nil,
 		nil,
 		nil,
-		nil,
+		settingService,
+		authCache,
 		nil, // userPlatformQuotaRepo
 	)
 	svc.userGroupRateResolver = newUserGroupRateResolver(
@@ -241,6 +341,60 @@ func TestOpenAIGatewayServiceRecordUsage_ZeroUsageStillWritesUsageLog(t *testing
 	require.Zero(t, billingRepo.lastCmd.APIKeyQuotaCost)
 	require.Zero(t, billingRepo.lastCmd.APIKeyRateLimitCost)
 	require.Zero(t, billingRepo.lastCmd.AccountQuotaCost)
+}
+
+func TestOpenAIGatewayServiceRecordUsage_DisablesFourthDistinctUserForSameIPAndUA(t *testing.T) {
+	usageRepo := &openAIRecordUsageLogRepoStub{
+		inserted: true,
+		riskQueryResult: []UsageLogUserFirstSeen{
+			{UserID: 201, FirstSeen: time.Now().Add(-3 * time.Hour)},
+			{UserID: 202, FirstSeen: time.Now().Add(-2 * time.Hour)},
+			{UserID: 203, FirstSeen: time.Now().Add(-1 * time.Hour)},
+			{UserID: 204, FirstSeen: time.Now()},
+		},
+	}
+	userRepo := &openAIRecordUsageUserRepoStub{
+		users: map[int64]*User{
+			201: {ID: 201, Status: StatusActive},
+			202: {ID: 202, Status: StatusActive},
+			203: {ID: 203, Status: StatusActive},
+			204: {ID: 204, Status: StatusActive},
+		},
+	}
+	subRepo := &openAIRecordUsageSubRepoStub{}
+	svc := newOpenAIRecordUsageServiceForTest(usageRepo, userRepo, subRepo, nil)
+	cacheStub := &openAIRecordUsageAuthCacheInvalidatorStub{}
+	svc.authCacheInvalidator = cacheStub
+	svc.settingService = NewSettingService(&openAIRecordUsageSettingRepoStub{values: map[string]string{
+		SettingKeyAPIUsageIPUARiskControlThreshold:    "4",
+		SettingKeyAPIUsageIPUADisablePreviousAccounts: "false",
+		SettingKeyAPIUsageIPUAKeepPreviousAccounts:    "0",
+	}}, svc.cfg)
+
+	err := svc.RecordUsage(context.Background(), &OpenAIRecordUsageInput{
+		Result: &OpenAIForwardResult{
+			RequestID: "openai_api_usage_risk",
+			Usage: OpenAIUsage{
+				InputTokens:  10,
+				OutputTokens: 6,
+			},
+			Model:    "gpt-5.1",
+			Duration: time.Second,
+		},
+		APIKey:    &APIKey{ID: 1001, Quota: 100, Group: &Group{RateMultiplier: 1}},
+		User:      &User{ID: 204},
+		Account:   &Account{ID: 3001, Type: AccountTypeAPIKey},
+		UserAgent: "same-ua",
+		IPAddress: "5.6.7.8",
+	})
+
+	require.NoError(t, err)
+	require.Equal(t, 1, usageRepo.riskQueryCalls)
+	require.Equal(t, "5.6.7.8", usageRepo.riskLastIP)
+	require.Equal(t, "same-ua", usageRepo.riskLastUserAgent)
+	require.Equal(t, []int64{204}, userRepo.updatedIDs)
+	require.Equal(t, StatusDisabled, userRepo.users[204].Status)
+	require.Equal(t, []int64{204}, cacheStub.invalidatedUserIDs)
 }
 
 func TestOpenAIGatewayServiceRecordUsage_MissingPricingRecordsZeroCostUsageLog(t *testing.T) {

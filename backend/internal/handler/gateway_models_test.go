@@ -69,6 +69,7 @@ func newGatewayModelsHandlerForTest(repo service.AccountRepository) *GatewayHand
 			nil, // rpmCache
 			nil, // digestStore
 			nil, // settingService
+			nil, // authCacheInvalidator
 			nil, // tlsFPProfileService
 			nil, // channelService
 			nil, // resolver

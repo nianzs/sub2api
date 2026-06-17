@@ -635,6 +635,7 @@ type GatewayService struct {
 	modelsListCache       *gocache.Cache
 	modelsListCacheTTL    time.Duration
 	settingService        *SettingService
+	authCacheInvalidator  APIKeyAuthCacheInvalidator
 	responseHeaderFilter  *responseheaders.CompiledHeaderFilter
 	debugModelRouting     atomic.Bool
 	debugClaudeMimic      atomic.Bool
@@ -672,6 +673,7 @@ func NewGatewayService(
 	rpmCache RPMCache,
 	digestStore *DigestSessionStore,
 	settingService *SettingService,
+	authCacheInvalidator APIKeyAuthCacheInvalidator,
 	tlsFPProfileService *TLSFingerprintProfileService,
 	channelService *ChannelService,
 	resolver *ModelPricingResolver,
@@ -707,6 +709,7 @@ func NewGatewayService(
 		rpmCache:              rpmCache,
 		userGroupRateCache:    gocache.New(userGroupRateTTL, time.Minute),
 		settingService:        settingService,
+		authCacheInvalidator:  authCacheInvalidator,
 		modelsListCache:       gocache.New(modelsListTTL, time.Minute),
 		modelsListCacheTTL:    modelsListTTL,
 		responseHeaderFilter:  compileResponseHeaderFilter(cfg),
@@ -8947,6 +8950,10 @@ type recordUsageOpts struct {
 	IsKiroAccount bool
 }
 
+type apiUsageIPUARiskQueryRepo interface {
+	ListDistinctUsersByIPAndUserAgentSince(ctx context.Context, ipAddress, userAgent string, startTime time.Time) ([]UsageLogUserFirstSeen, error)
+}
+
 // RecordUsage 记录使用量并扣费（或更新订阅用量）
 func (s *GatewayService) RecordUsage(ctx context.Context, input *RecordUsageInput) error {
 	return s.recordUsageCore(ctx, &recordUsageCoreInput{
@@ -8965,6 +8972,86 @@ func (s *GatewayService) RecordUsage(ctx context.Context, input *RecordUsageInpu
 		QuotaPlatform:      input.QuotaPlatform,
 		ChannelUsageFields: input.ChannelUsageFields,
 	}, &recordUsageOpts{})
+}
+
+func (s *GatewayService) applyAPIUsageIPUARiskControl(ctx context.Context, userID int64, ipAddress, userAgent string) {
+	if s == nil || s.userRepo == nil || s.usageLogRepo == nil || userID <= 0 {
+		return
+	}
+	ipAddress = strings.TrimSpace(ipAddress)
+	userAgent = strings.TrimSpace(userAgent)
+	if ipAddress == "" || userAgent == "" {
+		return
+	}
+
+	repo, ok := s.usageLogRepo.(apiUsageIPUARiskQueryRepo)
+	if !ok {
+		return
+	}
+
+	threshold := defaultAPIUsageIPUARiskControlThreshold
+	disablePreviousAccounts := defaultAPIUsageIPUADisablePreviousAccounts
+	keepPreviousAccounts := defaultAPIUsageIPUAKeepPreviousAccounts
+	if s.settingService != nil {
+		threshold = s.settingService.GetAPIUsageIPUARiskControlThreshold(ctx)
+		disablePreviousAccounts = s.settingService.GetAPIUsageIPUADisablePreviousAccounts(ctx)
+		keepPreviousAccounts = s.settingService.GetAPIUsageIPUAKeepPreviousAccounts(ctx)
+	}
+	if threshold < 1 {
+		threshold = 1
+	}
+	if keepPreviousAccounts < 0 {
+		keepPreviousAccounts = 0
+	}
+
+	items, err := repo.ListDistinctUsersByIPAndUserAgentSince(ctx, ipAddress, userAgent, time.Now().Add(-24*time.Hour))
+	if err != nil {
+		logger.LegacyPrintf("service.gateway", "api usage ip+ua risk control query failed: user=%d ip=%s ua=%s err=%v", userID, ipAddress, userAgent, err)
+		return
+	}
+	if len(items) < threshold {
+		return
+	}
+
+	currentIndex := -1
+	for idx, item := range items {
+		if item.UserID == userID {
+			currentIndex = idx
+			break
+		}
+	}
+	if currentIndex == -1 {
+		return
+	}
+
+	for idx, item := range items {
+		shouldDisable := idx >= threshold-1
+		if disablePreviousAccounts && idx >= keepPreviousAccounts {
+			shouldDisable = true
+		}
+		if !shouldDisable {
+			continue
+		}
+		target, err := s.userRepo.GetByID(ctx, item.UserID)
+		if err != nil {
+			logger.LegacyPrintf("service.gateway", "api usage ip+ua risk control get user failed: user=%d err=%v", item.UserID, err)
+			continue
+		}
+		if target == nil || target.Status == StatusDisabled {
+			continue
+		}
+		target.Status = StatusDisabled
+		if err := s.userRepo.Update(ctx, target); err != nil {
+			logger.LegacyPrintf("service.gateway", "api usage ip+ua risk control disable failed: user=%d err=%v", item.UserID, err)
+			continue
+		}
+		if s.authCacheInvalidator != nil {
+			s.authCacheInvalidator.InvalidateAuthCacheByUserID(ctx, item.UserID)
+		}
+		if currentIndex == idx {
+			return
+		}
+	}
 }
 
 // RecordUsageLongContextInput 记录使用量的输入参数（支持长上下文双倍计费）
@@ -9147,6 +9234,7 @@ func (s *GatewayService) recordUsageCore(ctx context.Context, input *recordUsage
 		return billingErr
 	}
 	writeUsageLogBestEffort(ctx, s.usageLogRepo, usageLog, "service.gateway")
+	s.applyAPIUsageIPUARiskControl(ctx, usageLog.UserID, input.IPAddress, input.UserAgent)
 
 	return nil
 }

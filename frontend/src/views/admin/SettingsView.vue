@@ -1537,6 +1537,59 @@
                   {{ t("admin.settings.registration.signupIPKeepPreviousAccountsHint") }}
                 </p>
               </div>
+
+              <div class="border-t border-gray-100 pt-4 dark:border-dark-700">
+                <label
+                  class="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300"
+                >
+                  {{ t("admin.settings.registration.apiUsageIPUARiskControlThreshold") }}
+                </label>
+                <input
+                  v-model.number="form.api_usage_ip_ua_risk_control_threshold"
+                  type="number"
+                  min="1"
+                  class="input w-32"
+                />
+                <p class="mt-1.5 text-xs text-gray-500 dark:text-gray-400">
+                  {{ t("admin.settings.registration.apiUsageIPUARiskControlThresholdHint") }}
+                </p>
+              </div>
+
+              <div
+                class="flex items-center justify-between border-t border-gray-100 pt-4 dark:border-dark-700"
+              >
+                <div>
+                  <label class="font-medium text-gray-900 dark:text-white">{{
+                    t("admin.settings.registration.apiUsageIPUADisablePreviousAccounts")
+                  }}</label>
+                  <p class="text-sm text-gray-500 dark:text-gray-400">
+                    {{
+                      t("admin.settings.registration.apiUsageIPUADisablePreviousAccountsHint")
+                    }}
+                  </p>
+                </div>
+                <Toggle v-model="form.api_usage_ip_ua_disable_previous_accounts" />
+              </div>
+
+              <div
+                v-if="form.api_usage_ip_ua_disable_previous_accounts"
+                class="border-t border-gray-100 pt-4 dark:border-dark-700"
+              >
+                <label
+                  class="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300"
+                >
+                  {{ t("admin.settings.registration.apiUsageIPUAKeepPreviousAccounts") }}
+                </label>
+                <input
+                  v-model.number="form.api_usage_ip_ua_keep_previous_accounts"
+                  type="number"
+                  min="0"
+                  class="input w-32"
+                />
+                <p class="mt-1.5 text-xs text-gray-500 dark:text-gray-400">
+                  {{ t("admin.settings.registration.apiUsageIPUAKeepPreviousAccountsHint") }}
+                </p>
+              </div>
               <!-- Password Reset - Only show when email verification is enabled -->
               <div
                 v-if="form.email_verify_enabled"
@@ -7094,6 +7147,9 @@ const form = reactive<SettingsForm>({
   signup_ip_risk_control_threshold: 3,
   signup_ip_disable_previous_accounts: true,
   signup_ip_keep_previous_accounts: 1,
+  api_usage_ip_ua_risk_control_threshold: 4,
+  api_usage_ip_ua_disable_previous_accounts: false,
+  api_usage_ip_ua_keep_previous_accounts: 0,
   totp_enabled: false,
   totp_encryption_key_configured: false,
   login_agreement_enabled: false,
@@ -8251,6 +8307,12 @@ async function saveSettings() {
         form.signup_ip_disable_previous_accounts,
       signup_ip_keep_previous_accounts:
         Math.max(0, Math.floor(Number(form.signup_ip_keep_previous_accounts) || 0)),
+      api_usage_ip_ua_risk_control_threshold:
+        Math.max(1, Math.floor(Number(form.api_usage_ip_ua_risk_control_threshold) || 1)),
+      api_usage_ip_ua_disable_previous_accounts:
+        form.api_usage_ip_ua_disable_previous_accounts,
+      api_usage_ip_ua_keep_previous_accounts:
+        Math.max(0, Math.floor(Number(form.api_usage_ip_ua_keep_previous_accounts) || 0)),
       password_reset_enabled: form.password_reset_enabled,
       totp_enabled: form.totp_enabled,
       login_agreement_enabled: form.login_agreement_enabled,

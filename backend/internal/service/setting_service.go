@@ -1193,9 +1193,12 @@ type PublicSettingsInjectionPayload struct {
 }
 
 const (
-	defaultSignupIPRiskControlThreshold    = 3
-	defaultSignupIPDisablePreviousAccounts = true
-	defaultSignupIPKeepPreviousAccounts    = 1
+	defaultSignupIPRiskControlThreshold        = 3
+	defaultSignupIPDisablePreviousAccounts     = true
+	defaultSignupIPKeepPreviousAccounts        = 1
+	defaultAPIUsageIPUARiskControlThreshold    = 4
+	defaultAPIUsageIPUADisablePreviousAccounts = false
+	defaultAPIUsageIPUAKeepPreviousAccounts    = 0
 )
 
 // GetPublicSettingsForInjection returns public settings in a format suitable for HTML injection.
@@ -1692,6 +1695,15 @@ func (s *SettingService) buildSystemSettingsUpdates(ctx context.Context, setting
 	updates[SettingKeySignupIPRiskControlThreshold] = strconv.Itoa(settings.SignupIPRiskControlThreshold)
 	updates[SettingKeySignupIPDisablePreviousAccounts] = strconv.FormatBool(settings.SignupIPDisablePreviousAccounts)
 	updates[SettingKeySignupIPKeepPreviousAccounts] = strconv.Itoa(settings.SignupIPKeepPreviousAccounts)
+	if settings.APIUsageIPUARiskControlThreshold < 1 {
+		settings.APIUsageIPUARiskControlThreshold = 1
+	}
+	if settings.APIUsageIPUAKeepPreviousAccounts < 0 {
+		settings.APIUsageIPUAKeepPreviousAccounts = 0
+	}
+	updates[SettingKeyAPIUsageIPUARiskControlThreshold] = strconv.Itoa(settings.APIUsageIPUARiskControlThreshold)
+	updates[SettingKeyAPIUsageIPUADisablePreviousAccounts] = strconv.FormatBool(settings.APIUsageIPUADisablePreviousAccounts)
+	updates[SettingKeyAPIUsageIPUAKeepPreviousAccounts] = strconv.Itoa(settings.APIUsageIPUAKeepPreviousAccounts)
 	updates[SettingKeyTotpEnabled] = strconv.FormatBool(settings.TotpEnabled)
 	settings.LoginAgreementMode = normalizeLoginAgreementMode(settings.LoginAgreementMode)
 	settings.LoginAgreementUpdatedAt = strings.TrimSpace(settings.LoginAgreementUpdatedAt)
@@ -2234,6 +2246,30 @@ func (s *SettingService) GetSignupIPKeepPreviousAccounts(ctx context.Context) in
 		return defaultSignupIPKeepPreviousAccounts
 	}
 	return parseSignupIPKeepPreviousAccounts(value)
+}
+
+func (s *SettingService) GetAPIUsageIPUARiskControlThreshold(ctx context.Context) int {
+	value, err := s.settingRepo.GetValue(ctx, SettingKeyAPIUsageIPUARiskControlThreshold)
+	if err != nil {
+		return defaultAPIUsageIPUARiskControlThreshold
+	}
+	return parseAPIUsageIPUARiskControlThreshold(value)
+}
+
+func (s *SettingService) GetAPIUsageIPUADisablePreviousAccounts(ctx context.Context) bool {
+	value, err := s.settingRepo.GetValue(ctx, SettingKeyAPIUsageIPUADisablePreviousAccounts)
+	if err != nil {
+		return defaultAPIUsageIPUADisablePreviousAccounts
+	}
+	return parseAPIUsageIPUADisablePreviousAccounts(value)
+}
+
+func (s *SettingService) GetAPIUsageIPUAKeepPreviousAccounts(ctx context.Context) int {
+	value, err := s.settingRepo.GetValue(ctx, SettingKeyAPIUsageIPUAKeepPreviousAccounts)
+	if err != nil {
+		return defaultAPIUsageIPUAKeepPreviousAccounts
+	}
+	return parseAPIUsageIPUAKeepPreviousAccounts(value)
 }
 
 // IsBackendModeEnabled checks if backend mode is enabled
@@ -2786,6 +2822,9 @@ func (s *SettingService) InitializeDefaultSettings(ctx context.Context) error {
 		SettingKeySignupIPRiskControlThreshold:              strconv.Itoa(defaultSignupIPRiskControlThreshold),
 		SettingKeySignupIPDisablePreviousAccounts:           strconv.FormatBool(defaultSignupIPDisablePreviousAccounts),
 		SettingKeySignupIPKeepPreviousAccounts:              strconv.Itoa(defaultSignupIPKeepPreviousAccounts),
+		SettingKeyAPIUsageIPUARiskControlThreshold:          strconv.Itoa(defaultAPIUsageIPUARiskControlThreshold),
+		SettingKeyAPIUsageIPUADisablePreviousAccounts:       strconv.FormatBool(defaultAPIUsageIPUADisablePreviousAccounts),
+		SettingKeyAPIUsageIPUAKeepPreviousAccounts:          strconv.Itoa(defaultAPIUsageIPUAKeepPreviousAccounts),
 		SettingKeyDefaultConcurrency:                        strconv.Itoa(s.cfg.Default.UserConcurrency),
 		SettingKeyDefaultBalance:                            strconv.FormatFloat(s.cfg.Default.UserBalance, 'f', 8, 64),
 		SettingKeyAffiliateRebateRate:                       strconv.FormatFloat(AffiliateRebateRateDefault, 'f', 8, 64),
@@ -2897,43 +2936,45 @@ func (s *SettingService) parseSettings(settings map[string]string) *SystemSettin
 		apiKeyACLTrustForwardedIP = s.cfg.Security.TrustForwardedIPForAPIKeyACL
 	}
 	result := &SystemSettings{
-		RegistrationEnabled:              settings[SettingKeyRegistrationEnabled] == "true",
-		EmailVerifyEnabled:               emailVerifyEnabled,
-		RegistrationEmailSuffixWhitelist: ParseRegistrationEmailSuffixWhitelist(settings[SettingKeyRegistrationEmailSuffixWhitelist]),
-		PromoCodeEnabled:                 settings[SettingKeyPromoCodeEnabled] != "false", // 默认启用
-		PasswordResetEnabled:             emailVerifyEnabled && settings[SettingKeyPasswordResetEnabled] == "true",
-		FrontendURL:                      settings[SettingKeyFrontendURL],
-		InvitationCodeEnabled:            settings[SettingKeyInvitationCodeEnabled] == "true",
-		SignupIPDisablePreviousAccounts:  parseSignupIPDisablePreviousAccounts(settings[SettingKeySignupIPDisablePreviousAccounts]),
-		SignupIPKeepPreviousAccounts:     parseSignupIPKeepPreviousAccounts(settings[SettingKeySignupIPKeepPreviousAccounts]),
-		TotpEnabled:                      settings[SettingKeyTotpEnabled] == "true",
-		LoginAgreementEnabled:            settings[SettingKeyLoginAgreementEnabled] == "true",
-		LoginAgreementMode:               normalizeLoginAgreementMode(settings[SettingKeyLoginAgreementMode]),
-		LoginAgreementUpdatedAt:          loginAgreementUpdatedAt,
-		LoginAgreementDocuments:          loginAgreementDocuments,
-		SMTPHost:                         settings[SettingKeySMTPHost],
-		SMTPUsername:                     settings[SettingKeySMTPUsername],
-		SMTPFrom:                         settings[SettingKeySMTPFrom],
-		SMTPFromName:                     settings[SettingKeySMTPFromName],
-		SMTPUseTLS:                       settings[SettingKeySMTPUseTLS] == "true",
-		SMTPPasswordConfigured:           settings[SettingKeySMTPPassword] != "",
-		TurnstileEnabled:                 settings[SettingKeyTurnstileEnabled] == "true",
-		TurnstileSiteKey:                 settings[SettingKeyTurnstileSiteKey],
-		TurnstileSecretKeyConfigured:     settings[SettingKeyTurnstileSecretKey] != "",
-		APIKeyACLTrustForwardedIP:        apiKeyACLTrustForwardedIP,
-		SiteName:                         s.getStringOrDefault(settings, SettingKeySiteName, "Sub2API"),
-		SiteLogo:                         settings[SettingKeySiteLogo],
-		SiteSubtitle:                     s.getStringOrDefault(settings, SettingKeySiteSubtitle, "Subscription to API Conversion Platform"),
-		APIBaseURL:                       settings[SettingKeyAPIBaseURL],
-		ContactInfo:                      settings[SettingKeyContactInfo],
-		DocURL:                           settings[SettingKeyDocURL],
-		HomeContent:                      settings[SettingKeyHomeContent],
-		HideCcsImportButton:              settings[SettingKeyHideCcsImportButton] == "true",
-		PurchaseSubscriptionEnabled:      settings[SettingKeyPurchaseSubscriptionEnabled] == "true",
-		PurchaseSubscriptionURL:          strings.TrimSpace(settings[SettingKeyPurchaseSubscriptionURL]),
-		CustomMenuItems:                  settings[SettingKeyCustomMenuItems],
-		CustomEndpoints:                  settings[SettingKeyCustomEndpoints],
-		BackendModeEnabled:               settings[SettingKeyBackendModeEnabled] == "true",
+		RegistrationEnabled:                 settings[SettingKeyRegistrationEnabled] == "true",
+		EmailVerifyEnabled:                  emailVerifyEnabled,
+		RegistrationEmailSuffixWhitelist:    ParseRegistrationEmailSuffixWhitelist(settings[SettingKeyRegistrationEmailSuffixWhitelist]),
+		PromoCodeEnabled:                    settings[SettingKeyPromoCodeEnabled] != "false", // 默认启用
+		PasswordResetEnabled:                emailVerifyEnabled && settings[SettingKeyPasswordResetEnabled] == "true",
+		FrontendURL:                         settings[SettingKeyFrontendURL],
+		InvitationCodeEnabled:               settings[SettingKeyInvitationCodeEnabled] == "true",
+		SignupIPDisablePreviousAccounts:     parseSignupIPDisablePreviousAccounts(settings[SettingKeySignupIPDisablePreviousAccounts]),
+		SignupIPKeepPreviousAccounts:        parseSignupIPKeepPreviousAccounts(settings[SettingKeySignupIPKeepPreviousAccounts]),
+		APIUsageIPUADisablePreviousAccounts: parseAPIUsageIPUADisablePreviousAccounts(settings[SettingKeyAPIUsageIPUADisablePreviousAccounts]),
+		APIUsageIPUAKeepPreviousAccounts:    parseAPIUsageIPUAKeepPreviousAccounts(settings[SettingKeyAPIUsageIPUAKeepPreviousAccounts]),
+		TotpEnabled:                         settings[SettingKeyTotpEnabled] == "true",
+		LoginAgreementEnabled:               settings[SettingKeyLoginAgreementEnabled] == "true",
+		LoginAgreementMode:                  normalizeLoginAgreementMode(settings[SettingKeyLoginAgreementMode]),
+		LoginAgreementUpdatedAt:             loginAgreementUpdatedAt,
+		LoginAgreementDocuments:             loginAgreementDocuments,
+		SMTPHost:                            settings[SettingKeySMTPHost],
+		SMTPUsername:                        settings[SettingKeySMTPUsername],
+		SMTPFrom:                            settings[SettingKeySMTPFrom],
+		SMTPFromName:                        settings[SettingKeySMTPFromName],
+		SMTPUseTLS:                          settings[SettingKeySMTPUseTLS] == "true",
+		SMTPPasswordConfigured:              settings[SettingKeySMTPPassword] != "",
+		TurnstileEnabled:                    settings[SettingKeyTurnstileEnabled] == "true",
+		TurnstileSiteKey:                    settings[SettingKeyTurnstileSiteKey],
+		TurnstileSecretKeyConfigured:        settings[SettingKeyTurnstileSecretKey] != "",
+		APIKeyACLTrustForwardedIP:           apiKeyACLTrustForwardedIP,
+		SiteName:                            s.getStringOrDefault(settings, SettingKeySiteName, "Sub2API"),
+		SiteLogo:                            settings[SettingKeySiteLogo],
+		SiteSubtitle:                        s.getStringOrDefault(settings, SettingKeySiteSubtitle, "Subscription to API Conversion Platform"),
+		APIBaseURL:                          settings[SettingKeyAPIBaseURL],
+		ContactInfo:                         settings[SettingKeyContactInfo],
+		DocURL:                              settings[SettingKeyDocURL],
+		HomeContent:                         settings[SettingKeyHomeContent],
+		HideCcsImportButton:                 settings[SettingKeyHideCcsImportButton] == "true",
+		PurchaseSubscriptionEnabled:         settings[SettingKeyPurchaseSubscriptionEnabled] == "true",
+		PurchaseSubscriptionURL:             strings.TrimSpace(settings[SettingKeyPurchaseSubscriptionURL]),
+		CustomMenuItems:                     settings[SettingKeyCustomMenuItems],
+		CustomEndpoints:                     settings[SettingKeyCustomEndpoints],
+		BackendModeEnabled:                  settings[SettingKeyBackendModeEnabled] == "true",
 	}
 	result.TableDefaultPageSize, result.TablePageSizeOptions = parseTablePreferences(
 		settings[SettingKeyTableDefaultPageSize],
@@ -2957,6 +2998,7 @@ func (s *SettingService) parseSettings(settings map[string]string) *SystemSettin
 		result.DefaultUserRPMLimit = rpm
 	}
 	result.SignupIPRiskControlThreshold = parseSignupIPRiskControlThreshold(settings[SettingKeySignupIPRiskControlThreshold])
+	result.APIUsageIPUARiskControlThreshold = parseAPIUsageIPUARiskControlThreshold(settings[SettingKeyAPIUsageIPUARiskControlThreshold])
 
 	// 解析浮点数类型
 	if balance, err := strconv.ParseFloat(settings[SettingKeyDefaultBalance], 64); err == nil {
@@ -3462,6 +3504,30 @@ func parseSignupIPKeepPreviousAccounts(raw string) int {
 	value, err := strconv.Atoi(strings.TrimSpace(raw))
 	if err != nil || value < 0 {
 		return defaultSignupIPKeepPreviousAccounts
+	}
+	return value
+}
+
+func parseAPIUsageIPUARiskControlThreshold(raw string) int {
+	value, err := strconv.Atoi(strings.TrimSpace(raw))
+	if err != nil || value < 1 {
+		return defaultAPIUsageIPUARiskControlThreshold
+	}
+	return value
+}
+
+func parseAPIUsageIPUADisablePreviousAccounts(raw string) bool {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return defaultAPIUsageIPUADisablePreviousAccounts
+	}
+	return trimmed == "true"
+}
+
+func parseAPIUsageIPUAKeepPreviousAccounts(raw string) int {
+	value, err := strconv.Atoi(strings.TrimSpace(raw))
+	if err != nil || value < 0 {
+		return defaultAPIUsageIPUAKeepPreviousAccounts
 	}
 	return value
 }

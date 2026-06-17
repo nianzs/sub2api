@@ -17,6 +17,8 @@ import (
 func newGatewayRecordUsageServiceForTest(usageRepo UsageLogRepository, userRepo UserRepository, subRepo UserSubscriptionRepository) *GatewayService {
 	cfg := &config.Config{}
 	cfg.Default.RateMultiplier = 1.1
+	authCache := &openAIRecordUsageAuthCacheInvalidatorStub{}
+	settingService := NewSettingService(&openAIRecordUsageSettingRepoStub{values: map[string]string{}}, cfg)
 	return NewGatewayService(
 		nil,
 		nil,
@@ -43,6 +45,8 @@ func newGatewayRecordUsageServiceForTest(usageRepo UsageLogRepository, userRepo 
 		nil,
 		nil,
 		nil,
+		settingService,
+		authCache,
 		nil,
 		nil,
 		nil,
@@ -492,4 +496,58 @@ func TestGatewayServiceRecordUsage_ReasoningEffortNil(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, usageRepo.lastLog)
 	require.Nil(t, usageRepo.lastLog.ReasoningEffort)
+}
+
+func TestGatewayServiceRecordUsage_DisablesFourthDistinctUserForSameIPAndUA(t *testing.T) {
+	usageRepo := &openAIRecordUsageLogRepoStub{
+		inserted: true,
+		riskQueryResult: []UsageLogUserFirstSeen{
+			{UserID: 101, FirstSeen: time.Now().Add(-3 * time.Hour)},
+			{UserID: 102, FirstSeen: time.Now().Add(-2 * time.Hour)},
+			{UserID: 103, FirstSeen: time.Now().Add(-1 * time.Hour)},
+			{UserID: 104, FirstSeen: time.Now()},
+		},
+	}
+	userRepo := &openAIRecordUsageUserRepoStub{
+		users: map[int64]*User{
+			101: {ID: 101, Status: StatusActive},
+			102: {ID: 102, Status: StatusActive},
+			103: {ID: 103, Status: StatusActive},
+			104: {ID: 104, Status: StatusActive},
+		},
+	}
+	subRepo := &openAIRecordUsageSubRepoStub{}
+	svc := newGatewayRecordUsageServiceForTest(usageRepo, userRepo, subRepo)
+	cacheStub := &openAIRecordUsageAuthCacheInvalidatorStub{}
+	svc.authCacheInvalidator = cacheStub
+	svc.settingService = NewSettingService(&openAIRecordUsageSettingRepoStub{values: map[string]string{
+		SettingKeyAPIUsageIPUARiskControlThreshold:    "4",
+		SettingKeyAPIUsageIPUADisablePreviousAccounts: "false",
+		SettingKeyAPIUsageIPUAKeepPreviousAccounts:    "0",
+	}}, svc.cfg)
+
+	err := svc.RecordUsage(context.Background(), &RecordUsageInput{
+		Result: &ForwardResult{
+			RequestID: "gateway_api_usage_risk",
+			Usage: ClaudeUsage{
+				InputTokens:  10,
+				OutputTokens: 6,
+			},
+			Model:    "claude-sonnet-4",
+			Duration: time.Second,
+		},
+		APIKey:    &APIKey{ID: 501, Quota: 100},
+		User:      &User{ID: 104},
+		Account:   &Account{ID: 701},
+		UserAgent: "same-ua",
+		IPAddress: "1.2.3.4",
+	})
+
+	require.NoError(t, err)
+	require.Equal(t, 1, usageRepo.riskQueryCalls)
+	require.Equal(t, "1.2.3.4", usageRepo.riskLastIP)
+	require.Equal(t, "same-ua", usageRepo.riskLastUserAgent)
+	require.Equal(t, []int64{104}, userRepo.updatedIDs)
+	require.Equal(t, StatusDisabled, userRepo.users[104].Status)
+	require.Equal(t, []int64{104}, cacheStub.invalidatedUserIDs)
 }

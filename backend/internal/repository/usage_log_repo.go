@@ -1440,6 +1440,36 @@ func (r *usageLogRepository) ListByAPIKey(ctx context.Context, apiKeyID int64, p
 	return r.listUsageLogsWithPagination(ctx, "WHERE api_key_id = $1", []any{apiKeyID}, params)
 }
 
+func (r *usageLogRepository) ListDistinctUsersByIPAndUserAgentSince(ctx context.Context, ipAddress, userAgent string, startTime time.Time) ([]service.UsageLogUserFirstSeen, error) {
+	query := `
+		SELECT user_id, MIN(created_at) AS first_seen
+		FROM usage_logs
+		WHERE ip_address = $1
+		  AND user_agent = $2
+		  AND created_at >= $3
+		GROUP BY user_id
+		ORDER BY first_seen ASC, user_id ASC
+	`
+	rows, err := r.sql.QueryContext(ctx, query, ipAddress, userAgent, startTime)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	items := make([]service.UsageLogUserFirstSeen, 0, 8)
+	for rows.Next() {
+		var item service.UsageLogUserFirstSeen
+		if err := rows.Scan(&item.UserID, &item.FirstSeen); err != nil {
+			return nil, err
+		}
+		items = append(items, item)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 // UserStats 用户使用统计
 type UserStats struct {
 	TotalRequests   int64   `json:"total_requests"`
