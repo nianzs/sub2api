@@ -232,6 +232,10 @@ func (s *KiroOAuthService) GenerateIDCAuthURL(ctx context.Context, input *KiroGe
 
 func (s *KiroOAuthService) RefreshToken(ctx context.Context, input *KiroRefreshTokenInput) (*KiroTokenInfo, error) {
 	proxyURL, _ := s.resolveProxyURL(ctx, input.ProxyID)
+	refreshToken := strings.TrimSpace(input.RefreshToken)
+	if refreshToken == "" {
+		return nil, fmt.Errorf("kiro refresh token is required")
+	}
 	authMethod := strings.ToLower(strings.TrimSpace(input.AuthMethod))
 	if authMethod == "" {
 		authMethod = "social"
@@ -241,9 +245,14 @@ func (s *KiroOAuthService) RefreshToken(ctx context.Context, input *KiroRefreshT
 	var err error
 	switch authMethod {
 	case "idc":
-		token, err = kiropkg.RefreshIDCToken(ctx, proxyURL, input.ClientID, input.ClientSecret, input.RefreshToken, input.Region, input.StartURL)
+		clientID := strings.TrimSpace(input.ClientID)
+		clientSecret := strings.TrimSpace(input.ClientSecret)
+		if clientID == "" || clientSecret == "" {
+			return nil, fmt.Errorf("kiro idc refresh requires client_id and client_secret")
+		}
+		token, err = kiropkg.RefreshIDCToken(ctx, proxyURL, clientID, clientSecret, refreshToken, input.Region, input.StartURL)
 	default:
-		token, err = kiropkg.RefreshSocialToken(ctx, proxyURL, input.RefreshToken, input.Provider)
+		token, err = kiropkg.RefreshSocialToken(ctx, proxyURL, refreshToken, input.Provider)
 	}
 	if err != nil {
 		return nil, err

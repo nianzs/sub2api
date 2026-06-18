@@ -49,3 +49,25 @@ func TestKiroOAuthService_ExchangeCodeRejectsExpiredSession(t *testing.T) {
 	})
 	require.EqualError(t, err, "session not found or expired")
 }
+
+func TestKiroOAuthService_RefreshTokenRejectsMissingRefreshToken(t *testing.T) {
+	svc := NewKiroOAuthService(nil)
+
+	_, err := svc.RefreshToken(context.Background(), &KiroRefreshTokenInput{
+		AuthMethod: "social",
+	})
+
+	require.EqualError(t, err, "kiro refresh token is required")
+}
+
+func TestKiroOAuthService_RefreshTokenRejectsIDCMissingClientCredentials(t *testing.T) {
+	svc := NewKiroOAuthService(nil)
+
+	_, err := svc.RefreshToken(context.Background(), &KiroRefreshTokenInput{
+		AuthMethod:   "idc",
+		RefreshToken: "refresh-token",
+		ClientID:     "client-id",
+	})
+
+	require.EqualError(t, err, "kiro idc refresh requires client_id and client_secret")
+}

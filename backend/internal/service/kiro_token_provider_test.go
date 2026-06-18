@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 )
@@ -58,10 +59,50 @@ func (s *stubKiroAccountTokenRefresher) BuildAccountCredentials(tokenInfo *KiroT
 	if tokenInfo == nil {
 		return nil
 	}
-	return map[string]any{
-		"access_token": tokenInfo.AccessToken,
-		"expires_at":   tokenInfo.ExpiresAt,
+	creds := map[string]any{
+		"access_token":  tokenInfo.AccessToken,
+		"refresh_token": tokenInfo.RefreshToken,
+		"expires_at":    tokenInfo.ExpiresAt,
 	}
+	if tokenInfo.ProfileArn != "" {
+		creds["profile_arn"] = tokenInfo.ProfileArn
+	}
+	return creds
+}
+
+func TestKiroTokenProviderGetAccessTokenReturnsRefreshedToken(t *testing.T) {
+	past := time.Now().Add(-time.Minute).Format(time.RFC3339)
+	future := time.Now().Add(time.Hour).Format(time.RFC3339)
+	account := &Account{
+		ID:       88,
+		Platform: PlatformKiro,
+		Type:     AccountTypeOAuth,
+		Credentials: map[string]any{
+			"access_token":  "old-access",
+			"refresh_token": "old-refresh",
+			"expires_at":    past,
+		},
+	}
+	repo := &refreshAPIAccountRepo{account: account}
+	cache := &refreshAPICacheStub{lockResult: true}
+	executor := &refreshAPIExecutorStub{
+		needsRefresh: true,
+		credentials: map[string]any{
+			"access_token":  "new-access",
+			"refresh_token": "rotated-refresh",
+			"expires_at":    future,
+		},
+	}
+	api := NewOAuthRefreshAPI(repo, cache)
+	provider := NewKiroTokenProvider(repo, cache, nil)
+	provider.SetRefreshAPI(api, executor)
+
+	token, err := provider.GetAccessToken(context.Background(), account)
+	require.NoError(t, err)
+	require.Equal(t, "new-access", token)
+	require.Equal(t, "new-access", account.GetCredential("access_token"))
+	require.Equal(t, "rotated-refresh", account.GetCredential("refresh_token"))
+	require.Equal(t, 1, executor.refreshCalls)
 }
 
 func TestKiroTokenProviderForceRefreshInvalidGrantSetsError(t *testing.T) {

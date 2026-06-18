@@ -82,7 +82,12 @@ func (p *KiroTokenProvider) GetAccessToken(ctx context.Context, account *Account
 				}
 			}
 		} else {
-			account = result.Account
+			if result.Account != nil {
+				account = result.Account
+			}
+			if len(result.NewCredentials) > 0 {
+				account.Credentials = cloneCredentials(result.NewCredentials)
+			}
 			expiresAt = account.GetCredentialAsTime("expires_at")
 		}
 	} else if needsRefresh && p.tokenCache != nil {

@@ -2,11 +2,14 @@ package admin
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 
+	kiropkg "github.com/Wei-Shaw/sub2api/internal/pkg/kiro"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
@@ -58,6 +61,7 @@ func setupAccountDataRouter() (*gin.Engine, *stubAdminService) {
 
 	h := NewAccountHandler(
 		adminSvc,
+		nil,
 		nil,
 		nil,
 		nil,
@@ -283,6 +287,25 @@ func TestImportDataReusesProxyAndSkipsDefaultGroup(t *testing.T) {
 
 func TestImportDataSupportsKiroAccountManagerJSON(t *testing.T) {
 	router, adminSvc := setupAccountDataRouter()
+	previousRefresh := refreshKiroIDCTokenForDataImport
+	refreshKiroIDCTokenForDataImport = func(ctx context.Context, proxyURL, clientID, clientSecret, refreshToken, region, startURL string) (*kiropkg.TokenData, error) {
+		require.Equal(t, "client-id", clientID)
+		require.Equal(t, "client-secret", clientSecret)
+		require.Equal(t, "refresh-token", refreshToken)
+		require.Equal(t, "us-east-1", region)
+		return &kiropkg.TokenData{
+			AccessToken:  "refreshed-access-token",
+			RefreshToken: "rotated-refresh-token",
+			ProfileArn:   "arn:aws:codewhisperer:us-east-1:123456789012:profile/refreshed",
+			ExpiresAt:    "2099-01-01T00:00:00Z",
+			AuthMethod:   "idc",
+			Provider:     "AWS",
+			ClientID:     clientID,
+			ClientSecret: clientSecret,
+			Region:       region,
+		}, nil
+	}
+	t.Cleanup(func() { refreshKiroIDCTokenForDataImport = previousRefresh })
 
 	dataPayload := map[string]any{
 		"data": []map[string]any{
@@ -330,16 +353,17 @@ func TestImportDataSupportsKiroAccountManagerJSON(t *testing.T) {
 	require.Equal(t, 3, created.Concurrency)
 	require.Equal(t, 50, created.Priority)
 	require.True(t, created.SkipDefaultGroupBind)
-	require.Equal(t, "access-token", created.Credentials["access_token"])
-	require.Equal(t, "refresh-token", created.Credentials["refresh_token"])
+	require.Equal(t, "refreshed-access-token", created.Credentials["access_token"])
+	require.Equal(t, "rotated-refresh-token", created.Credentials["refresh_token"])
 	require.Equal(t, "idc", created.Credentials["auth_method"])
-	require.Equal(t, "BuilderId", created.Credentials["provider"])
+	require.Equal(t, "AWS", created.Credentials["provider"])
 	require.Equal(t, "client-id", created.Credentials["client_id"])
 	require.Equal(t, "client-secret", created.Credentials["client_secret"])
 	require.Equal(t, "client-id-hash", created.Credentials["client_id_hash"])
 	require.Equal(t, "builder@example.com", created.Credentials["email"])
 	require.Equal(t, "us-east-1", created.Credentials["region"])
-	require.Equal(t, "arn:aws:codewhisperer:us-east-1:123456789012:profile/test", created.Credentials["profile_arn"])
+	require.Equal(t, "arn:aws:codewhisperer:us-east-1:123456789012:profile/refreshed", created.Credentials["profile_arn"])
+	require.Equal(t, "2099-01-01T00:00:00Z", created.Credentials["expires_at"])
 	require.Equal(t, "2582956e-cc88-4669-b546-07adbffcb894", created.Credentials["machineId"])
 	require.Equal(t, dataImportSourceKiroAccountManager, created.Extra["import_source"])
 	require.Equal(t, "source-id-1", created.Extra["source_id"])
@@ -348,7 +372,7 @@ func TestImportDataSupportsKiroAccountManagerJSON(t *testing.T) {
 	require.Equal(t, "inactive", created.Extra["source_status"])
 }
 
-func TestImportDataKiroAccountManagerAllowsRefreshTokenOnly(t *testing.T) {
+func TestImportDataKiroAccountManagerRejectsIDCRefreshTokenOnly(t *testing.T) {
 	router, adminSvc := setupAccountDataRouter()
 
 	dataPayload := map[string]any{
@@ -371,11 +395,47 @@ func TestImportDataKiroAccountManagerAllowsRefreshTokenOnly(t *testing.T) {
 
 	var resp dataImportResponse
 	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
-	require.Equal(t, 1, resp.Data.AccountCreated)
-	require.Equal(t, 0, resp.Data.AccountFailed)
-	require.Len(t, adminSvc.createdAccounts, 1)
-	require.Equal(t, "refresh-token", adminSvc.createdAccounts[0].Credentials["refresh_token"])
-	require.NotContains(t, adminSvc.createdAccounts[0].Credentials, "access_token")
+	require.Equal(t, 0, resp.Data.AccountCreated)
+	require.Equal(t, 1, resp.Data.AccountFailed)
+	require.Len(t, resp.Data.Errors, 1)
+	require.Contains(t, resp.Data.Errors[0].Message, "clientId")
+	require.Len(t, adminSvc.createdAccounts, 0)
+}
+
+func TestImportDataKiroAccountManagerRejectsRefreshFailure(t *testing.T) {
+	router, adminSvc := setupAccountDataRouter()
+	previousRefresh := refreshKiroIDCTokenForDataImport
+	refreshKiroIDCTokenForDataImport = func(context.Context, string, string, string, string, string, string) (*kiropkg.TokenData, error) {
+		return nil, errors.New("invalid_grant")
+	}
+	t.Cleanup(func() { refreshKiroIDCTokenForDataImport = previousRefresh })
+
+	dataPayload := map[string]any{
+		"data": []map[string]any{
+			{
+				"email":        "revoked@example.com",
+				"refreshToken": "revoked-refresh-token",
+				"authMethod":   "IdC",
+				"clientId":     "client-id",
+				"clientSecret": "client-secret",
+			},
+		},
+	}
+
+	body, _ := json.Marshal(dataPayload)
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/accounts/data", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code)
+
+	var resp dataImportResponse
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+	require.Equal(t, 0, resp.Data.AccountCreated)
+	require.Equal(t, 1, resp.Data.AccountFailed)
+	require.Len(t, resp.Data.Errors, 1)
+	require.Contains(t, resp.Data.Errors[0].Message, "invalid_grant")
+	require.Len(t, adminSvc.createdAccounts, 0)
 }
 
 func TestImportDataKiroAccountManagerFailsWithoutAccessOrRefreshToken(t *testing.T) {
