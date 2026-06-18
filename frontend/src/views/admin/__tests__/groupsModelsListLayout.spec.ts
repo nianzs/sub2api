@@ -16,4 +16,25 @@ describe("groups models list layout", () => {
     expect(groupsViewSource).toContain("max-h-64 space-y-2 overflow-y-auto p-2");
     expect(groupsViewSource).not.toContain("sticky top-0");
   });
+
+  it("uses the shared Select component for Kiro endpoint mode fields", () => {
+    const endpointModeSections = groupsViewSource
+      .split('t("admin.groups.kiroCache.endpointMode")')
+      .slice(1)
+      .map((section) =>
+        section.slice(
+          0,
+          section.indexOf('t("admin.groups.kiroCache.endpointModeHint")'),
+        ),
+      );
+
+    expect(endpointModeSections).toHaveLength(2);
+    expect(groupsViewSource).toContain("const kiroEndpointModeOptions = computed(() => [");
+
+    for (const section of endpointModeSections) {
+      expect(section).toContain("<Select");
+      expect(section).toContain(':options="kiroEndpointModeOptions"');
+      expect(section).not.toContain("<select");
+    }
+  });
 });

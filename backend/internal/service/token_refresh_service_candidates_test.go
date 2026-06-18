@@ -65,7 +65,7 @@ func (r *tokenRefreshCandidateRepo) SetTempUnschedulable(_ context.Context, _ in
 
 func isOAuthRefreshPlatform(platform string) bool {
 	switch platform {
-	case PlatformAnthropic, PlatformOpenAI, PlatformGemini, PlatformAntigravity:
+	case PlatformAnthropic, PlatformOpenAI, PlatformGemini, PlatformAntigravity, PlatformKiro:
 		return true
 	default:
 		return false
@@ -128,6 +128,13 @@ func TestTokenRefreshService_ProcessRefreshUsesOAuthRefreshCandidates(t *testing
 				Status:      StatusActive,
 				Credentials: map[string]any{"refresh_token": "refresh-token"},
 			},
+			{
+				ID:          6,
+				Platform:    PlatformKiro,
+				Type:        AccountTypeOAuth,
+				Status:      StatusActive,
+				Credentials: map[string]any{"refresh_token": "refresh-token"},
+			},
 		},
 	}
 	svc := &TokenRefreshService{
@@ -140,7 +147,7 @@ func TestTokenRefreshService_ProcessRefreshUsesOAuthRefreshCandidates(t *testing
 	svc.processRefresh()
 
 	require.Zero(t, repo.listActiveCalls, "TokenRefreshService should not use the broad active-account query")
-	require.Equal(t, []int64{1}, repo.updatedCredentialIDs)
+	require.Equal(t, []int64{1, 6}, repo.updatedCredentialIDs)
 }
 
 func TestTokenRefreshService_RefreshFailureDoesNotCallPrivacy(t *testing.T) {

@@ -100,7 +100,7 @@ func (s *AccountUsageService) getKiroUsage(ctx context.Context, account *Account
 	}
 
 	cached, hasCached := s.getCachedKiroUsage(account.ID)
-	if hasCached && (cached.ErrorCode != "" || cached.Error != "") {
+	if !forceRefresh && hasCached && (cached.ErrorCode != "" || cached.Error != "") {
 		cached.Source = source
 		s.attachKiroRuntimeState(ctx, account, cached)
 		return cached, nil
@@ -154,7 +154,16 @@ func (s *AccountUsageService) getKiroUsage(ctx context.Context, account *Account
 }
 
 func (s *AccountUsageService) fetchAndCacheKiroUsage(ctx context.Context, account *Account, source string) (*UsageInfo, error) {
-	token := strings.TrimSpace(account.GetCredential("access_token"))
+	token := ""
+	if s != nil && s.kiroTokenProvider != nil {
+		refreshedToken, err := s.kiroTokenProvider.GetAccessToken(ctx, account)
+		if err != nil {
+			return nil, fmt.Errorf("get kiro access token failed: %w", err)
+		}
+		token = strings.TrimSpace(refreshedToken)
+	} else {
+		token = strings.TrimSpace(account.GetCredential("access_token"))
+	}
 	if token == "" {
 		return nil, fmt.Errorf("no access token available")
 	}

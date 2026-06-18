@@ -663,7 +663,7 @@ func (r *accountRepository) ListOAuthRefreshCandidates(ctx context.Context) ([]s
 		WHERE deleted_at IS NULL
 			AND status = 'active'
 			AND type = 'oauth'
-			AND platform IN ('anthropic', 'openai', 'gemini', 'antigravity')
+			AND platform IN ('anthropic', 'openai', 'gemini', 'antigravity', 'kiro')
 			AND credentials ? 'refresh_token'
 			AND btrim(credentials->>'refresh_token') <> ''
 			AND (
@@ -1157,7 +1157,7 @@ func (r *accountRepository) SetModelRateLimit(ctx context.Context, id int64, sco
 	client := clientFromContext(ctx, r.client)
 	result, err := client.ExecContext(
 		ctx,
-		`UPDATE accounts SET 
+		`UPDATE accounts SET
 			extra = jsonb_set(
 				jsonb_set(COALESCE(extra, '{}'::jsonb), '{model_rate_limits}'::text[], COALESCE(extra->'model_rate_limits', '{}'::jsonb), true),
 				ARRAY['model_rate_limits', $1]::text[],

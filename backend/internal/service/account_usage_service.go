@@ -309,6 +309,7 @@ type AccountUsageService struct {
 	identityCache           IdentityCache
 	tlsFPProfileService     *TLSFingerprintProfileService
 	kiroCooldownStore       KiroCooldownStore
+	kiroTokenProvider       *KiroTokenProvider
 }
 
 // NewAccountUsageService 创建AccountUsageService实例
@@ -337,6 +338,13 @@ func NewAccountUsageService(
 func (s *AccountUsageService) SetKiroCooldownStore(store KiroCooldownStore) *AccountUsageService {
 	if s != nil {
 		s.kiroCooldownStore = store
+	}
+	return s
+}
+
+func (s *AccountUsageService) SetKiroTokenProvider(provider *KiroTokenProvider) *AccountUsageService {
+	if s != nil {
+		s.kiroTokenProvider = provider
 	}
 	return s
 }
@@ -370,7 +378,7 @@ func (s *AccountUsageService) GetUsage(ctx context.Context, accountID int64, for
 	}
 
 	if account.Platform == PlatformKiro && account.Type == AccountTypeOAuth {
-		return s.getKiroUsage(ctx, account, "active", false)
+		return s.getKiroUsage(ctx, account, "active", forceProbe)
 	}
 
 	// Antigravity 平台：使用 AntigravityQuotaFetcher 获取额度
