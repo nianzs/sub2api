@@ -298,6 +298,11 @@ type ClaudeUsageFetcher interface {
 	FetchUsageWithOptions(ctx context.Context, opts *ClaudeUsageFetchOptions) (*ClaudeUsageResponse, error)
 }
 
+type KiroUsageTokenProvider interface {
+	GetAccessToken(ctx context.Context, account *Account) (string, error)
+	ForceRefreshAccessToken(ctx context.Context, account *Account) (string, error)
+}
+
 // AccountUsageService 账号使用量查询服务
 type AccountUsageService struct {
 	accountRepo             AccountRepository
@@ -305,6 +310,7 @@ type AccountUsageService struct {
 	usageFetcher            ClaudeUsageFetcher
 	geminiQuotaService      *GeminiQuotaService
 	antigravityQuotaFetcher *AntigravityQuotaFetcher
+	kiroTokenProvider       KiroUsageTokenProvider
 	cache                   *UsageCache
 	identityCache           IdentityCache
 	tlsFPProfileService     *TLSFingerprintProfileService
@@ -333,6 +339,36 @@ func NewAccountUsageService(
 		identityCache:           identityCache,
 		tlsFPProfileService:     tlsFPProfileService,
 	}
+}
+
+func ProvideAccountUsageService(
+	accountRepo AccountRepository,
+	usageLogRepo UsageLogRepository,
+	usageFetcher ClaudeUsageFetcher,
+	geminiQuotaService *GeminiQuotaService,
+	antigravityQuotaFetcher *AntigravityQuotaFetcher,
+	cache *UsageCache,
+	identityCache IdentityCache,
+	tlsFPProfileService *TLSFingerprintProfileService,
+	kiroTokenProvider *KiroTokenProvider,
+) *AccountUsageService {
+	return NewAccountUsageService(
+		accountRepo,
+		usageLogRepo,
+		usageFetcher,
+		geminiQuotaService,
+		antigravityQuotaFetcher,
+		cache,
+		identityCache,
+		tlsFPProfileService,
+	).SetKiroTokenProvider(kiroTokenProvider)
+}
+
+func (s *AccountUsageService) SetKiroTokenProvider(provider KiroUsageTokenProvider) *AccountUsageService {
+	if s != nil {
+		s.kiroTokenProvider = provider
+	}
+	return s
 }
 
 func (s *AccountUsageService) SetKiroCooldownStore(store KiroCooldownStore) *AccountUsageService {

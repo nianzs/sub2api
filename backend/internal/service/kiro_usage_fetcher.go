@@ -100,7 +100,7 @@ func (s *AccountUsageService) getKiroUsage(ctx context.Context, account *Account
 	}
 
 	cached, hasCached := s.getCachedKiroUsage(account.ID)
-	if !forceRefresh && hasCached && (cached.ErrorCode != "" || cached.Error != "") {
+	if hasCached && (cached.ErrorCode != "" || cached.Error != "") {
 		cached.Source = source
 		s.attachKiroRuntimeState(ctx, account, cached)
 		return cached, nil
@@ -154,16 +154,11 @@ func (s *AccountUsageService) getKiroUsage(ctx context.Context, account *Account
 }
 
 func (s *AccountUsageService) fetchAndCacheKiroUsage(ctx context.Context, account *Account, source string) (*UsageInfo, error) {
-	token := ""
-	if s != nil && s.kiroTokenProvider != nil {
-		refreshedToken, err := s.kiroTokenProvider.GetAccessToken(ctx, account)
-		if err != nil {
-			return nil, fmt.Errorf("get kiro access token failed: %w", err)
-		}
-		token = strings.TrimSpace(refreshedToken)
-	} else {
-		token = strings.TrimSpace(account.GetCredential("access_token"))
+	token, err := s.getKiroUsageAccessToken(ctx, account)
+	if err != nil {
+		return nil, err
 	}
+	token = strings.TrimSpace(token)
 	if token == "" {
 		return nil, fmt.Errorf("no access token available")
 	}
@@ -173,6 +168,19 @@ func (s *AccountUsageService) fetchAndCacheKiroUsage(ctx context.Context, accoun
 
 	resp, err := s.requestKiroUsageLimits(ctx, account, region, profileArn, token)
 	if err != nil {
+		if s.shouldRetryKiroUsageWithRefresh(err) {
+			refreshedToken, refreshErr := s.kiroTokenProvider.ForceRefreshAccessToken(ctx, account)
+			if refreshErr == nil && strings.TrimSpace(refreshedToken) != "" {
+				resp, err = s.requestKiroUsageLimits(ctx, account, region, profileArn, strings.TrimSpace(refreshedToken))
+				if err == nil {
+					usage := mapKiroUsageToInfo(resp)
+					usage.Source = source
+					s.storeKiroUsageSnapshot(account.ID, usage)
+					return usage, nil
+				}
+				return nil, err
+			}
+		}
 		return nil, err
 	}
 
@@ -180,6 +188,20 @@ func (s *AccountUsageService) fetchAndCacheKiroUsage(ctx context.Context, accoun
 	usage.Source = source
 	s.storeKiroUsageSnapshot(account.ID, usage)
 	return usage, nil
+}
+
+func (s *AccountUsageService) getKiroUsageAccessToken(ctx context.Context, account *Account) (string, error) {
+	if s != nil && s.kiroTokenProvider != nil {
+		return s.kiroTokenProvider.GetAccessToken(ctx, account)
+	}
+	return strings.TrimSpace(account.GetCredential("access_token")), nil
+}
+
+func (s *AccountUsageService) shouldRetryKiroUsageWithRefresh(err error) bool {
+	if s == nil || s.kiroTokenProvider == nil || err == nil {
+		return false
+	}
+	return classifyKiroError(err).Category == kiroErrorAuthError
 }
 
 func (s *AccountUsageService) storeKiroUsageSnapshot(accountID int64, usage *UsageInfo) {

@@ -42,8 +42,46 @@ func (s *kiroUsageCooldownStore) ClearEarliestTransientCooldown(context.Context,
 	return false, nil
 }
 
+type kiroUsageTokenProviderStub struct {
+	getToken     string
+	getErr       error
+	refreshToken string
+	refreshErr   error
+	getCalls     int
+	refreshCalls int
+}
+
+func (s *kiroUsageTokenProviderStub) GetAccessToken(context.Context, *Account) (string, error) {
+	s.getCalls++
+	return s.getToken, s.getErr
+}
+
+func (s *kiroUsageTokenProviderStub) ForceRefreshAccessToken(context.Context, *Account) (string, error) {
+	s.refreshCalls++
+	return s.refreshToken, s.refreshErr
+}
+
 func kiroFloatPtr(v float64) *float64 {
 	return &v
+}
+
+func kiroUsageTestBody(current float64) string {
+	return `{
+		"subscriptionInfo": {"subscriptionTitle":"KIRO PRO+"},
+		"usageBreakdownList": [{
+			"currency":"USD",
+			"currentUsageWithPrecision":` + strconv.FormatFloat(current, 'f', -1, 64) + `,
+			"usageLimitWithPrecision":2000,
+			"resourceType":"CREDIT"
+		}]
+	}`
+}
+
+func setKiroUsageTestEndpoint(t *testing.T, endpoint string) {
+	t.Helper()
+	prevResolver := resolveKiroRuntimeEndpoint
+	resolveKiroRuntimeEndpoint = func(_ string) string { return endpoint }
+	t.Cleanup(func() { resolveKiroRuntimeEndpoint = prevResolver })
 }
 
 func TestChannel_IsWebSearchEmulationEnabled_Kiro(t *testing.T) {
@@ -184,62 +222,163 @@ func TestAccountUsageService_GetUsage_KiroMapsCredits(t *testing.T) {
 	require.NotNil(t, usage.KiroQuotaResetAt)
 }
 
-func TestAccountUsageService_GetUsage_KiroRefreshesExpiredTokenBeforeUsageRequest(t *testing.T) {
-	past := time.Now().Add(-time.Minute).Format(time.RFC3339)
-	future := time.Now().Add(time.Hour).Format(time.RFC3339)
+func TestAccountUsageService_GetUsage_KiroUsesTokenProviderAccessToken(t *testing.T) {
 	account := Account{
-		ID:       709,
+		ID:       710,
 		Platform: PlatformKiro,
 		Type:     AccountTypeOAuth,
 		Credentials: map[string]any{
-			"access_token":  "stale-kiro-access-token",
-			"refresh_token": "kiro-refresh-token",
-			"expires_at":    past,
-			"provider":      "Github",
-			"auth_method":   "social",
+			"access_token": "stale-access-token",
+			"provider":     "Github",
+			"auth_method":  "social",
 		},
 	}
-	repo := &refreshAPIAccountRepo{account: &account}
-	cache := &refreshAPICacheStub{lockResult: true}
-	executor := &refreshAPIExecutorStub{
-		needsRefresh: true,
-		credentials: map[string]any{
-			"access_token":  "fresh-kiro-access-token",
-			"refresh_token": "rotated-kiro-refresh-token",
-			"expires_at":    future,
-			"provider":      "Github",
-			"auth_method":   "social",
-		},
-	}
-	provider := NewKiroTokenProvider(repo, cache, nil)
-	provider.SetRefreshAPI(NewOAuthRefreshAPI(repo, cache), executor)
+	repo := &stubOpenAIAccountRepo{accounts: []Account{account}}
+	provider := &kiroUsageTokenProviderStub{getToken: "provider-access-token"}
 	svc := NewAccountUsageService(repo, nil, nil, nil, nil, NewUsageCache(), nil, nil).
 		SetKiroTokenProvider(provider)
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		require.Equal(t, "Bearer fresh-kiro-access-token", r.Header.Get("Authorization"))
+		require.Equal(t, "Bearer provider-access-token", r.Header.Get("Authorization"))
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{
-			"subscriptionInfo": {"subscriptionTitle":"KIRO FREE","type":"FREE"},
-			"usageBreakdownList": [{
-				"resourceType":"CREDIT",
-				"currentUsageWithPrecision": 1,
-				"usageLimitWithPrecision": 50
-			}]
-		}`))
+		_, _ = w.Write([]byte(kiroUsageTestBody(15)))
 	}))
 	defer server.Close()
-
-	prevResolver := resolveKiroRuntimeEndpoint
-	resolveKiroRuntimeEndpoint = func(_ string) string { return server.URL }
-	defer func() { resolveKiroRuntimeEndpoint = prevResolver }()
+	setKiroUsageTestEndpoint(t, server.URL)
 
 	usage, err := svc.GetUsage(context.Background(), account.ID)
 	require.NoError(t, err)
 	require.NotNil(t, usage)
-	require.Empty(t, usage.Error)
-	require.Equal(t, "fresh-kiro-access-token", repo.account.GetCredential("access_token"))
-	require.Equal(t, 1, executor.refreshCalls)
+	require.NotNil(t, usage.KiroCredit)
+	require.Equal(t, 15.0, usage.KiroCredit.CurrentUsage)
+	require.Equal(t, 1, provider.getCalls)
+	require.Equal(t, 0, provider.refreshCalls)
+}
+
+func TestAccountUsageService_GetUsage_KiroRefreshesAndRetriesOn401(t *testing.T) {
+	account := Account{
+		ID:       711,
+		Platform: PlatformKiro,
+		Type:     AccountTypeOAuth,
+		Credentials: map[string]any{
+			"access_token": "expired-access-token",
+			"provider":     "Github",
+			"auth_method":  "social",
+		},
+	}
+	repo := &stubOpenAIAccountRepo{accounts: []Account{account}}
+	provider := &kiroUsageTokenProviderStub{
+		getToken:     "expired-access-token",
+		refreshToken: "refreshed-access-token",
+	}
+	svc := NewAccountUsageService(repo, nil, nil, nil, nil, NewUsageCache(), nil, nil).
+		SetKiroTokenProvider(provider)
+
+	attempts := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		attempts++
+		if attempts == 1 {
+			require.Equal(t, "Bearer expired-access-token", r.Header.Get("Authorization"))
+			http.Error(w, `{"message":"Unauthorized"}`, http.StatusUnauthorized)
+			return
+		}
+		require.Equal(t, "Bearer refreshed-access-token", r.Header.Get("Authorization"))
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(kiroUsageTestBody(17)))
+	}))
+	defer server.Close()
+	setKiroUsageTestEndpoint(t, server.URL)
+
+	usage, err := svc.GetUsage(context.Background(), account.ID)
+	require.NoError(t, err)
+	require.NotNil(t, usage)
+	require.NotNil(t, usage.KiroCredit)
+	require.Equal(t, 17.0, usage.KiroCredit.CurrentUsage)
+	require.Equal(t, 2, attempts)
+	require.Equal(t, 1, provider.getCalls)
+	require.Equal(t, 1, provider.refreshCalls)
+}
+
+func TestAccountUsageService_GetUsage_KiroRefreshesAndRetriesOn403TokenError(t *testing.T) {
+	account := Account{
+		ID:       712,
+		Platform: PlatformKiro,
+		Type:     AccountTypeOAuth,
+		Credentials: map[string]any{
+			"access_token": "expired-access-token",
+			"provider":     "Github",
+			"auth_method":  "social",
+		},
+	}
+	repo := &stubOpenAIAccountRepo{accounts: []Account{account}}
+	provider := &kiroUsageTokenProviderStub{
+		getToken:     "expired-access-token",
+		refreshToken: "refreshed-access-token",
+	}
+	svc := NewAccountUsageService(repo, nil, nil, nil, nil, NewUsageCache(), nil, nil).
+		SetKiroTokenProvider(provider)
+
+	attempts := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		attempts++
+		if attempts == 1 {
+			require.Equal(t, "Bearer expired-access-token", r.Header.Get("Authorization"))
+			http.Error(w, `{"message":"token expired"}`, http.StatusForbidden)
+			return
+		}
+		require.Equal(t, "Bearer refreshed-access-token", r.Header.Get("Authorization"))
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(kiroUsageTestBody(19)))
+	}))
+	defer server.Close()
+	setKiroUsageTestEndpoint(t, server.URL)
+
+	usage, err := svc.GetUsage(context.Background(), account.ID)
+	require.NoError(t, err)
+	require.NotNil(t, usage)
+	require.NotNil(t, usage.KiroCredit)
+	require.Equal(t, 19.0, usage.KiroCredit.CurrentUsage)
+	require.Equal(t, 2, attempts)
+	require.Equal(t, 1, provider.getCalls)
+	require.Equal(t, 1, provider.refreshCalls)
+}
+
+func TestAccountUsageService_GetUsage_KiroDoesNotRefreshOrdinary403(t *testing.T) {
+	account := Account{
+		ID:       713,
+		Platform: PlatformKiro,
+		Type:     AccountTypeOAuth,
+		Credentials: map[string]any{
+			"access_token": "valid-access-token",
+			"provider":     "Github",
+			"auth_method":  "social",
+		},
+	}
+	repo := &stubOpenAIAccountRepo{accounts: []Account{account}}
+	provider := &kiroUsageTokenProviderStub{
+		getToken:     "valid-access-token",
+		refreshToken: "unused-access-token",
+	}
+	svc := NewAccountUsageService(repo, nil, nil, nil, nil, NewUsageCache(), nil, nil).
+		SetKiroTokenProvider(provider)
+
+	attempts := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		attempts++
+		require.Equal(t, "Bearer valid-access-token", r.Header.Get("Authorization"))
+		http.Error(w, `{"message":"usage forbidden"}`, http.StatusForbidden)
+	}))
+	defer server.Close()
+	setKiroUsageTestEndpoint(t, server.URL)
+
+	usage, err := svc.GetUsage(context.Background(), account.ID)
+	require.NoError(t, err)
+	require.NotNil(t, usage)
+	require.Equal(t, errorCodeForbidden, usage.ErrorCode)
+	require.Contains(t, usage.Error, "status 403")
+	require.Equal(t, 1, attempts)
+	require.Equal(t, 1, provider.getCalls)
+	require.Equal(t, 0, provider.refreshCalls)
 }
 
 func TestAccountUsageService_GetUsage_KiroActiveUsesCachedSnapshotWithinTTL(t *testing.T) {
@@ -581,56 +720,6 @@ func TestAccountUsageService_GetUsage_KiroCachesErrorSnapshotWhenRefreshFailsWit
 	require.NotNil(t, secondUsage)
 	require.Equal(t, errorCodeForbidden, secondUsage.ErrorCode)
 	require.Equal(t, 1, requestCount)
-}
-
-func TestAccountUsageService_GetUsage_KiroForceBypassesCachedErrorSnapshot(t *testing.T) {
-	account := Account{
-		ID:       710,
-		Platform: PlatformKiro,
-		Type:     AccountTypeOAuth,
-		Credentials: map[string]any{
-			"access_token": "kiro-access-token",
-			"provider":     "Github",
-			"auth_method":  "social",
-		},
-	}
-	repo := &stubOpenAIAccountRepo{accounts: []Account{account}}
-	svc := NewAccountUsageService(repo, nil, nil, nil, nil, NewUsageCache(), nil, nil)
-
-	requestCount := 0
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		requestCount++
-		if requestCount == 1 {
-			http.Error(w, `{"message":"The bearer token included in the request is invalid.","reason":null}`, http.StatusForbidden)
-			return
-		}
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{
-			"subscriptionInfo": {"subscriptionTitle":"KIRO FREE","type":"FREE"},
-			"usageBreakdownList": [{
-				"resourceType":"CREDIT",
-				"currentUsageWithPrecision": 2,
-				"usageLimitWithPrecision": 50
-			}]
-		}`))
-	}))
-	defer server.Close()
-
-	prevResolver := resolveKiroRuntimeEndpoint
-	resolveKiroRuntimeEndpoint = func(_ string) string { return server.URL }
-	defer func() { resolveKiroRuntimeEndpoint = prevResolver }()
-
-	firstUsage, err := svc.GetUsage(context.Background(), account.ID)
-	require.NoError(t, err)
-	require.NotNil(t, firstUsage)
-	require.Equal(t, errorCodeUnauthenticated, firstUsage.ErrorCode)
-
-	forcedUsage, err := svc.GetUsage(context.Background(), account.ID, true)
-	require.NoError(t, err)
-	require.NotNil(t, forcedUsage)
-	require.Empty(t, forcedUsage.ErrorCode)
-	require.NotNil(t, forcedUsage.KiroCredit)
-	require.Equal(t, 2, requestCount)
 }
 
 func TestMapKiroUsageToInfo_CreditsExhaustedWithoutOverages(t *testing.T) {
