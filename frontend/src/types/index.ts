@@ -175,6 +175,9 @@ export interface DailyCheckinStatus {
   daily_total_limit: number
   min_reward: number
   max_reward: number
+  min_recharge_amount: number
+  total_recharged: number
+  recharge_eligible: boolean
   checkin_date: string
   last_checkin_at?: string | null
   last_reward?: number

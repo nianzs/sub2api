@@ -378,6 +378,7 @@ export default {
     announcements: '公告',
     apiKeys: 'API 密钥',
     usage: '使用记录',
+    dailyCheckins: '签到详情',
     redeem: '兑换',
     affiliate: '邀请返利',
     affiliateManagement: '邀请返利',
@@ -709,12 +710,14 @@ export default {
       hint: '随机获得 {min} - {max} 额度',
       checkedHint: '今日已获得 {amount}',
       exhaustedHint: '今日签到额度已发完',
+      rechargeRequiredHint: '累计充值满 {amount} 可签到，当前 {current}',
       success: '签到成功，获得 {amount}',
       failed: '签到失败，请稍后重试',
       errors: {
         DAILY_CHECKIN_DISABLED: '每日签到未启用',
         DAILY_CHECKIN_ALREADY: '今天已经签到过了',
-        DAILY_CHECKIN_EXHAUSTED: '今日签到额度已发完'
+        DAILY_CHECKIN_EXHAUSTED: '今日签到额度已发完',
+        DAILY_CHECKIN_RECHARGE_REQUIRED: '累计充值金额未达到签到要求'
       }
     }
   },
@@ -1869,6 +1872,38 @@ export default {
         historyQuota: '历史返利'
       }
     },
+
+    dailyCheckins: {
+      title: '签到详情',
+      description: '查看每个用户每日签到获得的额度',
+      searchPlaceholder: '邮箱、用户名或用户 ID',
+      startDate: '开始日期',
+      endDate: '结束日期',
+      columns: {
+        user: '用户',
+        checkinDate: '签到日期',
+        reward: '获得额度',
+        createdAt: '领取时间'
+        },
+        settings: {
+          button: '签到设置',
+          title: '签到设置',
+          enabled: '开启每日签到',
+          enabledHint: '仅管理员可修改；关闭后用户端签到按钮不可领取。',
+          minReward: '最小签到获取额度',
+          maxReward: '最大签到获取额度',
+          dailyTotalLimit: '每日总派发额度',
+          minRechargeAmount: '最低累计充值金额',
+          minRechargeAmountHint: '填 0 表示所有用户都可签到。',
+          saved: '签到设置已保存'
+        },
+        errors: {
+          loadFailed: '加载签到详情失败',
+          settingsLoadFailed: '加载签到设置失败',
+          settingsSaveFailed: '保存签到设置失败',
+          DAILY_CHECKIN_SETTINGS_INVALID: '签到设置不合法，请检查额度范围'
+        }
+      },
 
     // Users Management
     users: {

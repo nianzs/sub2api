@@ -575,6 +575,18 @@ const routes: RouteRecordRaw[] = [
     }
   },
   {
+    path: '/admin/daily-checkins',
+    name: 'AdminDailyCheckins',
+    component: () => import('@/views/admin/DailyCheckinsView.vue'),
+    meta: {
+      requiresAuth: true,
+      requiresAdmin: true,
+      title: 'Daily Check-in Records',
+      titleKey: 'admin.dailyCheckins.title',
+      descriptionKey: 'admin.dailyCheckins.description'
+    }
+  },
+  {
     path: '/admin/affiliates',
     redirect: '/admin/affiliates/invites'
   },

@@ -58,6 +58,7 @@ services:
       - DAILY_CHECKIN_DAILY_TOTAL_LIMIT=${DAILY_CHECKIN_DAILY_TOTAL_LIMIT:-0}
       - DAILY_CHECKIN_MIN_REWARD=${DAILY_CHECKIN_MIN_REWARD:-0}
       - DAILY_CHECKIN_MAX_REWARD=${DAILY_CHECKIN_MAX_REWARD:-0}
+      - DAILY_CHECKIN_MIN_RECHARGE_AMOUNT=${DAILY_CHECKIN_MIN_RECHARGE_AMOUNT:-0}
 
       # =======================================================================
       # Database Configuration (PostgreSQL)

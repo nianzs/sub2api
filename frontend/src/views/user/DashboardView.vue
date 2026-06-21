@@ -50,7 +50,7 @@ const loadCharts = async () => { loadingCharts.value = true; try { const res = a
 const loadRecent = async () => { loadingUsage.value = true; try { const res = await usageAPI.getByDateRange(startDate.value, endDate.value); recentUsage.value = res.items.slice(0, 5) } catch (error) { console.error('Failed to load recent usage:', error) } finally { loadingUsage.value = false } }
 const loadPlatformQuotas = async () => { try { const data = await getMyPlatformQuotas(); platformQuotas.value = data.platform_quotas ?? [] } catch (error) { console.warn('Failed to load platform quotas:', error); platformQuotas.value = [] } }
 const loadDailyCheckin = async () => { try { dailyCheckinStatus.value = await getDailyCheckinStatus() } catch (error) { console.warn('Failed to load daily check-in status:', error); dailyCheckinStatus.value = null } }
-const dailyCheckinDisabled = computed(() => dailyCheckinLoading.value || !dailyCheckinStatus.value?.enabled || dailyCheckinStatus.value.checked_in_today || dailyCheckinStatus.value.exhausted_today)
+const dailyCheckinDisabled = computed(() => dailyCheckinLoading.value || !dailyCheckinStatus.value?.enabled || !dailyCheckinStatus.value.recharge_eligible || dailyCheckinStatus.value.checked_in_today || dailyCheckinStatus.value.exhausted_today)
 const dailyCheckinButtonText = computed(() => {
   if (dailyCheckinLoading.value) return t('dashboard.dailyCheckin.checking')
   if (dailyCheckinStatus.value?.checked_in_today) return t('dashboard.dailyCheckin.checked')
@@ -62,6 +62,7 @@ const dailyCheckinTitle = computed(() => {
   if (!status) return ''
   if (status.checked_in_today) return t('dashboard.dailyCheckin.checkedHint', { amount: formatCurrency(status.today_reward) })
   if (status.exhausted_today) return t('dashboard.dailyCheckin.exhaustedHint')
+  if (!status.recharge_eligible) return t('dashboard.dailyCheckin.rechargeRequiredHint', { amount: formatCurrency(status.min_recharge_amount), current: formatCurrency(status.total_recharged) })
   return t('dashboard.dailyCheckin.hint', { min: formatCurrency(status.min_reward), max: formatCurrency(status.max_reward) })
 })
 const formatCurrency = (value: number) => `$${Number(value || 0).toFixed(2)}`

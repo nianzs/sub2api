@@ -80,6 +80,9 @@ func RegisterAdminRoutes(
 		// 使用记录管理
 		registerUsageRoutes(admin, h)
 
+		// 每日签到记录
+		registerDailyCheckinRoutes(admin, h)
+
 		// 用户属性管理
 		registerUserAttributeRoutes(admin, h)
 
@@ -575,6 +578,15 @@ func registerUsageRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 		usage.GET("/cleanup-tasks", h.Admin.Usage.ListCleanupTasks)
 		usage.POST("/cleanup-tasks", h.Admin.Usage.CreateCleanupTask)
 		usage.POST("/cleanup-tasks/:id/cancel", h.Admin.Usage.CancelCleanupTask)
+	}
+}
+
+func registerDailyCheckinRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
+	checkins := admin.Group("/daily-checkins")
+	{
+		checkins.GET("/settings", h.Admin.DailyCheckin.GetSettings)
+		checkins.PUT("/settings", h.Admin.DailyCheckin.UpdateSettings)
+		checkins.GET("", h.Admin.DailyCheckin.List)
 	}
 }
 

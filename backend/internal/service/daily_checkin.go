@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"math"
 	"math/rand/v2"
+	"strings"
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
@@ -19,6 +20,10 @@ var (
 		"DAILY_CHECKIN_EXHAUSTED",
 		"daily check-in reward pool has been exhausted",
 	)
+	ErrDailyCheckinRechargeRequired = infraerrors.Forbidden(
+		"DAILY_CHECKIN_RECHARGE_REQUIRED",
+		"minimum recharge amount is required for daily check-in",
+	)
 )
 
 type DailyCheckinStatus struct {
@@ -29,6 +34,9 @@ type DailyCheckinStatus struct {
 	DailyTotalLimit   float64    `json:"daily_total_limit"`
 	MinReward         float64    `json:"min_reward"`
 	MaxReward         float64    `json:"max_reward"`
+	MinRechargeAmount float64    `json:"min_recharge_amount"`
+	TotalRecharged    float64    `json:"total_recharged"`
+	RechargeEligible  bool       `json:"recharge_eligible"`
 	CheckinDate       string     `json:"checkin_date"`
 	LastCheckinAt     *time.Time `json:"last_checkin_at,omitempty"`
 	LastReward        float64    `json:"last_reward,omitempty"`
@@ -48,6 +56,26 @@ type DailyCheckinRecord struct {
 	Date      string
 	Reward    float64
 	CreatedAt time.Time
+}
+
+type DailyCheckinAdminRecord struct {
+	UserID      int64     `json:"user_id"`
+	Email       string    `json:"email"`
+	Username    string    `json:"username"`
+	CheckinDate string    `json:"checkin_date"`
+	Reward      float64   `json:"reward"`
+	CreatedAt   time.Time `json:"created_at"`
+}
+
+type DailyCheckinAdminListFilter struct {
+	Search    string
+	UserID    int64
+	StartDate string
+	EndDate   string
+	Page      int
+	PageSize  int
+	SortBy    string
+	SortOrder string
 }
 
 type DailyCheckinClaimInput struct {
@@ -70,39 +98,69 @@ type DailyCheckinRepository interface {
 	GetUserLatestCheckin(ctx context.Context, userID int64) (*DailyCheckinRecord, error)
 	SumRewardsByDate(ctx context.Context, date string) (float64, error)
 	Claim(ctx context.Context, input DailyCheckinClaimInput) (*DailyCheckinClaimResult, error)
+	ListAdminRecords(ctx context.Context, filter DailyCheckinAdminListFilter) ([]DailyCheckinAdminRecord, int64, error)
+}
+
+type DailyCheckinUserRepository interface {
+	GetByID(ctx context.Context, id int64) (*User, error)
 }
 
 type DailyCheckinService struct {
 	repo                DailyCheckinRepository
+	userRepo            DailyCheckinUserRepository
 	cfg                 *config.Config
 	billingCacheService *BillingCacheService
+	settingService      *SettingService
 }
 
-func NewDailyCheckinService(repo DailyCheckinRepository, cfg *config.Config, billingCacheService *BillingCacheService) *DailyCheckinService {
+func NewDailyCheckinService(repo DailyCheckinRepository, userRepo DailyCheckinUserRepository, cfg *config.Config, billingCacheService *BillingCacheService) *DailyCheckinService {
 	return &DailyCheckinService{
 		repo:                repo,
+		userRepo:            userRepo,
 		cfg:                 cfg,
 		billingCacheService: billingCacheService,
 	}
 }
 
+func (s *DailyCheckinService) SetSettingService(settingService *SettingService) {
+	if s != nil {
+		s.settingService = settingService
+	}
+}
+
+func ProvideDailyCheckinService(repo DailyCheckinRepository, userRepo DailyCheckinUserRepository, cfg *config.Config, billingCacheService *BillingCacheService, settingService *SettingService) *DailyCheckinService {
+	svc := NewDailyCheckinService(repo, userRepo, cfg, billingCacheService)
+	svc.SetSettingService(settingService)
+	return svc
+}
+
 func (s *DailyCheckinService) GetStatus(ctx context.Context, userID int64) (*DailyCheckinStatus, error) {
-	settings := s.settings()
+	settings := s.settings(ctx)
 	claimable := dailyCheckinClaimable(settings)
 	today, nextAvailableAt := s.todayWindow()
 
 	status := &DailyCheckinStatus{
-		Enabled:         claimable,
-		DailyTotalLimit: settings.DailyTotalLimit,
-		MinReward:       settings.MinReward,
-		MaxReward:       settings.MaxReward,
-		CheckinDate:     today,
-		NextAvailableAt: nextAvailableAt,
+		Enabled:           claimable,
+		DailyTotalLimit:   settings.DailyTotalLimit,
+		MinReward:         settings.MinReward,
+		MaxReward:         settings.MaxReward,
+		MinRechargeAmount: settings.MinRechargeAmount,
+		RechargeEligible:  true,
+		CheckinDate:       today,
+		NextAvailableAt:   nextAvailableAt,
 	}
 
 	if s == nil || s.repo == nil || userID <= 0 {
+		status.RechargeEligible = dailyCheckinRechargeEligible(status.TotalRecharged, settings.MinRechargeAmount)
 		return status, nil
 	}
+
+	totalRecharged, err := s.userTotalRecharged(ctx, userID)
+	if err != nil {
+		return nil, fmt.Errorf("get daily check-in recharge total: %w", err)
+	}
+	status.TotalRecharged = totalRecharged
+	status.RechargeEligible = dailyCheckinRechargeEligible(totalRecharged, settings.MinRechargeAmount)
 
 	if record, err := s.repo.GetUserCheckin(ctx, userID, today); err != nil {
 		return nil, fmt.Errorf("get daily check-in status: %w", err)
@@ -128,12 +186,19 @@ func (s *DailyCheckinService) GetStatus(ctx context.Context, userID int64) (*Dai
 }
 
 func (s *DailyCheckinService) Claim(ctx context.Context, userID int64) (*DailyCheckinResult, error) {
-	settings := s.settings()
+	settings := s.settings(ctx)
 	if !dailyCheckinClaimable(settings) {
 		return nil, ErrDailyCheckinDisabled
 	}
 	if userID <= 0 {
 		return nil, ErrUserNotFound
+	}
+	totalRecharged, err := s.userTotalRecharged(ctx, userID)
+	if err != nil {
+		return nil, fmt.Errorf("get daily check-in recharge total: %w", err)
+	}
+	if !dailyCheckinRechargeEligible(totalRecharged, settings.MinRechargeAmount) {
+		return nil, ErrDailyCheckinRechargeRequired
 	}
 
 	today, nextAvailableAt := s.todayWindow()
@@ -172,6 +237,9 @@ func (s *DailyCheckinService) Claim(ctx context.Context, userID int64) (*DailyCh
 		DailyTotalLimit:   settings.DailyTotalLimit,
 		MinReward:         settings.MinReward,
 		MaxReward:         settings.MaxReward,
+		MinRechargeAmount: settings.MinRechargeAmount,
+		TotalRecharged:    totalRecharged,
+		RechargeEligible:  true,
 		CheckinDate:       today,
 		LastCheckinAt:     &claimed.Record.CreatedAt,
 		LastReward:        roundCheckinReward(claimed.Record.Reward),
@@ -186,11 +254,44 @@ func (s *DailyCheckinService) Claim(ctx context.Context, userID int64) (*DailyCh
 	}, nil
 }
 
-func (s *DailyCheckinService) settings() config.DailyCheckinConfig {
+func (s *DailyCheckinService) AdminListRecords(ctx context.Context, filter DailyCheckinAdminListFilter) ([]DailyCheckinAdminRecord, int64, error) {
+	if s == nil || s.repo == nil {
+		return nil, 0, fmt.Errorf("daily check-in service is not configured")
+	}
+	filter.Search = strings.TrimSpace(filter.Search)
+	filter.StartDate = strings.TrimSpace(filter.StartDate)
+	filter.EndDate = strings.TrimSpace(filter.EndDate)
+	filter.SortBy = strings.TrimSpace(filter.SortBy)
+	if filter.SortBy == "" {
+		filter.SortBy = "created_at"
+	}
+	filter.SortOrder = strings.ToLower(strings.TrimSpace(filter.SortOrder))
+	if filter.SortOrder != "asc" {
+		filter.SortOrder = "desc"
+	}
+	if filter.Page <= 0 {
+		filter.Page = 1
+	}
+	if filter.PageSize <= 0 {
+		filter.PageSize = 20
+	}
+	if filter.PageSize > 1000 {
+		filter.PageSize = 1000
+	}
+	return s.repo.ListAdminRecords(ctx, filter)
+}
+
+func (s *DailyCheckinService) settings(ctx context.Context) config.DailyCheckinConfig {
+	if s != nil && s.settingService != nil {
+		return normalizeDailyCheckinConfig(s.settingService.ResolveDailyCheckinConfig(ctx))
+	}
 	if s == nil || s.cfg == nil {
 		return config.DailyCheckinConfig{}
 	}
-	settings := s.cfg.DailyCheckin
+	return normalizeDailyCheckinConfig(s.cfg.DailyCheckin)
+}
+
+func normalizeDailyCheckinConfig(settings config.DailyCheckinConfig) config.DailyCheckinConfig {
 	if !isFiniteNonNegativeFloat(settings.DailyTotalLimit) {
 		settings.DailyTotalLimit = 0
 	}
@@ -200,12 +301,16 @@ func (s *DailyCheckinService) settings() config.DailyCheckinConfig {
 	if !isFiniteNonNegativeFloat(settings.MaxReward) {
 		settings.MaxReward = 0
 	}
+	if !isFiniteNonNegativeFloat(settings.MinRechargeAmount) {
+		settings.MinRechargeAmount = 0
+	}
 	if settings.MaxReward < settings.MinReward {
 		settings.MaxReward = settings.MinReward
 	}
 	settings.DailyTotalLimit = roundCheckinReward(settings.DailyTotalLimit)
 	settings.MinReward = roundCheckinReward(settings.MinReward)
 	settings.MaxReward = roundCheckinReward(settings.MaxReward)
+	settings.MinRechargeAmount = roundCheckinReward(settings.MinRechargeAmount)
 	return settings
 }
 
@@ -237,6 +342,25 @@ func (s *DailyCheckinService) invalidateBalanceCache(userID int64) {
 	if err := s.billingCacheService.InvalidateUserBalance(ctx, userID); err != nil {
 		logger.LegacyPrintf("service.daily_checkin", "failed to invalidate billing cache for user %d: %v", userID, err)
 	}
+}
+
+func (s *DailyCheckinService) userTotalRecharged(ctx context.Context, userID int64) (float64, error) {
+	if s == nil || s.userRepo == nil {
+		return 0, nil
+	}
+	user, err := s.userRepo.GetByID(ctx, userID)
+	if err != nil {
+		return 0, err
+	}
+	return roundCheckinReward(user.TotalRecharged), nil
+}
+
+func dailyCheckinRechargeEligible(totalRecharged, minRechargeAmount float64) bool {
+	minRechargeAmount = roundCheckinReward(minRechargeAmount)
+	if minRechargeAmount <= 0 {
+		return true
+	}
+	return roundCheckinReward(totalRecharged) >= minRechargeAmount
 }
 
 func randomDailyCheckinReward(minReward, maxReward, remaining float64) float64 {

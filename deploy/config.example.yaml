@@ -704,6 +704,9 @@ daily_checkin:
   # Maximum balance a user can receive per check-in (USD)
   # 单人单次签到随机获得额度最大值（USD）
   max_reward: 1
+  # Minimum cumulative recharge amount required to use daily check-in (USD). 0 means unrestricted.
+  # 使用每日签到所需累计充值金额（USD），0 表示不限制。
+  min_recharge_amount: 0
 
 # =============================================================================
 # Dashboard Aggregation Configuration

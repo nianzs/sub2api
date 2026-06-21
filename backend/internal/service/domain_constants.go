@@ -142,6 +142,11 @@ const (
 	SettingKeyAffiliateRebateFreezeHours          = "affiliate_rebate_freeze_hours"             // 返利冻结期（小时，0=不冻结）
 	SettingKeyAffiliateRebateDurationDays         = "affiliate_rebate_duration_days"            // 返利有效期（天，0=永久）
 	SettingKeyAffiliateRebatePerInviteeCap        = "affiliate_rebate_per_invitee_cap"          // 单人返利上限（0=无上限）
+	SettingKeyDailyCheckinEnabled                 = "daily_checkin_enabled"                     // 每日签到总开关
+	SettingKeyDailyCheckinDailyTotalLimit         = "daily_checkin_daily_total_limit"           // 全站每日签到发放总额度上限
+	SettingKeyDailyCheckinMinReward               = "daily_checkin_min_reward"                  // 单人签到随机奖励最小值
+	SettingKeyDailyCheckinMaxReward               = "daily_checkin_max_reward"                  // 单人签到随机奖励最大值
+	SettingKeyDailyCheckinMinRechargeAmount       = "daily_checkin_min_recharge_amount"         // 使用签到功能所需累计充值金额
 	SettingKeyRiskControlEnabled                  = "risk_control_enabled"                      // 是否启用风控中心入口与审计链路
 	SettingKeyContentModerationConfig             = "content_moderation_config"                 // 内容审计配置（JSON）
 	SettingKeyCyberSessionBlockEnabled            = "cyber_session_block_enabled"               // cyber 命中后会话级自动屏蔽总开关(默认关)

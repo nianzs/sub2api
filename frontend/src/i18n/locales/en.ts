@@ -378,6 +378,7 @@ export default {
     announcements: 'Announcements',
     apiKeys: 'API Keys',
     usage: 'Usage',
+    dailyCheckins: 'Check-in Details',
     redeem: 'Redeem',
     affiliate: 'Affiliate Rebates',
     affiliateManagement: 'Affiliate Rebates',
@@ -710,12 +711,14 @@ export default {
       hint: 'Get a random {min} - {max} balance reward',
       checkedHint: 'Received {amount} today',
       exhaustedHint: 'Today\'s check-in pool is empty',
+      rechargeRequiredHint: 'Recharge at least {amount} to check in. Current total: {current}',
       success: 'Check-in complete. You received {amount}',
       failed: 'Check-in failed. Please try again later.',
       errors: {
         DAILY_CHECKIN_DISABLED: 'Daily check-in is not enabled',
         DAILY_CHECKIN_ALREADY: 'You have already checked in today',
-        DAILY_CHECKIN_EXHAUSTED: 'Today\'s check-in pool is empty'
+        DAILY_CHECKIN_EXHAUSTED: 'Today\'s check-in pool is empty',
+        DAILY_CHECKIN_RECHARGE_REQUIRED: 'Your cumulative recharge has not reached the check-in requirement'
       }
     }
   },
@@ -1848,6 +1851,38 @@ export default {
         historyQuota: 'Historical Rebate'
       }
     },
+
+    dailyCheckins: {
+      title: 'Check-in Details',
+      description: 'View daily check-in rewards granted to each user',
+      searchPlaceholder: 'Email, username, or user ID',
+      startDate: 'Start date',
+      endDate: 'End date',
+      columns: {
+        user: 'User',
+        checkinDate: 'Check-in Date',
+        reward: 'Reward',
+        createdAt: 'Claimed At'
+        },
+        settings: {
+          button: 'Check-in Settings',
+          title: 'Check-in Settings',
+          enabled: 'Enable daily check-in',
+          enabledHint: 'Admin only. When disabled, users cannot claim daily check-in rewards.',
+          minReward: 'Minimum reward',
+          maxReward: 'Maximum reward',
+          dailyTotalLimit: 'Daily total payout limit',
+          minRechargeAmount: 'Minimum cumulative recharge',
+          minRechargeAmountHint: 'Set 0 to allow all users to check in.',
+          saved: 'Daily check-in settings saved'
+        },
+        errors: {
+          loadFailed: 'Failed to load check-in details',
+          settingsLoadFailed: 'Failed to load check-in settings',
+          settingsSaveFailed: 'Failed to save check-in settings',
+          DAILY_CHECKIN_SETTINGS_INVALID: 'Invalid check-in settings. Please check reward limits.'
+        }
+      },
 
     // Users
     users: {

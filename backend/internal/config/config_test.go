@@ -637,10 +637,21 @@ func TestValidateDailyCheckinConfig(t *testing.T) {
 		{
 			name: "enabled valid",
 			cfg: DailyCheckinConfig{
-				Enabled:         true,
-				DailyTotalLimit: 100,
-				MinReward:       0.1,
-				MaxReward:       1,
+				Enabled:           true,
+				DailyTotalLimit:   100,
+				MinReward:         0.1,
+				MaxReward:         1,
+				MinRechargeAmount: 10,
+			},
+		},
+		{
+			name: "enabled allows zero min recharge amount",
+			cfg: DailyCheckinConfig{
+				Enabled:           true,
+				DailyTotalLimit:   100,
+				MinReward:         0.1,
+				MaxReward:         1,
+				MinRechargeAmount: 0,
 			},
 		},
 		{
@@ -664,6 +675,36 @@ func TestValidateDailyCheckinConfig(t *testing.T) {
 			wantErr: "daily_checkin.max_reward must be positive",
 		},
 		{
+			name: "enabled requires positive min reward",
+			cfg: DailyCheckinConfig{
+				Enabled:         true,
+				DailyTotalLimit: 100,
+				MinReward:       0,
+				MaxReward:       1,
+			},
+			wantErr: "daily_checkin.min_reward must be positive",
+		},
+		{
+			name: "enabled requires min reward that rounds positive",
+			cfg: DailyCheckinConfig{
+				Enabled:         true,
+				DailyTotalLimit: 100,
+				MinReward:       0.000000001,
+				MaxReward:       1,
+			},
+			wantErr: "daily_checkin.min_reward must be positive",
+		},
+		{
+			name: "enabled requires daily total limit that rounds positive",
+			cfg: DailyCheckinConfig{
+				Enabled:         true,
+				DailyTotalLimit: 0.000000001,
+				MinReward:       0.00000001,
+				MaxReward:       0.00000001,
+			},
+			wantErr: "daily_checkin.daily_total_limit must be positive",
+		},
+		{
 			name: "max reward cannot be below min reward",
 			cfg: DailyCheckinConfig{
 				Enabled:         true,
@@ -682,6 +723,17 @@ func TestValidateDailyCheckinConfig(t *testing.T) {
 				MaxReward:       2,
 			},
 			wantErr: "daily_checkin.min_reward must be less than or equal to daily_total_limit",
+		},
+		{
+			name: "min recharge amount cannot be negative",
+			cfg: DailyCheckinConfig{
+				Enabled:           true,
+				DailyTotalLimit:   100,
+				MinReward:         0.1,
+				MaxReward:         1,
+				MinRechargeAmount: -1,
+			},
+			wantErr: "daily_checkin.min_recharge_amount must be a finite non-negative number",
 		},
 	}
 
