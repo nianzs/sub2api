@@ -421,6 +421,17 @@ func ParseImportedToken(tokenJSON string, deviceRegistrationJSON string) (*Token
 			token.ClientSecret = reg.ClientSecret
 		}
 	}
+	if token.AuthMethod == "" && strings.TrimSpace(token.ClientID) != "" && strings.TrimSpace(token.ClientSecret) != "" {
+		token.AuthMethod = "idc"
+	}
+	if token.AuthMethod == "idc" {
+		if strings.TrimSpace(token.Provider) == "" {
+			token.Provider = "AWS"
+		}
+		if strings.TrimSpace(token.Region) == "" {
+			token.Region = defaultIDCRegion
+		}
+	}
 	return &token, nil
 }
 

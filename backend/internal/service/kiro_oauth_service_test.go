@@ -71,3 +71,11 @@ func TestKiroOAuthService_RefreshTokenRejectsIDCMissingClientCredentials(t *test
 
 	require.EqualError(t, err, "kiro idc refresh requires client_id and client_secret")
 }
+
+func TestResolveKiroRefreshAuthMethodInfersIDCFromClientCredentials(t *testing.T) {
+	require.Equal(t, "idc", resolveKiroRefreshAuthMethod("", "client-id", "client-secret"))
+	require.Equal(t, "social", resolveKiroRefreshAuthMethod("", "client-id", ""))
+	require.Equal(t, "social", resolveKiroRefreshAuthMethod("", "", "client-secret"))
+	require.Equal(t, "social", resolveKiroRefreshAuthMethod("", "", ""))
+	require.Equal(t, "idc", resolveKiroRefreshAuthMethod("IDC", "", ""))
+}

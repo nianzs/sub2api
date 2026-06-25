@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"strings"
 	"time"
 )
 
@@ -29,9 +30,12 @@ func (r *KiroTokenRefresher) NeedsRefresh(account *Account, _ time.Duration) boo
 	if !r.CanRefresh(account) {
 		return false
 	}
+	if strings.TrimSpace(account.GetCredential("refresh_token")) == "" {
+		return false
+	}
 	expiresAt := account.GetCredentialAsTime("expires_at")
 	if expiresAt == nil {
-		return false
+		return true
 	}
 	return time.Until(*expiresAt) <= kiroRefreshWindow
 }

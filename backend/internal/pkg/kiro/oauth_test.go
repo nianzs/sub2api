@@ -54,3 +54,49 @@ func TestSessionStoreSetPrunesExpiredSessions(t *testing.T) {
 		t.Fatalf("fresh session should remain after pruning")
 	}
 }
+
+func TestParseImportedTokenInfersIDCAuthMetadataFromClientCredentials(t *testing.T) {
+	token, err := ParseImportedToken(`{
+		"accessToken": "access-token",
+		"refreshToken": "refresh-token",
+		"clientId": "client-id",
+		"clientSecret": "client-secret"
+	}`, "")
+	if err != nil {
+		t.Fatalf("ParseImportedToken() error = %v", err)
+	}
+
+	if token.AuthMethod != "idc" {
+		t.Fatalf("AuthMethod = %q, want idc", token.AuthMethod)
+	}
+	if token.Provider != "AWS" {
+		t.Fatalf("Provider = %q, want AWS", token.Provider)
+	}
+	if token.Region != defaultIDCRegion {
+		t.Fatalf("Region = %q, want %q", token.Region, defaultIDCRegion)
+	}
+}
+
+func TestParseImportedTokenInfersIDCAuthMetadataFromDeviceRegistration(t *testing.T) {
+	token, err := ParseImportedToken(`{
+		"accessToken": "access-token",
+		"refreshToken": "refresh-token",
+		"clientIdHash": "client-id-hash"
+	}`, `{
+		"clientId": "client-id",
+		"clientSecret": "client-secret"
+	}`)
+	if err != nil {
+		t.Fatalf("ParseImportedToken() error = %v", err)
+	}
+
+	if token.ClientID != "client-id" {
+		t.Fatalf("ClientID = %q, want client-id", token.ClientID)
+	}
+	if token.ClientSecret != "client-secret" {
+		t.Fatalf("ClientSecret = %q, want client-secret", token.ClientSecret)
+	}
+	if token.AuthMethod != "idc" {
+		t.Fatalf("AuthMethod = %q, want idc", token.AuthMethod)
+	}
+}
