@@ -52,6 +52,13 @@ func (Proxy) Fields() []ent.Field {
 		field.String("status").
 			MaxLen(20).
 			Default("active"),
+		field.Int("max_accounts").
+			Default(3).
+			Positive().
+			Comment("Max accounts that may bind to this proxy (Kiro forced-proxy quota)."),
+		field.Bool("enforce_max_accounts").
+			Default(false).
+			Comment("When true, max_accounts is a hard limit (binding rejected on overflow); when false (default) it is a soft advisory limit (overflow logged, allowed)."),
 		field.Time("expires_at").
 			Optional().Nillable().
 			Comment("Proxy expiration time (NULL means never expires)."),

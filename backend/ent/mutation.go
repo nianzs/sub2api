@@ -28284,33 +28284,36 @@ func (m *PromoCodeUsageMutation) ResetEdge(name string) error {
 // ProxyMutation represents an operation that mutates the Proxy nodes in the graph.
 type ProxyMutation struct {
 	config
-	op                  Op
-	typ                 string
-	id                  *int64
-	created_at          *time.Time
-	updated_at          *time.Time
-	deleted_at          *time.Time
-	name                *string
-	protocol            *string
-	host                *string
-	port                *int
-	addport             *int
-	username            *string
-	password            *string
-	status              *string
-	expires_at          *time.Time
-	fallback_mode       *string
-	expiry_warn_days    *int
-	addexpiry_warn_days *int
-	clearedFields       map[string]struct{}
-	accounts            map[int64]struct{}
-	removedaccounts     map[int64]struct{}
-	clearedaccounts     bool
-	backup_proxy        *int64
-	clearedbackup_proxy bool
-	done                bool
-	oldValue            func(context.Context) (*Proxy, error)
-	predicates          []predicate.Proxy
+	op                   Op
+	typ                  string
+	id                   *int64
+	created_at           *time.Time
+	updated_at           *time.Time
+	deleted_at           *time.Time
+	name                 *string
+	protocol             *string
+	host                 *string
+	port                 *int
+	addport              *int
+	username             *string
+	password             *string
+	status               *string
+	max_accounts         *int
+	addmax_accounts      *int
+	enforce_max_accounts *bool
+	expires_at           *time.Time
+	fallback_mode        *string
+	expiry_warn_days     *int
+	addexpiry_warn_days  *int
+	clearedFields        map[string]struct{}
+	accounts             map[int64]struct{}
+	removedaccounts      map[int64]struct{}
+	clearedaccounts      bool
+	backup_proxy         *int64
+	clearedbackup_proxy  bool
+	done                 bool
+	oldValue             func(context.Context) (*Proxy, error)
+	predicates           []predicate.Proxy
 }
 
 var _ ent.Mutation = (*ProxyMutation)(nil)
@@ -28830,6 +28833,98 @@ func (m *ProxyMutation) ResetStatus() {
 	m.status = nil
 }
 
+// SetMaxAccounts sets the "max_accounts" field.
+func (m *ProxyMutation) SetMaxAccounts(i int) {
+	m.max_accounts = &i
+	m.addmax_accounts = nil
+}
+
+// MaxAccounts returns the value of the "max_accounts" field in the mutation.
+func (m *ProxyMutation) MaxAccounts() (r int, exists bool) {
+	v := m.max_accounts
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldMaxAccounts returns the old "max_accounts" field's value of the Proxy entity.
+// If the Proxy object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *ProxyMutation) OldMaxAccounts(ctx context.Context) (v int, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldMaxAccounts is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldMaxAccounts requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldMaxAccounts: %w", err)
+	}
+	return oldValue.MaxAccounts, nil
+}
+
+// AddMaxAccounts adds i to the "max_accounts" field.
+func (m *ProxyMutation) AddMaxAccounts(i int) {
+	if m.addmax_accounts != nil {
+		*m.addmax_accounts += i
+	} else {
+		m.addmax_accounts = &i
+	}
+}
+
+// AddedMaxAccounts returns the value that was added to the "max_accounts" field in this mutation.
+func (m *ProxyMutation) AddedMaxAccounts() (r int, exists bool) {
+	v := m.addmax_accounts
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// ResetMaxAccounts resets all changes to the "max_accounts" field.
+func (m *ProxyMutation) ResetMaxAccounts() {
+	m.max_accounts = nil
+	m.addmax_accounts = nil
+}
+
+// SetEnforceMaxAccounts sets the "enforce_max_accounts" field.
+func (m *ProxyMutation) SetEnforceMaxAccounts(b bool) {
+	m.enforce_max_accounts = &b
+}
+
+// EnforceMaxAccounts returns the value of the "enforce_max_accounts" field in the mutation.
+func (m *ProxyMutation) EnforceMaxAccounts() (r bool, exists bool) {
+	v := m.enforce_max_accounts
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldEnforceMaxAccounts returns the old "enforce_max_accounts" field's value of the Proxy entity.
+// If the Proxy object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *ProxyMutation) OldEnforceMaxAccounts(ctx context.Context) (v bool, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldEnforceMaxAccounts is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldEnforceMaxAccounts requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldEnforceMaxAccounts: %w", err)
+	}
+	return oldValue.EnforceMaxAccounts, nil
+}
+
+// ResetEnforceMaxAccounts resets all changes to the "enforce_max_accounts" field.
+func (m *ProxyMutation) ResetEnforceMaxAccounts() {
+	m.enforce_max_accounts = nil
+}
+
 // SetExpiresAt sets the "expires_at" field.
 func (m *ProxyMutation) SetExpiresAt(t time.Time) {
 	m.expires_at = &t
@@ -29135,7 +29230,7 @@ func (m *ProxyMutation) Type() string {
 // order to get all numeric fields that were incremented/decremented, call
 // AddedFields().
 func (m *ProxyMutation) Fields() []string {
-	fields := make([]string, 0, 14)
+	fields := make([]string, 0, 16)
 	if m.created_at != nil {
 		fields = append(fields, proxy.FieldCreatedAt)
 	}
@@ -29165,6 +29260,12 @@ func (m *ProxyMutation) Fields() []string {
 	}
 	if m.status != nil {
 		fields = append(fields, proxy.FieldStatus)
+	}
+	if m.max_accounts != nil {
+		fields = append(fields, proxy.FieldMaxAccounts)
+	}
+	if m.enforce_max_accounts != nil {
+		fields = append(fields, proxy.FieldEnforceMaxAccounts)
 	}
 	if m.expires_at != nil {
 		fields = append(fields, proxy.FieldExpiresAt)
@@ -29206,6 +29307,10 @@ func (m *ProxyMutation) Field(name string) (ent.Value, bool) {
 		return m.Password()
 	case proxy.FieldStatus:
 		return m.Status()
+	case proxy.FieldMaxAccounts:
+		return m.MaxAccounts()
+	case proxy.FieldEnforceMaxAccounts:
+		return m.EnforceMaxAccounts()
 	case proxy.FieldExpiresAt:
 		return m.ExpiresAt()
 	case proxy.FieldFallbackMode:
@@ -29243,6 +29348,10 @@ func (m *ProxyMutation) OldField(ctx context.Context, name string) (ent.Value, e
 		return m.OldPassword(ctx)
 	case proxy.FieldStatus:
 		return m.OldStatus(ctx)
+	case proxy.FieldMaxAccounts:
+		return m.OldMaxAccounts(ctx)
+	case proxy.FieldEnforceMaxAccounts:
+		return m.OldEnforceMaxAccounts(ctx)
 	case proxy.FieldExpiresAt:
 		return m.OldExpiresAt(ctx)
 	case proxy.FieldFallbackMode:
@@ -29330,6 +29439,20 @@ func (m *ProxyMutation) SetField(name string, value ent.Value) error {
 		}
 		m.SetStatus(v)
 		return nil
+	case proxy.FieldMaxAccounts:
+		v, ok := value.(int)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetMaxAccounts(v)
+		return nil
+	case proxy.FieldEnforceMaxAccounts:
+		v, ok := value.(bool)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetEnforceMaxAccounts(v)
+		return nil
 	case proxy.FieldExpiresAt:
 		v, ok := value.(time.Time)
 		if !ok {
@@ -29369,6 +29492,9 @@ func (m *ProxyMutation) AddedFields() []string {
 	if m.addport != nil {
 		fields = append(fields, proxy.FieldPort)
 	}
+	if m.addmax_accounts != nil {
+		fields = append(fields, proxy.FieldMaxAccounts)
+	}
 	if m.addexpiry_warn_days != nil {
 		fields = append(fields, proxy.FieldExpiryWarnDays)
 	}
@@ -29382,6 +29508,8 @@ func (m *ProxyMutation) AddedField(name string) (ent.Value, bool) {
 	switch name {
 	case proxy.FieldPort:
 		return m.AddedPort()
+	case proxy.FieldMaxAccounts:
+		return m.AddedMaxAccounts()
 	case proxy.FieldExpiryWarnDays:
 		return m.AddedExpiryWarnDays()
 	}
@@ -29399,6 +29527,13 @@ func (m *ProxyMutation) AddField(name string, value ent.Value) error {
 			return fmt.Errorf("unexpected type %T for field %s", value, name)
 		}
 		m.AddPort(v)
+		return nil
+	case proxy.FieldMaxAccounts:
+		v, ok := value.(int)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.AddMaxAccounts(v)
 		return nil
 	case proxy.FieldExpiryWarnDays:
 		v, ok := value.(int)
@@ -29496,6 +29631,12 @@ func (m *ProxyMutation) ResetField(name string) error {
 		return nil
 	case proxy.FieldStatus:
 		m.ResetStatus()
+		return nil
+	case proxy.FieldMaxAccounts:
+		m.ResetMaxAccounts()
+		return nil
+	case proxy.FieldEnforceMaxAccounts:
+		m.ResetEnforceMaxAccounts()
 		return nil
 	case proxy.FieldExpiresAt:
 		m.ResetExpiresAt()

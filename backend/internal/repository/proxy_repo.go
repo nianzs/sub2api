@@ -46,6 +46,10 @@ func (r *proxyRepository) Create(ctx context.Context, proxyIn *service.Proxy) er
 	if proxyIn.Password != "" {
 		builder.SetPassword(proxyIn.Password)
 	}
+	if proxyIn.MaxAccounts > 0 {
+		builder.SetMaxAccounts(proxyIn.MaxAccounts)
+	}
+	builder.SetEnforceMaxAccounts(proxyIn.EnforceMaxAccounts)
 	if proxyIn.ExpiresAt != nil {
 		builder.SetExpiresAt(*proxyIn.ExpiresAt)
 	}
@@ -109,6 +113,10 @@ func (r *proxyRepository) Update(ctx context.Context, proxyIn *service.Proxy) er
 	} else {
 		builder.ClearPassword()
 	}
+	if proxyIn.MaxAccounts > 0 {
+		builder.SetMaxAccounts(proxyIn.MaxAccounts)
+	}
+	builder.SetEnforceMaxAccounts(proxyIn.EnforceMaxAccounts)
 	if proxyIn.ExpiresAt != nil {
 		builder.SetExpiresAt(*proxyIn.ExpiresAt)
 	} else {
@@ -442,18 +450,20 @@ func proxyEntityToService(m *dbent.Proxy) *service.Proxy {
 		return nil
 	}
 	out := &service.Proxy{
-		ID:             m.ID,
-		Name:           m.Name,
-		Protocol:       m.Protocol,
-		Host:           m.Host,
-		Port:           m.Port,
-		Status:         m.Status,
-		CreatedAt:      m.CreatedAt,
-		UpdatedAt:      m.UpdatedAt,
-		ExpiresAt:      m.ExpiresAt,
-		FallbackMode:   m.FallbackMode,
-		BackupProxyID:  m.BackupProxyID,
-		ExpiryWarnDays: m.ExpiryWarnDays,
+		ID:                 m.ID,
+		Name:               m.Name,
+		Protocol:           m.Protocol,
+		Host:               m.Host,
+		Port:               m.Port,
+		Status:             m.Status,
+		MaxAccounts:        m.MaxAccounts,
+		EnforceMaxAccounts: m.EnforceMaxAccounts,
+		CreatedAt:          m.CreatedAt,
+		UpdatedAt:          m.UpdatedAt,
+		ExpiresAt:          m.ExpiresAt,
+		FallbackMode:       m.FallbackMode,
+		BackupProxyID:      m.BackupProxyID,
+		ExpiryWarnDays:     m.ExpiryWarnDays,
 	}
 	if m.Username != nil {
 		out.Username = *m.Username
