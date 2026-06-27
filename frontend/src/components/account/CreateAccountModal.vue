@@ -989,7 +989,7 @@
         </div>
       </div>
 
-      <div v-if="form.platform === 'kiro' && accountCategory === 'oauth-based'" class="space-y-2">
+      <div v-if="form.platform === 'kiro' && (accountCategory === 'oauth-based' || accountCategory === 'apikey')" class="space-y-2">
         <label class="input-label">{{ t('admin.accounts.kiroCreditUnitPriceUsd') }}</label>
         <input
           v-model.number="kiroCreditUnitPriceUsd"
@@ -1005,24 +1005,13 @@
 
       <div v-if="form.platform === 'kiro' && accountCategory === 'apikey'" class="space-y-4">
         <div>
-          <label class="input-label">{{ t('admin.accounts.baseUrl') }}</label>
-          <input
-            v-model="apiKeyBaseUrl"
-            type="text"
-            required
-            class="input"
-            placeholder="https://your-kiro-upstream.example.com"
-          />
-          <p class="input-hint">{{ baseUrlHint }}</p>
-        </div>
-        <div>
           <label class="input-label">{{ t('admin.accounts.apiKeyRequired') }}</label>
           <input
             v-model="apiKeyValue"
             type="password"
             required
             class="input font-mono"
-            placeholder="sk-..."
+            placeholder="ksk_..."
           />
           <p class="input-hint">{{ apiKeyHint }}</p>
         </div>
@@ -5242,17 +5231,14 @@ const handleSubmit = async () => {
       appStore.showError(t('admin.accounts.pleaseEnterAccountName'))
       return
     }
-    if (!apiKeyBaseUrl.value.trim()) {
-      appStore.showError(t('admin.accounts.upstream.pleaseEnterBaseUrl'))
-      return
-    }
     if (!apiKeyValue.value.trim()) {
       appStore.showError(t('admin.accounts.pleaseEnterApiKey'))
       return
     }
 
+    // Kiro API Key 账号直连 AWS(q.{region}.amazonaws.com),不使用 base_url。
+    // 区域由凭据 api_region 控制(默认 us-east-1),无需也不展示 Base URL。
     const credentials: Record<string, unknown> = {
-      base_url: apiKeyBaseUrl.value.trim(),
       api_key: apiKeyValue.value.trim()
     }
 
@@ -5453,7 +5439,7 @@ const createAccountAndFinish = async (
       delete credentials.compact_model_mapping
     }
   }
-  if (platform === 'kiro' && type === 'oauth') {
+  if (platform === 'kiro') {
     const kiroExtra: Record<string, unknown> = { ...(finalExtra || {}) }
     const unitPrice = Number(kiroCreditUnitPriceUsd.value ?? 0)
     kiroExtra.kiro_credit_unit_price_usd = Number.isFinite(unitPrice) ? unitPrice : 0

@@ -3342,7 +3342,7 @@ export default {
         googleOauth: 'Google OAuth',
         codeAssist: 'Code Assist',
         kiroOauth: '社交 OAuth / AWS Builder ID / 导入',
-        kiroApikey: '通过 Base URL + API Key 连接',
+        kiroApikey: '通过 API Key 直连 AWS',
         antigravityOauth: 'Antigravity OAuth',
         antigravityApikey: '通过 Base URL + API Key 连接',
         upstream: '对接上游',
@@ -3599,6 +3599,7 @@ export default {
       addMethod: '添加方式',
       setupTokenLongLived: 'Setup Token（长期有效）',
       baseUrl: 'Base URL',
+      baseUrlOptional: 'Base URL（可选）',
       baseUrlHint: '留空使用官方 Anthropic API',
       apiKeyRequired: 'API Key *',
       apiKeyPlaceholder: 'sk-ant-api03-...',
@@ -3686,8 +3687,8 @@ export default {
         modelRestrictionDisabledByPassthrough: '已开启自动透传：模型白名单/映射不会生效。',
       },
       kiro: {
-        baseUrlHint: '请输入 Kiro 兼容上游的 Base URL',
-        apiKeyHint: '用于该 Kiro 上游的 API Key',
+        baseUrlHint: '留空即可，将直连 AWS（q.{region}.amazonaws.com）。区域由凭据 api_region 控制，默认 us-east-1',
+        apiKeyHint: 'Kiro API Key（ksk_ 开头），将作为直连 AWS 的 Bearer Token',
       },
       anthropic: {
         apiKeyPassthrough: '自动透传（仅替换认证）',

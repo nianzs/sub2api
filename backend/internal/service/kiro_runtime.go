@@ -278,8 +278,10 @@ func (s *GatewayService) openKiroAnthropicStreamResponse(ctx context.Context, ac
 	if err != nil {
 		return nil, 0, err
 	}
-	if tokenType != "oauth" {
-		return nil, 0, fmt.Errorf("kiro requires oauth token, got %s", tokenType)
+	// Kiro 直连 AWS 支持两类 token:OAuth access_token 与 API Key(ksk_*)。
+	// API Key 模式下 GetAccessToken 返回 tokenType "apikey"(无需刷新)。
+	if tokenType != "oauth" && tokenType != "apikey" {
+		return nil, 0, fmt.Errorf("kiro requires oauth or apikey token, got %s", tokenType)
 	}
 
 	inputTokens := estimateKiroInputTokens(anthropicBody)
@@ -356,7 +358,7 @@ func (s *GatewayService) executeKiroUpstreamWithParsed(ctx context.Context, acco
 	}
 
 	// KRS 模式：确保 profileArn 已解析（ListAvailableProfiles + 回填持久化）
-	mode := kiroEndpointModeForRequest(parsed)
+	mode := kiroEndpointModeForRequest(account, parsed)
 	s.ensureKiroProfileArnForRequest(ctx, account, token, mode)
 
 	modelID := kiropkg.MapModel(mappedModel)
@@ -369,7 +371,7 @@ func (s *GatewayService) executeKiroUpstreamWithParsed(ctx context.Context, acco
 	requestCtx = buildResult.Context
 	logKiroStatelessReplay(account, buildResult.Payload)
 
-	endpoints := buildKiroEndpoints(account, kiroEndpointModeForRequest(parsed))
+	endpoints := buildKiroEndpoints(account, kiroEndpointModeForRequest(account, parsed))
 	proxyURL := kiroProxyURL(account)
 	tlsProfile := s.tlsFPProfileService.ResolveTLSProfile(account)
 	accountKey := buildKiroAccountKey(account)
@@ -541,7 +543,15 @@ func buildKiroEndpoints(account *Account, mode string) []kiroEndpointConfig {
 
 // kiroEndpointModeForRequest 从 ParsedRequest 取 group 配置的 Kiro endpoint 模式；
 // parsed/Group 为 nil 时安全兜底为 "q"。
-func kiroEndpointModeForRequest(parsed *ParsedRequest) string {
+//
+// API Key 账号强制走 Q 端点(q.{region}.amazonaws.com):KRS 网关
+// (runtime.us-east-1.kiro.dev)是 Kiro 自家 OAuth 网关,只认 OAuth/IdC token +
+// profileArn,不接受 AWS 的 ksk_ API Key(会返回 403 "bearer token invalid")。
+// 与 kiro.rs 一致——其 API Key 模式也只走 q.{region}.amazonaws.com。
+func kiroEndpointModeForRequest(account *Account, parsed *ParsedRequest) string {
+	if account != nil && account.Type == AccountTypeAPIKey {
+		return KiroEndpointModeQ
+	}
 	if parsed == nil || parsed.Group == nil {
 		return KiroEndpointModeQ
 	}
@@ -553,7 +563,7 @@ func (s *GatewayService) buildKiroPayloadForAccount(ctx context.Context, account
 	_ = ctx
 	_ = token
 	var profileArn string
-	if kiroEndpointModeForRequest(parsed) == KiroEndpointModeKRS {
+	if kiroEndpointModeForRequest(account, parsed) == KiroEndpointModeKRS {
 		profileArn = kiroResolveProfileArnForKRS(account)
 	}
 	anthropicBody = prepareKiroPayloadBodyForRequestModel(anthropicBody, requestModel)

@@ -92,7 +92,7 @@ func (s *AccountUsageService) getKiroUsage(ctx context.Context, account *Account
 			ErrorCode: errorCodeNetworkError,
 		}, nil
 	}
-	if account.Platform != PlatformKiro || account.Type != AccountTypeOAuth {
+	if !isKiroDirectModeAccount(account) {
 		return &UsageInfo{
 			Source:    source,
 			UpdatedAt: &now,
@@ -168,7 +168,8 @@ func (s *AccountUsageService) fetchAndCacheKiroUsage(ctx context.Context, accoun
 
 	resp, err := s.requestKiroUsageLimits(ctx, account, region, profileArn, token)
 	if err != nil {
-		if s.shouldRetryKiroUsageWithRefresh(err) {
+		// API Key 账号无可刷新 token,跳过刷新重试。
+		if account.Type != AccountTypeAPIKey && s.shouldRetryKiroUsageWithRefresh(err) {
 			refreshedToken, refreshErr := s.kiroTokenProvider.ForceRefreshAccessToken(ctx, account)
 			if refreshErr == nil && strings.TrimSpace(refreshedToken) != "" {
 				resp, err = s.requestKiroUsageLimits(ctx, account, region, profileArn, strings.TrimSpace(refreshedToken))
@@ -191,6 +192,10 @@ func (s *AccountUsageService) fetchAndCacheKiroUsage(ctx context.Context, accoun
 }
 
 func (s *AccountUsageService) getKiroUsageAccessToken(ctx context.Context, account *Account) (string, error) {
+	// API Key 账号:api_key 即长期 Bearer Token,不经过刷新 provider。
+	if account != nil && account.Type == AccountTypeAPIKey {
+		return firstKiroCredential(account, "kiro_api_key", "kiroApiKey", "api_key"), nil
+	}
 	if s != nil && s.kiroTokenProvider != nil {
 		return s.kiroTokenProvider.GetAccessToken(ctx, account)
 	}
@@ -585,7 +590,7 @@ func (s *AccountUsageService) attachKiroRuntimeState(ctx context.Context, accoun
 }
 
 func (s *AccountUsageService) EnrichAccountWithKiroRuntimeState(ctx context.Context, account *Account) {
-	if s == nil || account == nil || account.Platform != PlatformKiro || account.Type != AccountTypeOAuth {
+	if s == nil || !isKiroDirectModeAccount(account) {
 		return
 	}
 	account.KiroQuotaState = ""

@@ -2757,7 +2757,7 @@ func (s *GatewayService) isAccountSchedulableForModelSelection(ctx context.Conte
 }
 
 func (s *GatewayService) isKiroRuntimeSchedulable(ctx context.Context, account *Account) bool {
-	if account == nil || account.Platform != PlatformKiro || account.Type != AccountTypeOAuth || s == nil || s.kiroCooldownStore == nil {
+	if !isKiroDirectModeAccount(account) || s == nil || s.kiroCooldownStore == nil {
 		return true
 	}
 	state, err := s.getKiroCooldownState(ctx, buildKiroAccountKey(account))
@@ -2791,7 +2791,7 @@ func (s *GatewayService) kiroTransientCooldownRecoveryKeys(ctx context.Context, 
 	eligible := 0
 	for i := range accounts {
 		acc := &accounts[i]
-		if acc == nil || acc.Platform != PlatformKiro || acc.Type != AccountTypeOAuth {
+		if !isKiroDirectModeAccount(acc) {
 			if allowMixedScheduling {
 				continue
 			}
@@ -4122,7 +4122,7 @@ func (s *GatewayService) diagnoseSelectionFailure(
 	if !acc.IsSchedulable() {
 		return selectionFailureDiagnosis{Category: "unschedulable", Detail: "generic_unschedulable"}
 	}
-	if acc.Platform == PlatformKiro && acc.Type == AccountTypeOAuth {
+	if isKiroDirectModeAccount(acc) {
 		if state, err := s.getKiroCooldownState(ctx, buildKiroAccountKey(acc)); err == nil && state != nil && state.Active {
 			return selectionFailureDiagnosis{
 				Category: "unschedulable",
@@ -5061,8 +5061,8 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 	}
 
 	// Web Search 模拟：纯 web_search 请求时，直接调用搜索 API 构造响应。
-	// Kiro OAuth 在 forwardKiroMessages 内部完成模型映射后再判断，避免使用未映射的请求体。
-	if account != nil && (account.Platform != PlatformKiro || account.Type != AccountTypeOAuth) && s.shouldEmulateWebSearch(ctx, account, parsed.GroupID, parsed.Body.Bytes()) {
+	// Kiro 直连账号(OAuth/API Key)在 forwardKiroMessages 内部完成模型映射后再判断，避免使用未映射的请求体。
+	if account != nil && !isKiroDirectModeAccount(account) && s.shouldEmulateWebSearch(ctx, account, parsed.GroupID, parsed.Body.Bytes()) {
 		return s.handleWebSearchEmulation(ctx, c, account, parsed)
 	}
 
@@ -5090,7 +5090,7 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 		return s.forwardBedrock(ctx, c, account, parsed, startTime)
 	}
 
-	if account != nil && account.Platform == PlatformKiro && account.Type == AccountTypeOAuth {
+	if isKiroDirectModeAccount(account) {
 		return s.forwardKiroMessages(ctx, c, account, parsed, startTime)
 	}
 
@@ -6989,10 +6989,9 @@ func (s *GatewayService) buildUpstreamRequest(ctx context.Context, c *gin.Contex
 	// 确定目标URL
 	targetURL := claudeAPIURL
 	if account.Type == AccountTypeAPIKey {
+		// 注:Kiro API Key 账号已在 Forward 入口分流到 forwardKiroMessages 直连 AWS,
+		// 不会到达此处;此分支仅服务 Anthropic 兼容 API Key 账号。
 		baseURL := account.GetBaseURL()
-		if baseURL == "" && account.Platform == PlatformKiro {
-			return nil, nil, fmt.Errorf("kiro api key account requires base_url")
-		}
 		if baseURL != "" {
 			validatedURL, err := s.validateUpstreamBaseURL(baseURL)
 			if err != nil {
@@ -10305,7 +10304,7 @@ func (s *GatewayService) ForwardCountTokens(ctx context.Context, c *gin.Context,
 		s.countTokensError(c, http.StatusNotFound, "not_found_error", "count_tokens endpoint is not supported for this platform")
 		return nil
 	}
-	if account.Platform == PlatformKiro && account.Type == AccountTypeOAuth {
+	if isKiroDirectModeAccount(account) {
 		s.countTokensError(c, http.StatusNotFound, "not_found_error", "Token counting is not supported for this platform")
 		return nil
 	}

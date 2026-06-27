@@ -28,7 +28,8 @@
 
       <!-- API Key fields (only for apikey type) -->
       <div v-if="account.type === 'apikey'" class="space-y-4">
-        <div>
+        <!-- Kiro API Key 账号直连 AWS,不使用 Base URL,故隐藏该字段 -->
+        <div v-if="account.platform !== 'kiro'">
           <label class="input-label">{{ t('admin.accounts.baseUrl') }}</label>
           <input
             v-model="editBaseUrl"
@@ -39,8 +40,6 @@
                 ? 'https://api.openai.com'
                 : account.platform === 'gemini'
                   ? 'https://generativelanguage.googleapis.com'
-                  : account.platform === 'kiro'
-                    ? 'https://your-kiro-upstream.example.com'
                   : account.platform === 'antigravity'
                     ? 'https://cloudcode-pa.googleapis.com'
                     : 'https://api.anthropic.com'
@@ -720,7 +719,7 @@
         </template>
       </div>
 
-      <div v-if="isKiroOAuthAccount" class="border-t border-gray-200 pt-4 dark:border-dark-600">
+      <div v-if="isKiroAccount" class="border-t border-gray-200 pt-4 dark:border-dark-600">
         <label class="input-label">{{ t('admin.accounts.kiroCreditUnitPriceUsd') }}</label>
         <input
           v-model.number="kiroCreditUnitPriceUsd"
@@ -2661,6 +2660,8 @@ const baseUrlHint = computed(() => {
 const antigravityPresetMappings = computed(() => getPresetMappingsByPlatform('antigravity'))
 const bedrockPresets = computed(() => getPresetMappingsByPlatform('bedrock'))
 const isKiroOAuthAccount = computed(() => props.account?.platform === 'kiro' && props.account?.type === 'oauth')
+// Kiro 积分单价适用于所有 Kiro 账号(OAuth 与 API Key 都直连 AWS、消费积分)。
+const isKiroAccount = computed(() => props.account?.platform === 'kiro')
 
 // Model mapping type
 interface ModelMapping {
@@ -3996,20 +3997,25 @@ const handleSubmit = async () => {
     // For apikey type, handle credentials update
     if (props.account.type === 'apikey') {
       const currentCredentials = (props.account.credentials as Record<string, unknown>) || {}
+      // Kiro API Key 账号直连 AWS,base_url 可选;其余平台留空时回落到默认上游。
       const newBaseUrl = props.account.platform === 'kiro'
         ? editBaseUrl.value.trim()
         : (editBaseUrl.value.trim() || defaultBaseUrl.value)
       const shouldApplyModelMapping = !(props.account.platform === 'openai' && openaiPassthroughEnabled.value)
 
-      if (!newBaseUrl) {
+      if (!newBaseUrl && props.account.platform !== 'kiro') {
         appStore.showError(t('admin.accounts.upstream.pleaseEnterBaseUrl'))
         return
       }
 
       // Always update credentials for apikey type to handle model mapping changes
       const newCredentials: Record<string, unknown> = {
-        ...currentCredentials,
-        base_url: newBaseUrl
+        ...currentCredentials
+      }
+      if (newBaseUrl) {
+        newCredentials.base_url = newBaseUrl
+      } else {
+        delete newCredentials.base_url
       }
 
       // Handle API key
@@ -4261,7 +4267,7 @@ const handleSubmit = async () => {
       updatePayload.credentials = newCredentials
     }
 
-    if (props.account.platform === 'kiro' && props.account.type === 'oauth') {
+    if (props.account.platform === 'kiro') {
       const currentExtra = (updatePayload.extra as Record<string, unknown>) ||
         (props.account.extra as Record<string, unknown>) || {}
       const newExtra: Record<string, unknown> = { ...currentExtra }

@@ -109,7 +109,7 @@ func (s *GatewayService) ForwardAsResponses(
 	anthropicBody = enforceCacheControlLimit(anthropicBody)
 
 	var resp *http.Response
-	if account.Platform == PlatformKiro && account.Type == AccountTypeOAuth {
+	if isKiroDirectModeAccount(account) {
 		var group *Group
 		if parsed != nil {
 			group = parsed.Group

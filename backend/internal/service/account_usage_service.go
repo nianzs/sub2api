@@ -405,7 +405,7 @@ func (s *AccountUsageService) GetUsage(ctx context.Context, accountID int64, for
 		return usage, err
 	}
 
-	if account.Platform == PlatformKiro && account.Type == AccountTypeOAuth {
+	if isKiroDirectModeAccount(account) {
 		return s.getKiroUsage(ctx, account, "active", false)
 	}
 
@@ -518,8 +518,8 @@ func (s *AccountUsageService) GetPassiveUsage(ctx context.Context, accountID int
 	}
 
 	if account.Platform == PlatformKiro {
-		if account.Type != AccountTypeOAuth {
-			return nil, fmt.Errorf("passive usage only supported for Kiro OAuth accounts")
+		if account.Type != AccountTypeOAuth && account.Type != AccountTypeAPIKey {
+			return nil, fmt.Errorf("passive usage only supported for Kiro OAuth/APIKey accounts")
 		}
 		return s.getKiroUsage(ctx, account, "passive", false)
 	}

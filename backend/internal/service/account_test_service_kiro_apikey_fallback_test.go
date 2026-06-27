@@ -10,10 +10,11 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
-	"github.com/Wei-Shaw/sub2api/internal/pkg/claude"
 )
 
-func TestAccountTestService_KiroAPIKeyUsesGenericAnthropicCompatiblePath(t *testing.T) {
+// Kiro API Key 账号现已直连 AWS(q.{region}.amazonaws.com),与 OAuth 账号同路径,
+// 不再走 Anthropic 兼容反代(base_url + /v1/messages)。
+func TestAccountTestService_KiroAPIKeyDirectAWSEndpoint(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	ctx, _ := newTestContext()
 
@@ -24,8 +25,7 @@ func TestAccountTestService_KiroAPIKeyUsesGenericAnthropicCompatiblePath(t *test
 		Type:        AccountTypeAPIKey,
 		Concurrency: 1,
 		Credentials: map[string]any{
-			"base_url": "https://kiro-upstream.example.com",
-			"api_key":  "kiro-api-key",
+			"api_key": "kiro-api-key",
 			"model_mapping": map[string]any{
 				"claude-sonnet-4-6": "claude-sonnet-4-6",
 			},
@@ -34,7 +34,7 @@ func TestAccountTestService_KiroAPIKeyUsesGenericAnthropicCompatiblePath(t *test
 	repo := &mockAccountRepoForGemini{accountsByID: map[int64]*Account{account.ID: account}}
 	upstream := &queuedHTTPUpstream{
 		responses: []*http.Response{
-			newJSONResponse(http.StatusUnauthorized, `{"type":"error","error":{"type":"authentication_error","message":"invalid api key"}}`),
+			newJSONResponse(http.StatusUnauthorized, `{"message":"invalid token"}`),
 		},
 	}
 	svc := &AccountTestService{
@@ -49,20 +49,23 @@ func TestAccountTestService_KiroAPIKeyUsesGenericAnthropicCompatiblePath(t *test
 	require.Len(t, upstream.requests, 1)
 
 	req := upstream.requests[0]
-	require.Equal(t, "kiro-upstream.example.com", req.URL.Host)
-	require.Equal(t, "/v1/messages", req.URL.Path)
-	require.Equal(t, "kiro-api-key", req.Header.Get("x-api-key"))
-	require.Empty(t, req.Header.Get("Authorization"))
-	require.Equal(t, claude.APIKeyBetaHeader, req.Header.Get("anthropic-beta"))
+	// 直连 AWS Q endpoint,默认 us-east-1
+	require.Equal(t, "q.us-east-1.amazonaws.com", req.URL.Host)
+	require.Equal(t, "/generateAssistantResponse", req.URL.Path)
+	// API Key 走 Bearer + 小写 tokentype: API_KEY(对齐 kiro.rs)
+	require.Equal(t, "Bearer kiro-api-key", req.Header.Get("Authorization"))
+	require.Equal(t, []string{"API_KEY"}, req.Header["tokentype"])
+	require.Empty(t, req.Header.Get("x-api-key"))
 }
 
-func TestAccountTestService_KiroAPIKeyWithoutBaseURLErrors(t *testing.T) {
+// 缺少 base_url 不再报错:Kiro API Key 账号直连 AWS,base_url 与其无关。
+func TestAccountTestService_KiroAPIKeyWithoutBaseURLDirectAWS(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	ctx, _ := newTestContext()
 
 	account := &Account{
 		ID:          20,
-		Name:        "kiro-apikey-missing-base-url",
+		Name:        "kiro-apikey-no-base-url",
 		Platform:    PlatformKiro,
 		Type:        AccountTypeAPIKey,
 		Concurrency: 1,
@@ -71,14 +74,22 @@ func TestAccountTestService_KiroAPIKeyWithoutBaseURLErrors(t *testing.T) {
 		},
 	}
 	repo := &mockAccountRepoForGemini{accountsByID: map[int64]*Account{account.ID: account}}
+	upstream := &queuedHTTPUpstream{
+		responses: []*http.Response{
+			newJSONResponse(http.StatusUnauthorized, `{"message":"invalid token"}`),
+		},
+	}
 	svc := &AccountTestService{
 		accountRepo:         repo,
-		httpUpstream:        &queuedHTTPUpstream{},
+		httpUpstream:        upstream,
 		cfg:                 &config.Config{Security: config.SecurityConfig{URLAllowlist: config.URLAllowlistConfig{Enabled: false}}},
 		tlsFPProfileService: &TLSFingerprintProfileService{},
 	}
 
 	err := svc.TestAccountConnection(ctx, account.ID, "claude-sonnet-4-6", "", AccountTestModeDefault)
+	// 不再因缺少 base_url 报错;直连 AWS 后因 mock 返回 401 而报上游错误
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "Base URL")
+	require.NotContains(t, err.Error(), "Base URL")
+	require.Len(t, upstream.requests, 1)
+	require.Equal(t, "q.us-east-1.amazonaws.com", upstream.requests[0].URL.Host)
 }
