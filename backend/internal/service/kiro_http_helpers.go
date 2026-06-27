@@ -133,6 +133,15 @@ func kiroProxyURL(account *Account) string {
 	return ""
 }
 
+// isKiroDirectModeAccount 判断账号是否走 Kiro 直连 AWS 模式。
+// Kiro 平台的 OAuth 账号与 API Key 账号共用 q.{region}.amazonaws.com 推理 / 用量 / MCP 端点,
+// 仅请求头(tokentype)和 token 获取方式(刷新 vs 直接取 api_key)不同。
+// 历史上 API Key 账号曾被当作 Anthropic 兼容反代,现已统一为直连 AWS。
+func isKiroDirectModeAccount(account *Account) bool {
+	return account != nil && account.Platform == PlatformKiro &&
+		(account.Type == AccountTypeOAuth || account.Type == AccountTypeAPIKey)
+}
+
 func kiroAPIRegion(account *Account) string {
 	if account == nil {
 		return kiroDefaultRegion
@@ -147,6 +156,14 @@ func kiroAPIRegion(account *Account) string {
 func applyKiroConditionalHeaders(req *http.Request, account *Account) {
 	if req == nil || account == nil {
 		return
+	}
+	// API Key 账号:AWS 要求显式声明 token 类型(对齐 kiro.rs 的 API Key 模式)。
+	// 必须用小写 "tokentype":AWS getUsageLimits 端点对该非标准头大小写敏感,
+	// 而 http.Header.Set 会规范化成 "Tokentype",在 HTTP/1.1 下原样发出会被忽略,
+	// 导致 ksk_ 被当作 OAuth token 校验 → 403 invalid。直接赋值 map key 绕过规范化,
+	// HTTP/1.1 原样发小写、HTTP/2 本就强制小写,两种协议都正确。
+	if account.Type == AccountTypeAPIKey {
+		req.Header["tokentype"] = []string{"API_KEY"}
 	}
 	if strings.EqualFold(strings.TrimSpace(account.GetCredential("auth_method")), "external_idp") {
 		req.Header.Set("TokenType", "EXTERNAL_IDP")

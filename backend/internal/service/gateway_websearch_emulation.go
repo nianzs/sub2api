@@ -79,7 +79,7 @@ func (s *GatewayService) shouldEmulateWebSearch(ctx context.Context, account *Ac
 		default:
 			return s.isChannelWebSearchEmulationEnabled(ctx, groupID, account.Platform)
 		}
-	case account.Platform == PlatformKiro && account.Type == AccountTypeOAuth:
+	case isKiroDirectModeAccount(account):
 		return s.isChannelWebSearchEmulationEnabled(ctx, groupID, account.Platform)
 	default:
 		return false

@@ -9,7 +9,9 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestAccountUsageService_GetUsage_KiroAPIKeyUnsupported(t *testing.T) {
+// Kiro API Key 账号现已支持用量查询(与 OAuth 同路径,直连 q.{region}.amazonaws.com)。
+// 缺少 api_key 凭据时优雅降级:返回非空 UsageInfo(内含错误),而非整体报错。
+func TestAccountUsageService_GetUsage_KiroAPIKeySupported(t *testing.T) {
 	account := &Account{
 		ID:       9101,
 		Platform: PlatformKiro,
@@ -19,12 +21,12 @@ func TestAccountUsageService_GetUsage_KiroAPIKeyUnsupported(t *testing.T) {
 	svc := NewAccountUsageService(repo, nil, nil, nil, nil, NewUsageCache(), nil, nil)
 
 	usage, err := svc.GetUsage(context.Background(), account.ID)
-	require.Nil(t, usage)
-	require.Error(t, err)
-	require.Contains(t, err.Error(), "does not support usage query")
+	require.NoError(t, err)
+	require.NotNil(t, usage)
+	require.Equal(t, "active", usage.Source)
 }
 
-func TestAccountUsageService_GetPassiveUsage_KiroAPIKeyUnsupported(t *testing.T) {
+func TestAccountUsageService_GetPassiveUsage_KiroAPIKeySupported(t *testing.T) {
 	account := &Account{
 		ID:       9102,
 		Platform: PlatformKiro,
@@ -34,7 +36,7 @@ func TestAccountUsageService_GetPassiveUsage_KiroAPIKeyUnsupported(t *testing.T)
 	svc := NewAccountUsageService(repo, nil, nil, nil, nil, NewUsageCache(), nil, nil)
 
 	usage, err := svc.GetPassiveUsage(context.Background(), account.ID)
-	require.Nil(t, usage)
-	require.Error(t, err)
-	require.Contains(t, err.Error(), "Kiro OAuth")
+	require.NoError(t, err)
+	require.NotNil(t, usage)
+	require.Equal(t, "passive", usage.Source)
 }

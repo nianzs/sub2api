@@ -103,6 +103,85 @@ func TestNewKiroJSONRequestAddsConditionalHeaders(t *testing.T) {
 	require.Empty(t, req.Header.Get("Anthropic-Beta"))
 }
 
+func TestApplyKiroConditionalHeadersAPIKeyTokenType(t *testing.T) {
+	apiKeyAccount := &Account{
+		Platform: PlatformKiro,
+		Type:     AccountTypeAPIKey,
+		Credentials: map[string]any{
+			"kiroApiKey": "ksk_test_key",
+		},
+	}
+	req, err := newKiroJSONRequest(
+		context.Background(),
+		"https://q.us-east-1.amazonaws.com/generateAssistantResponse",
+		[]byte(`{"ok":true}`),
+		"ksk_test_key",
+		"account-key",
+		buildKiroMachineID(apiKeyAccount),
+		"",
+		apiKeyAccount,
+	)
+	require.NoError(t, err)
+	// API Key 账号必须带小写 tokentype: API_KEY(对齐 kiro.rs;直接读原始 map key,
+	// 因为头以小写 key 存储,Header.Get 会按规范化的 "Tokentype" 查找而读不到)
+	require.Equal(t, []string{"API_KEY"}, req.Header["tokentype"])
+	require.Equal(t, "Bearer ksk_test_key", req.Header.Get("Authorization"))
+	// 非 external_idp,不应带规范化的 EXTERNAL_IDP 头
+	require.Empty(t, req.Header["Tokentype"])
+
+	// OAuth 账号不应带 API_KEY tokentype
+	oauthAccount := &Account{
+		Platform: PlatformKiro,
+		Type:     AccountTypeOAuth,
+		Credentials: map[string]any{
+			"refresh_token": "refresh-token",
+		},
+	}
+	oauthReq, err := newKiroJSONRequest(
+		context.Background(),
+		"https://q.us-east-1.amazonaws.com/generateAssistantResponse",
+		[]byte(`{"ok":true}`),
+		"access-token",
+		"account-key",
+		buildKiroMachineID(oauthAccount),
+		"",
+		oauthAccount,
+	)
+	require.NoError(t, err)
+	require.Empty(t, oauthReq.Header["tokentype"])
+}
+
+func TestIsKiroDirectModeAccount(t *testing.T) {
+	require.True(t, isKiroDirectModeAccount(&Account{Platform: PlatformKiro, Type: AccountTypeOAuth}))
+	require.True(t, isKiroDirectModeAccount(&Account{Platform: PlatformKiro, Type: AccountTypeAPIKey}))
+	// 非 Kiro 平台的 API Key 账号不算直连模式
+	require.False(t, isKiroDirectModeAccount(&Account{Platform: PlatformAnthropic, Type: AccountTypeAPIKey}))
+	// 其他账号类型不算
+	require.False(t, isKiroDirectModeAccount(&Account{Platform: PlatformKiro, Type: AccountTypeServiceAccount}))
+	require.False(t, isKiroDirectModeAccount(nil))
+}
+
+func TestBuildKiroEndpointsAPIKeyDirectAWS(t *testing.T) {
+	// 默认 region → us-east-1
+	defaultAccount := &Account{
+		Platform:    PlatformKiro,
+		Type:        AccountTypeAPIKey,
+		Credentials: map[string]any{"kiroApiKey": "ksk_x"},
+	}
+	endpoints := buildKiroEndpoints(defaultAccount, KiroEndpointModeQ)
+	require.Len(t, endpoints, 1)
+	require.Equal(t, "https://q.us-east-1.amazonaws.com/generateAssistantResponse", endpoints[0].URL)
+
+	// 凭据 api_region 覆盖 → us-west-2
+	regionAccount := &Account{
+		Platform:    PlatformKiro,
+		Type:        AccountTypeAPIKey,
+		Credentials: map[string]any{"kiroApiKey": "ksk_x", "api_region": "us-west-2"},
+	}
+	regionEndpoints := buildKiroEndpoints(regionAccount, KiroEndpointModeQ)
+	require.Equal(t, "https://q.us-west-2.amazonaws.com/generateAssistantResponse", regionEndpoints[0].URL)
+}
+
 func TestIsKiroInvalidModelIDBodyRecognizesKnownForms(t *testing.T) {
 	tests := []string{
 		`{"message":"Invalid model ID. Please select a different model to continue.","reason":"INVALID_MODEL_ID"}`,

@@ -430,8 +430,8 @@
       </div>
     </template>
 
-    <!-- Kiro platform: show credits + bonus + overage summary -->
-    <template v-else-if="account.platform === 'kiro' && account.type === 'oauth'">
+    <!-- Kiro platform: show credits + bonus + overage summary (OAuth 与 API Key 均直连 AWS) -->
+    <template v-else-if="account.platform === 'kiro' && (account.type === 'oauth' || account.type === 'apikey')">
       <div v-if="loading" class="space-y-1.5">
         <div class="h-4 w-24 animate-pulse rounded bg-gray-200 dark:bg-gray-700"></div>
         <div class="space-y-1">
@@ -656,6 +656,10 @@ let visibilityObserver: IntersectionObserver | null = null
 const showUsageWindows = computed(() => {
   // Gemini: we can always compute local usage windows from DB logs (simulated quotas).
   if (props.account.platform === 'gemini') return true
+  // Kiro OAuth 与 API Key 均直连 AWS,都有用量(credits)展示。
+  if (props.account.platform === 'kiro') {
+    return props.account.type === 'oauth' || props.account.type === 'apikey'
+  }
   return props.account.type === 'oauth' || props.account.type === 'setup-token'
 })
 
@@ -664,7 +668,8 @@ const shouldFetchUsage = computed(() => {
     return props.account.type === 'oauth' || props.account.type === 'setup-token'
   }
   if (props.account.platform === 'kiro') {
-    return props.account.type === 'oauth'
+    // Kiro OAuth 与 API Key 均直连 AWS,都支持用量查询
+    return props.account.type === 'oauth' || props.account.type === 'apikey'
   }
   if (props.account.platform === 'gemini') {
     return true
@@ -1121,19 +1126,20 @@ const isAnthropicOAuthOrSetupToken = computed(() => {
   return props.account.platform === 'anthropic' && (props.account.type === 'oauth' || props.account.type === 'setup-token')
 })
 
-const isKiroOAuth = computed(() => {
-  return props.account.platform === 'kiro' && props.account.type === 'oauth'
+// Kiro 用量账号:OAuth 与 API Key 均直连 AWS,用量取数策略与展示一致(默认 passive、手动刷新 active)。
+const isKiroUsageAccount = computed(() => {
+  return props.account.platform === 'kiro' && (props.account.type === 'oauth' || props.account.type === 'apikey')
 })
 
 const defaultUsageSource = computed<'passive' | 'active' | undefined>(() => {
-  if (isAnthropicOAuthOrSetupToken.value || isKiroOAuth.value) {
+  if (isAnthropicOAuthOrSetupToken.value || isKiroUsageAccount.value) {
     return 'passive'
   }
   return undefined
 })
 
 const manualRefreshUsageSource = computed<'passive' | 'active' | undefined>(() => {
-  if (isKiroOAuth.value) {
+  if (isKiroUsageAccount.value) {
     return 'active'
   }
   return defaultUsageSource.value
@@ -1150,7 +1156,7 @@ const kiroUsageAvailable = computed(() => {
 })
 
 const syncKiroUsageMeta = (info?: AccountUsageInfo | null) => {
-  if (!isKiroOAuth.value) return
+  if (!isKiroUsageAccount.value) return
 
   const planType = (
     info?.kiro_subscription_name ||
@@ -1220,7 +1226,7 @@ const kiroQuotaResetDisplay = computed(() => {
 })
 
 const isKiroProfileError = computed(() => {
-  if (!isKiroOAuth.value) return false
+  if (!isKiroUsageAccount.value) return false
   const err = (usageInfo.value?.error || '').toLowerCase()
   return err.includes('profilearn is required') ||
     (err.includes('profile arn') && err.includes('required')) ||
@@ -1229,7 +1235,7 @@ const isKiroProfileError = computed(() => {
 })
 
 const isKiroUsageForbidden = computed(() => {
-  if (!isKiroOAuth.value) return false
+  if (!isKiroUsageAccount.value) return false
   return usageInfo.value?.error_code === 'forbidden' && !usageInfo.value?.needs_reauth && !isKiroProfileError.value
 })
 

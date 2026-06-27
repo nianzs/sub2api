@@ -3154,7 +3154,7 @@ export default {
         googleOauth: 'Google OAuth',
         codeAssist: 'Code Assist',
         kiroOauth: 'Social OAuth / AWS Builder ID / Import',
-        kiroApikey: 'Connect via Base URL + API Key',
+        kiroApikey: 'Connect to AWS directly via API Key',
         antigravityOauth: 'Antigravity OAuth',
         antigravityApikey: 'Connect via Base URL + API Key',
         upstream: 'Upstream',
@@ -3427,6 +3427,7 @@ export default {
       addMethod: 'Add Method',
       setupTokenLongLived: 'Setup Token (Long-lived)',
       baseUrl: 'Base URL',
+      baseUrlOptional: 'Base URL (optional)',
       baseUrlHint: 'Leave default for official Anthropic API',
       apiKeyRequired: 'API Key *',
       apiKeyPlaceholder: 'sk-ant-api03-...',
@@ -3519,8 +3520,8 @@ export default {
         modelRestrictionDisabledByPassthrough: 'Automatic passthrough is enabled: model whitelist/mapping will not take effect.',
       },
       kiro: {
-        baseUrlHint: 'Enter the Base URL of the Kiro-compatible upstream',
-        apiKeyHint: 'API Key for that Kiro upstream',
+        baseUrlHint: 'Leave empty to connect directly to AWS (q.{region}.amazonaws.com). Region is controlled by the api_region credential, default us-east-1',
+        apiKeyHint: 'Kiro API Key (starts with ksk_), used as the Bearer token for direct AWS access',
       },
       anthropic: {
         apiKeyPassthrough: 'Auto passthrough (auth only)',
