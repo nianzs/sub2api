@@ -79,6 +79,7 @@ const props = withDefaults(
     stats?: WindowStats | null
     platform?: string | null
     kiroCreditUnitPriceUsd?: number | null
+    isRelay?: boolean
     loading?: boolean
     error?: string | null
   }>(),
@@ -86,6 +87,7 @@ const props = withDefaults(
     stats: null,
     platform: null,
     kiroCreditUnitPriceUsd: null,
+    isRelay: false,
     loading: false,
     error: null
   }
@@ -93,7 +95,8 @@ const props = withDefaults(
 
 const { t } = useI18n()
 
-const showKiroCredits = computed(() => props.platform === 'kiro')
+// 仅 Kiro 直连账号展示 credits 行;外部中转账号转发到 Anthropic 兼容上游、无 Kiro credits。
+const showKiroCredits = computed(() => props.platform === 'kiro' && !props.isRelay)
 
 const kiroCreditEstimatedCostValue = computed(() => {
   if (!showKiroCredits.value) return null

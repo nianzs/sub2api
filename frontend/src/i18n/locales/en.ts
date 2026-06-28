@@ -3155,6 +3155,7 @@ export default {
         codeAssist: 'Code Assist',
         kiroOauth: 'Social OAuth / AWS Builder ID / Import',
         kiroApikey: 'Connect to AWS directly via API Key',
+        kiroApikeyRelay: 'Relay via external API Key + Base URL',
         antigravityOauth: 'Antigravity OAuth',
         antigravityApikey: 'Connect via Base URL + API Key',
         upstream: 'Upstream',
@@ -3522,6 +3523,9 @@ export default {
       kiro: {
         baseUrlHint: 'Leave empty to connect directly to AWS (q.{region}.amazonaws.com). Region is controlled by the api_region credential, default us-east-1',
         apiKeyHint: 'Kiro API Key (starts with ksk_), used as the Bearer token for direct AWS access',
+        relayBaseUrlHint: 'External Anthropic-compatible upstream URL (e.g. https://your-relay.example.com); requests go to {base_url}/v1/messages',
+        relayApiKeyHint: 'API Key for that external upstream (sent via the x-api-key header)',
+        relayPriorityHint: 'Keep a low priority (larger number) so it acts as a fallback only — used when all native Kiro accounts fail',
       },
       anthropic: {
         apiKeyPassthrough: 'Auto passthrough (auth only)',

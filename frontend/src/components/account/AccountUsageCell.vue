@@ -430,8 +430,8 @@
       </div>
     </template>
 
-    <!-- Kiro platform: show credits + bonus + overage summary (OAuth 与 API Key 均直连 AWS) -->
-    <template v-else-if="account.platform === 'kiro' && (account.type === 'oauth' || account.type === 'apikey')">
+    <!-- Kiro platform: show credits + bonus + overage summary (仅直连 AWS;外部中转账号不展示 credits) -->
+    <template v-else-if="isKiroUsageAccount">
       <div v-if="loading" class="space-y-1.5">
         <div class="h-4 w-24 animate-pulse rounded bg-gray-200 dark:bg-gray-700"></div>
         <div class="space-y-1">
@@ -601,6 +601,7 @@ import { adminAPI } from '@/api/admin'
 import type { Account, AccountUsageInfo, GeminiCredentials, WindowStats } from '@/types'
 import { buildOpenAIUsageRefreshKey } from '@/utils/accountUsageRefresh'
 import { enqueueUsageRequest } from '@/utils/usageLoadQueue'
+import { isKiroDirectApiKeyAccount } from '@/utils/kiroAccount'
 import { formatCompactNumber } from '@/utils/format'
 import UsageProgressBar from './UsageProgressBar.vue'
 import AccountQuotaInfo from './AccountQuotaInfo.vue'
@@ -656,9 +657,9 @@ let visibilityObserver: IntersectionObserver | null = null
 const showUsageWindows = computed(() => {
   // Gemini: we can always compute local usage windows from DB logs (simulated quotas).
   if (props.account.platform === 'gemini') return true
-  // Kiro OAuth 与 API Key 均直连 AWS,都有用量(credits)展示。
+  // Kiro 直连 AWS(OAuth 或 无 base_url 的 API Key)展示 credits;外部中转账号按通用 API Key 处理。
   if (props.account.platform === 'kiro') {
-    return props.account.type === 'oauth' || props.account.type === 'apikey'
+    return props.account.type === 'oauth' || isKiroDirectApiKeyAccount(props.account)
   }
   return props.account.type === 'oauth' || props.account.type === 'setup-token'
 })
@@ -668,8 +669,8 @@ const shouldFetchUsage = computed(() => {
     return props.account.type === 'oauth' || props.account.type === 'setup-token'
   }
   if (props.account.platform === 'kiro') {
-    // Kiro OAuth 与 API Key 均直连 AWS,都支持用量查询
-    return props.account.type === 'oauth' || props.account.type === 'apikey'
+    // 仅 Kiro 直连 AWS 账号查 getUsageLimits;外部中转账号不查 Kiro 用量
+    return props.account.type === 'oauth' || isKiroDirectApiKeyAccount(props.account)
   }
   if (props.account.platform === 'gemini') {
     return true
@@ -1126,9 +1127,11 @@ const isAnthropicOAuthOrSetupToken = computed(() => {
   return props.account.platform === 'anthropic' && (props.account.type === 'oauth' || props.account.type === 'setup-token')
 })
 
-// Kiro 用量账号:OAuth 与 API Key 均直连 AWS,用量取数策略与展示一致(默认 passive、手动刷新 active)。
+// Kiro 用量账号:仅直连 AWS(OAuth 或 无 base_url 的 API Key)才查/展示 Kiro credits。
+// 外部中转账号(apikey + base_url)转发到 Anthropic 兼容上游,无 Kiro 用量,按通用 API Key 处理。
 const isKiroUsageAccount = computed(() => {
-  return props.account.platform === 'kiro' && (props.account.type === 'oauth' || props.account.type === 'apikey')
+  return props.account.platform === 'kiro' &&
+    (props.account.type === 'oauth' || isKiroDirectApiKeyAccount(props.account))
 })
 
 const defaultUsageSource = computed<'passive' | 'active' | undefined>(() => {

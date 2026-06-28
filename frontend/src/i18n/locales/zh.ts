@@ -3343,6 +3343,7 @@ export default {
         codeAssist: 'Code Assist',
         kiroOauth: '社交 OAuth / AWS Builder ID / 导入',
         kiroApikey: '通过 API Key 直连 AWS',
+        kiroApikeyRelay: '通过外部 API Key + Base URL 中转',
         antigravityOauth: 'Antigravity OAuth',
         antigravityApikey: '通过 Base URL + API Key 连接',
         upstream: '对接上游',
@@ -3689,6 +3690,9 @@ export default {
       kiro: {
         baseUrlHint: '留空即可，将直连 AWS（q.{region}.amazonaws.com）。区域由凭据 api_region 控制，默认 us-east-1',
         apiKeyHint: 'Kiro API Key（ksk_ 开头），将作为直连 AWS 的 Bearer Token',
+        relayBaseUrlHint: '外部 Anthropic 兼容上游地址（如 https://your-relay.example.com），将请求 {base_url}/v1/messages',
+        relayApiKeyHint: '该外部上游的 API Key（通过 x-api-key 头发送）',
+        relayPriorityHint: '建议保持较低优先级（数字更大），仅作兜底——原生 Kiro 账号全部异常时才启用',
       },
       anthropic: {
         apiKeyPassthrough: '自动透传（仅替换认证）',

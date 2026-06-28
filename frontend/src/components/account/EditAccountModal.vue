@@ -28,8 +28,8 @@
 
       <!-- API Key fields (only for apikey type) -->
       <div v-if="account.type === 'apikey'" class="space-y-4">
-        <!-- Kiro API Key 账号直连 AWS,不使用 Base URL,故隐藏该字段 -->
-        <div v-if="account.platform !== 'kiro'">
+        <!-- Kiro 直连 AWS 账号不使用 Base URL,隐藏;Kiro 外部中转账号(已配 base_url)显示可编辑 -->
+        <div v-if="account.platform !== 'kiro' || isKiroRelay">
           <label class="input-label">{{ t('admin.accounts.baseUrl') }}</label>
           <input
             v-model="editBaseUrl"
@@ -42,7 +42,9 @@
                   ? 'https://generativelanguage.googleapis.com'
                   : account.platform === 'antigravity'
                     ? 'https://cloudcode-pa.googleapis.com'
-                    : 'https://api.anthropic.com'
+                    : account.platform === 'kiro'
+                      ? 'https://your-relay.example.com'
+                      : 'https://api.anthropic.com'
             "
           />
           <p class="input-hint">{{ baseUrlHint }}</p>
@@ -719,7 +721,7 @@
         </template>
       </div>
 
-      <div v-if="isKiroAccount" class="border-t border-gray-200 pt-4 dark:border-dark-600">
+      <div v-if="isKiroAccount && !isKiroRelay" class="border-t border-gray-200 pt-4 dark:border-dark-600">
         <label class="input-label">{{ t('admin.accounts.kiroCreditUnitPriceUsd') }}</label>
         <input
           v-model.number="kiroCreditUnitPriceUsd"
@@ -2612,6 +2614,7 @@ import QuotaLimitCard from '@/components/account/QuotaLimitCard.vue'
 import { applyInterceptWarmup } from '@/components/account/credentialsBuilder'
 import { formatDateTime, formatDateTimeLocalInput, parseDateTimeLocalInput } from '@/utils/format'
 import { createStableObjectKeyResolver } from '@/utils/stableObjectKey'
+import { isKiroRelayAccount } from '@/utils/kiroAccount'
 import { VERTEX_LOCATION_SELECT_OPTIONS } from '@/constants/account'
 import {
   OPENAI_WS_MODE_CTX_POOL,
@@ -2662,6 +2665,8 @@ const bedrockPresets = computed(() => getPresetMappingsByPlatform('bedrock'))
 const isKiroOAuthAccount = computed(() => props.account?.platform === 'kiro' && props.account?.type === 'oauth')
 // Kiro 积分单价适用于所有 Kiro 账号(OAuth 与 API Key 都直连 AWS、消费积分)。
 const isKiroAccount = computed(() => props.account?.platform === 'kiro')
+// Kiro 外部中转账号(apikey + 已配 base_url):编辑时显示 base_url 输入。
+const isKiroRelay = computed(() => isKiroRelayAccount(props.account))
 
 // Model mapping type
 interface ModelMapping {
@@ -4267,7 +4272,8 @@ const handleSubmit = async () => {
       updatePayload.credentials = newCredentials
     }
 
-    if (props.account.platform === 'kiro') {
+    // 仅 Kiro 直连账号持久化积分单价;外部中转账号是外接渠道,与 Kiro 积分无关。
+    if (props.account.platform === 'kiro' && !isKiroRelay.value) {
       const currentExtra = (updatePayload.extra as Record<string, unknown>) ||
         (props.account.extra as Record<string, unknown>) || {}
       const newExtra: Record<string, unknown> = { ...currentExtra }

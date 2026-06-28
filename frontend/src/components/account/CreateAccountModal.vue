@@ -780,7 +780,7 @@
       <!-- Kiro account type selection -->
       <div v-if="form.platform === 'kiro'">
         <label class="input-label">{{ t('admin.accounts.accountType') }}</label>
-        <div class="mt-2 grid grid-cols-2 gap-3">
+        <div class="mt-2 grid grid-cols-1 gap-3 md:grid-cols-3">
           <button
             type="button"
             @click="accountCategory = 'oauth-based'"
@@ -825,10 +825,30 @@
               </span>
             </div>
           </button>
+          <button
+            type="button"
+            @click="accountCategory = 'apikey-relay'"
+            :class="[
+              'flex items-center gap-3 rounded-lg border-2 p-3 text-left transition-all',
+              accountCategory === 'apikey-relay'
+                ? 'border-sky-500 bg-sky-50 dark:bg-sky-900/20'
+                : 'border-gray-200 hover:border-sky-300 dark:border-dark-600 dark:hover:border-sky-700'
+            ]"
+          >
+            <div :class="['flex h-8 w-8 shrink-0 items-center justify-center rounded-lg', accountCategory === 'apikey-relay' ? 'bg-sky-500 text-white' : 'bg-gray-100 text-gray-500 dark:bg-dark-600 dark:text-gray-400']">
+              <Icon name="cloud" size="sm" />
+            </div>
+            <div class="min-w-0">
+              <span class="block text-sm font-medium text-gray-900 dark:text-white">
+                API Key + Base URL
+              </span>
+              <span class="text-xs text-gray-500 dark:text-gray-400">
+                {{ t('admin.accounts.types.kiroApikeyRelay') }}
+              </span>
+            </div>
+          </button>
         </div>
       </div>
-
-      <!-- Kiro OAuth auth mode selection -->
       <div v-if="form.platform === 'kiro' && accountCategory === 'oauth-based'">
         <label class="input-label">{{ t('admin.accounts.oauth.kiro.authModeTitle') }}</label>
         <div class="mt-2 grid grid-cols-1 gap-3 md:grid-cols-3">
@@ -1014,6 +1034,38 @@
             placeholder="ksk_..."
           />
           <p class="input-hint">{{ apiKeyHint }}</p>
+        </div>
+      </div>
+
+      <!-- Kiro 外部中转(API Key + Base URL):转发到 Anthropic 兼容上游,作为分组兜底 -->
+      <div v-if="form.platform === 'kiro' && accountCategory === 'apikey-relay'" class="space-y-4">
+        <div>
+          <label class="input-label">{{ t('admin.accounts.baseUrl') }}</label>
+          <input
+            v-model="apiKeyBaseUrl"
+            type="text"
+            required
+            class="input"
+            placeholder="https://your-relay.example.com"
+          />
+          <p class="input-hint">{{ t('admin.accounts.kiro.relayBaseUrlHint') }}</p>
+        </div>
+        <div>
+          <label class="input-label">{{ t('admin.accounts.apiKeyRequired') }}</label>
+          <input
+            v-model="apiKeyValue"
+            type="password"
+            required
+            class="input font-mono"
+            placeholder="sk-..."
+          />
+          <p class="input-hint">{{ t('admin.accounts.kiro.relayApiKeyHint') }}</p>
+        </div>
+        <div class="rounded-lg bg-sky-50 p-3 dark:bg-sky-900/20">
+          <p class="text-xs text-sky-700 dark:text-sky-400">
+            <Icon name="exclamationCircle" size="sm" class="mr-1 inline" :stroke-width="2" />
+            {{ t('admin.accounts.kiro.relayPriorityHint') }}
+          </p>
         </div>
       </div>
 
@@ -3849,7 +3901,11 @@ interface TempUnschedRuleForm {
 // State
 const step = ref(1)
 const submitting = ref(false)
-const accountCategory = ref<'oauth-based' | 'apikey' | 'bedrock' | 'service_account'>('oauth-based') // UI selection for account category
+const accountCategory = ref<'oauth-based' | 'apikey' | 'apikey-relay' | 'bedrock' | 'service_account'>('oauth-based') // UI selection for account category
+
+// Kiro 优先级默认值:普通账号 1(高优先级);外部中转账号 100(低优先级,仅作兜底)。
+const KIRO_DEFAULT_PRIORITY = 1
+const KIRO_RELAY_DEFAULT_PRIORITY = 100
 const addMethod = ref<AddMethod>('oauth') // For oauth-based: 'oauth' or 'setup-token'
 const apiKeyBaseUrl = ref('https://api.anthropic.com')
 const apiKeyValue = ref('')
@@ -4436,6 +4492,15 @@ watch(
     if (platform !== 'anthropic' || category !== 'apikey') {
       anthropicPassthroughEnabled.value = false
       webSearchEmulationMode.value = 'default'
+    }
+    // Kiro 外部中转默认低优先级(数字更大),仅作兜底;切走时恢复默认。
+    // 仅在用户未手改过优先级时调整,避免覆盖用户输入。
+    if (platform === 'kiro') {
+      if (category === 'apikey-relay' && form.priority === KIRO_DEFAULT_PRIORITY) {
+        form.priority = KIRO_RELAY_DEFAULT_PRIORITY
+      } else if (category !== 'apikey-relay' && form.priority === KIRO_RELAY_DEFAULT_PRIORITY) {
+        form.priority = KIRO_DEFAULT_PRIORITY
+      }
     }
   }
 )
@@ -5240,6 +5305,45 @@ const handleSubmit = async () => {
     // 区域由凭据 api_region 控制(默认 us-east-1),无需也不展示 Base URL。
     const credentials: Record<string, unknown> = {
       api_key: apiKeyValue.value.trim()
+    }
+
+    const modelMapping = buildModelMappingObject('mapping', [], kiroModelMappings.value)
+    if (modelMapping) {
+      credentials.model_mapping = modelMapping
+    }
+
+    if (poolModeEnabled.value) {
+      credentials.pool_mode = true
+      credentials.pool_mode_retry_count = normalizePoolModeRetryCount(poolModeRetryCount.value)
+    }
+
+    if (customErrorCodesEnabled.value) {
+      credentials.custom_error_codes_enabled = true
+      credentials.custom_error_codes = [...selectedErrorCodes.value]
+    }
+
+    await createAccountAndFinish('kiro', 'apikey', credentials)
+    return
+  }
+
+  // Kiro 外部中转(API Key + Base URL):存为 type=apikey,带 base_url → 后端走通用反代
+  if (form.platform === 'kiro' && accountCategory.value === 'apikey-relay') {
+    if (!form.name.trim()) {
+      appStore.showError(t('admin.accounts.pleaseEnterAccountName'))
+      return
+    }
+    if (!apiKeyBaseUrl.value.trim()) {
+      appStore.showError(t('admin.accounts.upstream.pleaseEnterBaseUrl'))
+      return
+    }
+    if (!apiKeyValue.value.trim()) {
+      appStore.showError(t('admin.accounts.pleaseEnterApiKey'))
+      return
+    }
+
+    const credentials: Record<string, unknown> = {
+      api_key: apiKeyValue.value.trim(),
+      base_url: apiKeyBaseUrl.value.trim()
     }
 
     const modelMapping = buildModelMappingObject('mapping', [], kiroModelMappings.value)

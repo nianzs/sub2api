@@ -278,6 +278,7 @@
               :stats="todayStatsByAccountId[String(row.id)] ?? null"
               :platform="row.platform"
               :kiro-credit-unit-price-usd="getKiroCreditUnitPriceUsd(row)"
+              :is-relay="isKiroRelayAccount(row)"
               :loading="todayStatsLoading"
               :error="todayStatsError"
             />
@@ -448,6 +449,7 @@ import Icon from '@/components/icons/Icon.vue'
 import ErrorPassthroughRulesModal from '@/components/admin/ErrorPassthroughRulesModal.vue'
 import TLSFingerprintProfilesModal from '@/components/admin/TLSFingerprintProfilesModal.vue'
 import { buildOpenAIUsageRefreshKey } from '@/utils/accountUsageRefresh'
+import { isKiroRelayAccount } from '@/utils/kiroAccount'
 import { formatDateTime, formatRelativeTime } from '@/utils/format'
 import { proxyExpiryBadgeClass, proxyExpiryLabelKey } from '@/utils/proxyExpiry'
 import type { Account, AccountPlatform, AccountType, Proxy as AccountProxy, AdminGroup, WindowStats, ClaudeModel } from '@/types'

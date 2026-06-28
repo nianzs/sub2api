@@ -134,12 +134,22 @@ func kiroProxyURL(account *Account) string {
 }
 
 // isKiroDirectModeAccount 判断账号是否走 Kiro 直连 AWS 模式。
-// Kiro 平台的 OAuth 账号与 API Key 账号共用 q.{region}.amazonaws.com 推理 / 用量 / MCP 端点,
-// 仅请求头(tokentype)和 token 获取方式(刷新 vs 直接取 api_key)不同。
-// 历史上 API Key 账号曾被当作 Anthropic 兼容反代,现已统一为直连 AWS。
+// - OAuth 账号:直连 AWS(q.{region}.amazonaws.com 或 KRS),走 forwardKiroMessages。
+// - API Key 账号:
+//   - base_url 为空 → 直连 AWS(ksk_ + tokentype: API_KEY),走 forwardKiroMessages。
+//   - base_url 非空 → 外部 Anthropic 兼容中转,返回 false,落回通用 buildUpstreamRequest
+//     反代路径(请求 {base_url}/v1/messages,发 x-api-key),作为分组兜底/灾备账号。
 func isKiroDirectModeAccount(account *Account) bool {
-	return account != nil && account.Platform == PlatformKiro &&
-		(account.Type == AccountTypeOAuth || account.Type == AccountTypeAPIKey)
+	if account == nil || account.Platform != PlatformKiro {
+		return false
+	}
+	if account.Type == AccountTypeOAuth {
+		return true
+	}
+	if account.Type == AccountTypeAPIKey {
+		return strings.TrimSpace(account.GetCredential("base_url")) == ""
+	}
+	return false
 }
 
 func kiroAPIRegion(account *Account) string {
