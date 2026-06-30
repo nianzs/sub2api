@@ -119,6 +119,10 @@ tests
 CLAUDE.md
 .claude
 scripts
+!scripts/
+scripts/*
+!scripts/update_vps.sh
+!scripts/update_vps_contract_test.sh
 .code-review-state
 #openspec/
 code-reviews/
