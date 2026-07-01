@@ -275,23 +275,45 @@
 
         <div v-if="isKiroImportMode" class="mt-3 space-y-3">
           <div>
-            <label class="input-label">{{ t('admin.accounts.oauth.kiro.tokenJsonLabel') }}</label>
+            <label class="input-label">{{ t('admin.accounts.oauth.kiro.importProviderLabel') }}</label>
+            <div class="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-4">
+              <label
+                v-for="opt in kiroImportProviderOptions"
+                :key="opt"
+                class="flex cursor-pointer items-center rounded-lg border px-3 py-2"
+                :class="kiroImportProvider === opt
+                  ? 'border-primary-500 bg-primary-50 dark:border-primary-400 dark:bg-primary-900/20'
+                  : 'border-gray-200 dark:border-dark-600'"
+              >
+                <input
+                  v-model="kiroImportProvider"
+                  type="radio"
+                  :value="opt"
+                  class="mr-2 text-primary-600 focus:ring-primary-500"
+                />
+                <span class="text-sm text-gray-700 dark:text-gray-300">{{ opt }}</span>
+              </label>
+            </div>
+          </div>
+          <div>
+            <label class="input-label">{{ t('admin.accounts.oauth.kiro.tokenJsonLabel') }} <span class="text-red-500">*</span></label>
             <textarea
               v-model="kiroTokenJson"
               rows="7"
               class="input font-mono text-xs"
-              placeholder='{"accessToken":"...","refreshToken":"..."}'
+              :placeholder="kiroImportTokenPlaceholder"
             />
             <p class="input-hint">{{ t('admin.accounts.oauth.kiro.tokenJsonHint') }}</p>
           </div>
-          <div>
-            <label class="input-label">{{ t('admin.accounts.oauth.kiro.deviceRegistrationLabel') }}</label>
+          <div v-if="kiroImportNeedsDeviceRegistration">
+            <label class="input-label">{{ t('admin.accounts.oauth.kiro.deviceRegistrationLabel') }} <span class="text-red-500">*</span></label>
             <textarea
               v-model="kiroDeviceRegistrationJson"
               rows="4"
               class="input font-mono text-xs"
               placeholder='{"clientId":"...","clientSecret":"..."}'
             />
+            <p class="input-hint">{{ t('admin.accounts.oauth.kiro.deviceRegistrationHint') }}</p>
           </div>
         </div>
       </div>
@@ -324,7 +346,7 @@
         <button
           v-if="isKiroImportMode"
           type="button"
-          :disabled="currentLoading || !kiroTokenJson.trim()"
+          :disabled="currentLoading || !kiroTokenJson.trim() || (kiroImportNeedsDeviceRegistration && !kiroDeviceRegistrationJson.trim())"
           class="btn btn-primary"
           @click="handleKiroImport"
         >
@@ -426,6 +448,18 @@ const kiroIDCStartUrl = ref('https://view.awsapps.com/start')
 const kiroIDCRegion = ref('us-east-1')
 const kiroTokenJson = ref('')
 const kiroDeviceRegistrationJson = ref('')
+// 「从 Kiro IDE 导入」账号来源:决定字段显隐/必填/示例,并与 token JSON 内 provider 做一致性校验。
+const kiroImportProvider = ref<'Google' | 'Github' | 'BuilderId' | 'Enterprise'>('Google')
+const kiroImportProviderOptions = ['Google', 'Github', 'BuilderId', 'Enterprise'] as const
+// BuilderId/Enterprise(IDC)需 Device Registration JSON;Google/Github(社交)不需要。
+const kiroImportNeedsDeviceRegistration = computed(
+  () => kiroImportProvider.value === 'BuilderId' || kiroImportProvider.value === 'Enterprise'
+)
+const kiroImportTokenPlaceholder = computed(() =>
+  kiroImportNeedsDeviceRegistration.value
+    ? '{"accessToken":"...","refreshToken":"...","clientIdHash":"...","authMethod":"IdC","provider":"' + kiroImportProvider.value + '"}'
+    : '{"accessToken":"...","refreshToken":"...","authMethod":"social","provider":"' + kiroImportProvider.value + '"}'
+)
 
 const isOpenAI = computed(() => props.account?.platform === 'openai')
 const isOpenAILike = computed(() => isOpenAI.value)
@@ -521,13 +555,33 @@ watch(
       const creds = (props.account.credentials || {}) as Record<string, unknown>
       const authMethod = typeof creds.auth_method === 'string' ? creds.auth_method : ''
       const provider = String(creds.provider || '').toLowerCase()
-      kiroIDCStartUrl.value = typeof creds.start_url === 'string' && creds.start_url ? creds.start_url : 'https://view.awsapps.com/start'
+      const startUrl = typeof creds.start_url === 'string' && creds.start_url ? creds.start_url : 'https://view.awsapps.com/start'
+      kiroIDCStartUrl.value = startUrl
       kiroIDCRegion.value = typeof creds.region === 'string' && creds.region ? creds.region : 'us-east-1'
       kiroAccountType.value = authMethod === 'idc' ? 'idc' : 'oauth'
       kiroOAuthProvider.value = provider === 'github' ? 'github' : 'google'
+      // 「从 Kiro IDE 导入」账号来源:按现有凭证的 provider 自动定位到四值之一。
+      kiroImportProvider.value = resolveKiroImportProvider(provider)
     }
   }
 )
+
+// resolveKiroImportProvider 按现有账号凭证的 provider 归一化到四值之一(不分大小写)。
+// provider 恒为 Google/Github/BuilderId/Enterprise 之一;异常兜底为 Google。
+const resolveKiroImportProvider = (
+  provider: string
+): 'Google' | 'Github' | 'BuilderId' | 'Enterprise' => {
+  switch (provider.toLowerCase()) {
+    case 'github':
+      return 'Github'
+    case 'builderid':
+      return 'BuilderId'
+    case 'enterprise':
+      return 'Enterprise'
+    default:
+      return 'Google'
+  }
+}
 
 const resetState = () => {
   addMethod.value = 'oauth'
@@ -538,6 +592,7 @@ const resetState = () => {
   kiroIDCRegion.value = 'us-east-1'
   kiroTokenJson.value = ''
   kiroDeviceRegistrationJson.value = ''
+  kiroImportProvider.value = 'Google'
   claudeOAuth.resetState()
   openaiOAuth.resetState()
   geminiOAuth.resetState()
@@ -829,7 +884,37 @@ const handleExchangeCode = async () => {
 }
 
 const handleKiroImport = async () => {
-  if (!props.account || !isKiroImportMode.value || !kiroTokenJson.value.trim()) return
+  if (!props.account || !isKiroImportMode.value) return
+
+  // 必填校验:token JSON 必填;BuilderId/Enterprise 还需 Device Registration JSON。
+  if (!kiroTokenJson.value.trim()) {
+    kiroOAuth.error.value = t('admin.accounts.oauth.kiro.tokenJsonRequired')
+    appStore.showError(kiroOAuth.error.value)
+    return
+  }
+  if (kiroImportNeedsDeviceRegistration.value && !kiroDeviceRegistrationJson.value.trim()) {
+    kiroOAuth.error.value = t('admin.accounts.oauth.kiro.deviceRegistrationRequired')
+    appStore.showError(kiroOAuth.error.value)
+    return
+  }
+
+  // 一致性校验:token JSON 内 provider 必须与所选账号来源一致(后端白名单兜底)。
+  let parsedProvider = ''
+  try {
+    parsedProvider = String(JSON.parse(kiroTokenJson.value)?.provider ?? '').trim()
+  } catch {
+    kiroOAuth.error.value = t('admin.accounts.oauth.kiro.tokenJsonInvalid')
+    appStore.showError(kiroOAuth.error.value)
+    return
+  }
+  if (parsedProvider !== kiroImportProvider.value) {
+    kiroOAuth.error.value = t('admin.accounts.oauth.kiro.providerMismatch', {
+      selected: kiroImportProvider.value,
+      actual: parsedProvider || '-'
+    })
+    appStore.showError(kiroOAuth.error.value)
+    return
+  }
 
   const tokenInfo = await kiroOAuth.importToken(
     kiroTokenJson.value,
