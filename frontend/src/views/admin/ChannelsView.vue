@@ -172,7 +172,7 @@
         </div>
 
         <!-- Tab Content -->
-        <form id="channel-form" @submit.prevent="handleSubmit" class="flex-1 overflow-y-auto pt-4">
+        <form id="channel-form" @submit.prevent="handleSubmit" class="channel-dialog-form flex-1 overflow-y-auto px-0.5 pt-4 pb-1">
           <!-- Basic Settings Tab -->
           <div v-show="activeTab === 'basic'" class="space-y-5">
             <!-- Name -->

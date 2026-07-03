@@ -66,7 +66,7 @@
       class="collapsible-content"
       :class="{ 'collapsible-content--collapsed': collapsed }"
     >
-      <div class="collapsible-inner">
+      <div class="collapsible-inner px-0.5 pb-0.5">
         <!-- Header: Models + Billing Mode -->
         <div class="mt-3 flex items-start gap-2">
           <div class="flex-1">
