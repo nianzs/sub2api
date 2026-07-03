@@ -7,6 +7,7 @@
         v-model:endDate="localEndDate"
         :exporting="false"
         :show-actions="false"
+        :model-options="modelOptions"
         @change="noop"
       />
 
@@ -132,9 +133,12 @@ interface Props {
   filters: AdminUsageQueryParams
   startDate: string
   endDate: string
+  modelOptions?: string[]
 }
 
-const props = defineProps<Props>()
+const props = withDefaults(defineProps<Props>(), {
+  modelOptions: () => []
+})
 const emit = defineEmits(['close'])
 
 const { t } = useI18n()

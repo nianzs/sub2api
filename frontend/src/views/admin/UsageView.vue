@@ -138,6 +138,7 @@
     :filters="filters"
     :start-date="startDate"
     :end-date="endDate"
+    :model-options="modelNameOptions"
     @close="cleanupDialogVisible = false"
   />
   <ConfirmDialog

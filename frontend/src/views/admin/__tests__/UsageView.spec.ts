@@ -188,6 +188,36 @@ describe('admin UsageView distribution metric toggles', () => {
     expect((wrapper.vm as any).requestedModelStats).toEqual([{ model: 'B', total_tokens: 20 }])
   })
 
+  it('passes requested model options to cleanup dialog', async () => {
+    getModelStats.mockResolvedValueOnce({
+      models: [
+        { model: 'claude-opus-4-8', total_tokens: 10 },
+        { model: 'gpt-5.4', total_tokens: 20 },
+      ],
+    })
+
+    const UsageCleanupDialogStub = {
+      props: ['modelOptions'],
+      template: '<div data-test="cleanup-model-options">{{ modelOptions.join(",") }}</div>',
+    }
+
+    const wrapper = mount(UsageView, {
+      global: { stubs: {
+        AppLayout: AppLayoutStub, UsageStatsCards: true, UsageFilters: UsageFiltersStub,
+        UsageTable: true, UsageExportProgress: true, UsageCleanupDialog: UsageCleanupDialogStub,
+        UserBalanceHistoryModal: true, AuditLogModal: true, Pagination: true, Select: true,
+        DateRangePicker: true, Icon: true, TokenUsageTrend: true,
+        ModelDistributionChart: ModelDistributionChartStub, GroupDistributionChart: GroupDistributionChartStub,
+        EndpointDistributionChart: true,
+      } },
+    })
+
+    vi.advanceTimersByTime(120)
+    await flushPromises()
+
+    expect(wrapper.get('[data-test="cleanup-model-options"]').text()).toBe('claude-opus-4-8,gpt-5.4')
+  })
+
   it('keeps model and group metric toggles independent without refetching chart data', async () => {
     const wrapper = mount(UsageView, {
       global: {
