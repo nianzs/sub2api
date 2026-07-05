@@ -169,6 +169,11 @@ func applyKiroConditionalHeaders(req *http.Request, account *Account) {
 	}
 	if account.Type == AccountTypeAPIKey {
 		req.Header["TokenType"] = []string{"API_KEY"}
+		return
+	}
+	if strings.EqualFold(strings.TrimSpace(account.GetCredential("auth_method")), "external_idp") {
+		req.Header.Set("TokenType", "EXTERNAL_IDP")
+		req.Header.Set("redirect-for-internal", "true")
 	}
 }
 
@@ -213,8 +218,11 @@ func newKiroJSONRequest(ctx context.Context, endpointURL string, payload []byte,
 	if amzTarget != "" {
 		req.Header.Set("X-Amz-Target", amzTarget)
 	}
-	if account != nil && endpointURL == kiroKRSEndpointURL {
-		profileArn := kiroResolveProfileArnForKRS(account)
+	if account != nil {
+		profileArn := resolveKiroPayloadProfileArn(account)
+		if profileArn == "" && endpointURL == kiroKRSEndpointURL {
+			profileArn = kiroResolveProfileArnForKRS(account)
+		}
 		if profileArn != "" {
 			req.Header.Set("x-amzn-kiro-profile-arn", profileArn)
 		}

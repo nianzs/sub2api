@@ -121,7 +121,7 @@
         <div class="mb-3 text-sm font-medium text-amber-900 dark:text-amber-100">
           {{ t('admin.accounts.oauth.kiro.authModeTitle') }}
         </div>
-        <div class="grid grid-cols-1 gap-3 md:grid-cols-3">
+        <div class="grid grid-cols-1 gap-3 md:grid-cols-4">
           <button
             type="button"
             @click="kiroAccountType = 'oauth'"
@@ -167,6 +167,30 @@
               </span>
               <span class="text-xs text-gray-500 dark:text-gray-400">
                 {{ t('admin.accounts.oauth.kiro.idcSubtitle') }}
+              </span>
+            </div>
+          </button>
+          <button
+            type="button"
+            @click="kiroAccountType = 'external_idp'"
+            :class="kiroModeClass('external_idp')"
+          >
+            <div
+              :class="[
+                'flex h-8 w-8 shrink-0 items-center justify-center rounded-lg',
+                kiroAccountType === 'external_idp'
+                  ? 'bg-emerald-500 text-white'
+                  : 'bg-gray-100 text-gray-500 dark:bg-dark-600 dark:text-gray-400'
+              ]"
+            >
+              <Icon name="shield" size="sm" />
+            </div>
+            <div class="min-w-0">
+              <span class="block text-sm font-medium text-gray-900 dark:text-white">
+                {{ t('admin.accounts.oauth.kiro.externalIdpTitle') }}
+              </span>
+              <span class="text-xs text-gray-500 dark:text-gray-400">
+                {{ t('admin.accounts.oauth.kiro.externalIdpSubtitle') }}
               </span>
             </div>
           </button>
@@ -276,7 +300,7 @@
         <div v-if="isKiroImportMode" class="mt-3 space-y-3">
           <div>
             <label class="input-label">{{ t('admin.accounts.oauth.kiro.importProviderLabel') }}</label>
-            <div class="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-4">
+            <div class="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-5">
               <label
                 v-for="opt in kiroImportProviderOptions"
                 :key="opt"
@@ -442,24 +466,27 @@ const oauthFlowRef = ref<OAuthFlowExposed | null>(null)
 
 const addMethod = ref<AddMethod>('oauth')
 const geminiOAuthType = ref<'code_assist' | 'google_one' | 'ai_studio'>('code_assist')
-const kiroAccountType = ref<'oauth' | 'idc' | 'import'>('oauth')
+const kiroAccountType = ref<'oauth' | 'idc' | 'external_idp' | 'import'>('oauth')
 const kiroOAuthProvider = ref<'google' | 'github'>('google')
 const kiroIDCStartUrl = ref('https://view.awsapps.com/start')
 const kiroIDCRegion = ref('us-east-1')
 const kiroTokenJson = ref('')
 const kiroDeviceRegistrationJson = ref('')
 // 「从 Kiro IDE 导入」账号来源:决定字段显隐/必填/示例,并与 token JSON 内 provider 做一致性校验。
-const kiroImportProvider = ref<'Google' | 'Github' | 'BuilderId' | 'Enterprise'>('Google')
-const kiroImportProviderOptions = ['Google', 'Github', 'BuilderId', 'Enterprise'] as const
+const kiroImportProvider = ref<'Google' | 'Github' | 'BuilderId' | 'Enterprise' | 'ExternalIdp'>('Google')
+const kiroImportProviderOptions = ['Google', 'Github', 'BuilderId', 'Enterprise', 'ExternalIdp'] as const
 // BuilderId/Enterprise(IDC)需 Device Registration JSON;Google/Github(社交)不需要。
 const kiroImportNeedsDeviceRegistration = computed(
   () => kiroImportProvider.value === 'BuilderId' || kiroImportProvider.value === 'Enterprise'
 )
-const kiroImportTokenPlaceholder = computed(() =>
-  kiroImportNeedsDeviceRegistration.value
+const kiroImportTokenPlaceholder = computed(() => {
+  if (kiroImportProvider.value === 'ExternalIdp') {
+    return '{"accessToken":"...","refreshToken":"...","authMethod":"external_idp","provider":"ExternalIdp","clientId":"...","tokenEndpoint":"https://idp.example.com/token","issuerUrl":"https://idp.example.com","scopes":"openid profile email"}'
+  }
+  return kiroImportNeedsDeviceRegistration.value
     ? '{"accessToken":"...","refreshToken":"...","clientIdHash":"...","authMethod":"IdC","provider":"' + kiroImportProvider.value + '"}'
     : '{"accessToken":"...","refreshToken":"...","authMethod":"social","provider":"' + kiroImportProvider.value + '"}'
-)
+})
 
 const isOpenAI = computed(() => props.account?.platform === 'openai')
 const isOpenAILike = computed(() => isOpenAI.value)
@@ -558,19 +585,23 @@ watch(
       const startUrl = typeof creds.start_url === 'string' && creds.start_url ? creds.start_url : 'https://view.awsapps.com/start'
       kiroIDCStartUrl.value = startUrl
       kiroIDCRegion.value = typeof creds.region === 'string' && creds.region ? creds.region : 'us-east-1'
-      kiroAccountType.value = authMethod === 'idc' ? 'idc' : 'oauth'
+      kiroAccountType.value = authMethod === 'idc'
+        ? 'idc'
+        : authMethod === 'external_idp'
+          ? 'external_idp'
+          : 'oauth'
       kiroOAuthProvider.value = provider === 'github' ? 'github' : 'google'
-      // 「从 Kiro IDE 导入」账号来源:按现有凭证的 provider 自动定位到四值之一。
+      // 「从 Kiro IDE 导入」账号来源:按现有凭证的 provider 自动定位到五值之一。
       kiroImportProvider.value = resolveKiroImportProvider(provider)
     }
   }
 )
 
-// resolveKiroImportProvider 按现有账号凭证的 provider 归一化到四值之一(不分大小写)。
-// provider 恒为 Google/Github/BuilderId/Enterprise 之一;异常兜底为 Google。
+// resolveKiroImportProvider 按现有账号凭证的 provider 归一化到五值之一(不分大小写)。
+// provider 恒为 Google/Github/BuilderId/Enterprise/ExternalIdp 之一;异常兜底为 Google。
 const resolveKiroImportProvider = (
   provider: string
-): 'Google' | 'Github' | 'BuilderId' | 'Enterprise' => {
+): 'Google' | 'Github' | 'BuilderId' | 'Enterprise' | 'ExternalIdp' => {
   switch (provider.toLowerCase()) {
     case 'github':
       return 'Github'
@@ -578,6 +609,8 @@ const resolveKiroImportProvider = (
       return 'BuilderId'
     case 'enterprise':
       return 'Enterprise'
+    case 'externalidp':
+      return 'ExternalIdp'
     default:
       return 'Google'
   }
@@ -607,12 +640,16 @@ const kiroModeClass = (mode: typeof kiroAccountType.value) => [
   kiroAccountType.value === mode
     ? mode === 'idc'
       ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/20'
-      : mode === 'import'
+      : mode === 'external_idp'
+        ? 'border-emerald-500 bg-emerald-50 dark:bg-emerald-900/20'
+        : mode === 'import'
         ? 'border-slate-500 bg-slate-50 dark:bg-slate-900/20'
         : 'border-amber-500 bg-amber-50 dark:bg-amber-900/20'
     : mode === 'idc'
       ? 'border-gray-200 hover:border-blue-300 dark:border-dark-600 dark:hover:border-blue-700'
-      : mode === 'import'
+      : mode === 'external_idp'
+        ? 'border-gray-200 hover:border-emerald-300 dark:border-dark-600 dark:hover:border-emerald-700'
+        : mode === 'import'
         ? 'border-gray-200 hover:border-slate-300 dark:border-dark-600 dark:hover:border-slate-700'
         : 'border-gray-200 hover:border-amber-300 dark:border-dark-600 dark:hover:border-amber-700'
 ]
@@ -675,10 +712,12 @@ const handleGenerateUrl = async () => {
       })
       return
     }
-    await kiroOAuth.generateAuthUrl(
-      props.account.proxy_id,
-      kiroOAuthProvider.value === 'github' ? 'Github' : 'Google'
-    )
+    const provider = kiroAccountType.value === 'external_idp'
+      ? 'ExternalIdp'
+      : kiroOAuthProvider.value === 'github'
+        ? 'Github'
+        : 'Google'
+    await kiroOAuth.generateAuthUrl(props.account.proxy_id, provider)
     return
   }
 

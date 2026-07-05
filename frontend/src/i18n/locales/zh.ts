@@ -4238,6 +4238,8 @@ export default {
           googleDesc: '使用 Google 账号登录 Kiro',
           githubDesc: '使用 GitHub 账号登录 Kiro',
           idcTitle: 'AWS Builder ID / IDC',
+          externalIdpTitle: 'External IDP',
+          externalIdpSubtitle: '通过 Microsoft 365 / Entra ID / Azure AD 企业登录',
           importTitle: '从 Kiro IDE 导入',
           socialSubtitle: 'Google / GitHub 登录',
           idcSubtitle: 'AWS Builder ID 或企业 Identity Center',

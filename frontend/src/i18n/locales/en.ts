@@ -4071,6 +4071,8 @@ export default {
           googleDesc: 'Sign in to Kiro with your Google account',
           githubDesc: 'Sign in to Kiro with your GitHub account',
           idcTitle: 'AWS Builder ID / IDC',
+          externalIdpTitle: 'External IDP',
+          externalIdpSubtitle: 'Enterprise sign-in through Microsoft 365 / Entra ID / Azure AD',
           importTitle: 'Import from Kiro IDE',
           socialSubtitle: 'Google / GitHub sign-in',
           idcSubtitle: 'AWS Builder ID or enterprise Identity Center',

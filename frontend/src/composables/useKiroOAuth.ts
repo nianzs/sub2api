@@ -24,7 +24,7 @@ export function useKiroOAuth() {
 
   const generateAuthUrl = async (
     proxyId: number | null | undefined,
-    provider: 'Google' | 'Github' = 'Google'
+    provider: 'Google' | 'Github' | 'ExternalIdp' = 'Google'
   ): Promise<boolean> => {
     loading.value = true
     error.value = ''
@@ -89,7 +89,7 @@ export function useKiroOAuth() {
     loading.value = true
     error.value = ''
     try {
-      return await adminAPI.kiro.exchangeCode({
+      const response = await adminAPI.kiro.exchangeCode({
         session_id: params.sessionId,
         state: params.state,
         code: params.code.trim(),
@@ -97,6 +97,13 @@ export function useKiroOAuth() {
         login_option: params.loginOption,
         proxy_id: params.proxyId || undefined
       })
+      if (response.auth_url && response.session_id && response.state && !response.access_token) {
+        authUrl.value = response.auth_url
+        sessionId.value = response.session_id
+        state.value = response.state
+        return null
+      }
+      return response
     } catch (err: any) {
       error.value = err.response?.data?.detail || t('admin.accounts.oauth.authFailed')
       appStore.showError(error.value)
@@ -115,6 +122,9 @@ export function useKiroOAuth() {
     startUrl?: string
     region?: string
     profileArn?: string
+    tokenEndpoint?: string
+    issuerUrl?: string
+    scopes?: string
     proxyId?: number | null
   }): Promise<KiroTokenInfo | null> => {
     loading.value = true
@@ -129,6 +139,9 @@ export function useKiroOAuth() {
         start_url: payload.startUrl,
         region: payload.region,
         profile_arn: payload.profileArn,
+        token_endpoint: payload.tokenEndpoint,
+        issuer_url: payload.issuerUrl,
+        scopes: payload.scopes,
         proxy_id: payload.proxyId || undefined
       })
     } catch (err: any) {
@@ -171,7 +184,10 @@ export function useKiroOAuth() {
     client_id_hash: tokenInfo.client_id_hash,
     email: tokenInfo.email,
     start_url: tokenInfo.start_url,
-    region: tokenInfo.region
+    region: tokenInfo.region,
+    token_endpoint: tokenInfo.token_endpoint,
+    issuer_url: tokenInfo.issuer_url,
+    scopes: tokenInfo.scopes
   })
 
   return {
