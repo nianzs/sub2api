@@ -129,15 +129,14 @@ func (p *KiroTokenProvider) GetAccessToken(ctx context.Context, account *Account
 	return accessToken, nil
 }
 
+// KiroTokenCacheKey 返回账号级 access token 缓存 key。
+// 必须账号唯一：曾用 client_id_hash / client_id 作 key，但它们标识的是 Kiro IDE
+// 的 OAuth client 注册而非用户身份——同一台机器/同一次 device registration 导入的
+// 多个 BuilderId/Enterprise 账号会共用同一个 client_id_hash，导致不同账号的 token、
+// 刷新锁、用量查询互相覆盖串用。改用 account.ID，与其它 provider(Claude/OpenAI/Grok)一致。
 func KiroTokenCacheKey(account *Account) string {
 	if account == nil {
 		return "kiro:account:0"
-	}
-	if clientIDHash := strings.TrimSpace(account.GetCredential("client_id_hash")); clientIDHash != "" {
-		return "kiro:" + clientIDHash
-	}
-	if clientID := strings.TrimSpace(account.GetCredential("client_id")); clientID != "" {
-		return "kiro:client:" + clientID
 	}
 	return "kiro:account:" + strconv.FormatInt(account.ID, 10)
 }
