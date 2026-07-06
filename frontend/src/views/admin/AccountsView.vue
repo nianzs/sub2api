@@ -217,11 +217,11 @@
             <div class="flex flex-col">
               <span class="font-medium text-gray-900 dark:text-white">{{ value }}</span>
               <span
-                v-if="row.extra?.email_address || row.extra?.email || row.credentials?.email"
+                v-if="accountDisplayEmail(row)"
                 class="text-xs text-gray-500 dark:text-gray-400 truncate max-w-[200px]"
-                :title="String(row.extra?.email_address || row.extra?.email || row.credentials?.email)"
+                :title="accountDisplayEmail(row) + (row.parent_chatgpt_account_id ? ' · ' + row.parent_chatgpt_account_id : '')"
               >
-                {{ row.extra?.email_address || row.extra?.email || row.credentials?.email }}
+                {{ accountDisplayEmail(row) }}
               </span>
             </div>
           </template>
@@ -235,10 +235,10 @@
                 <PlatformTypeBadge
                   :platform="row.platform"
                   :type="row.type"
-                  :plan-type="row.credentials?.plan_type"
+                  :plan-type="row.credentials?.plan_type || row.parent_plan_type"
                   :overages-enabled="isKiroOveragesEnabled(row)"
-                  :privacy-mode="row.extra?.privacy_mode"
-                  :subscription-expires-at="row.credentials?.subscription_expires_at"
+                  :privacy-mode="row.extra?.privacy_mode || row.parent_privacy_mode"
+                  :subscription-expires-at="row.credentials?.subscription_expires_at || row.parent_subscription_expires_at"
                 />
                 <span
                   v-if="getAntigravityTierLabel(row)"
@@ -382,7 +382,7 @@
     <AccountTestModal :show="showTest" :account="testingAcc" @close="closeTestModal" />
     <AccountStatsModal :show="showStats" :account="statsAcc" @close="closeStatsModal" />
     <ScheduledTestsPanel :show="showSchedulePanel" :account-id="scheduleAcc?.id ?? null" :model-options="scheduleModelOptions" @close="closeSchedulePanel" />
-    <AccountActionMenu :show="menu.show" :account="menu.acc" :position="menu.pos" @close="menu.show = false" @test="handleTest" @stats="handleViewStats" @schedule="handleSchedule" @reauth="handleReAuth" @refresh-token="handleRefresh" @recover-state="handleRecoverState" @reset-quota="handleResetQuota" @set-privacy="handleSetPrivacy" />
+    <AccountActionMenu :show="menu.show" :account="menu.acc" :position="menu.pos" @close="menu.show = false" @test="handleTest" @stats="handleViewStats" @schedule="handleSchedule" @reauth="handleReAuth" @refresh-token="handleRefresh" @recover-state="handleRecoverState" @reset-quota="handleResetQuota" @set-privacy="handleSetPrivacy" @create-spark-shadow="handleCreateSparkShadow" />
     <SyncFromCrsModal :show="showSync" @close="showSync = false" @synced="reload" />
     <ImportDataModal :show="showImportData" @close="showImportData = false" @imported="handleDataImported" />
     <BulkEditAccountModal
@@ -401,6 +401,7 @@
     <ConfirmDialog :show="showBulkDeleteDialog" :title="t('admin.accounts.bulkDeleteTitle')" :message="t('admin.accounts.bulkDeleteConfirm', { count: selIds.length })" :confirm-text="t('common.delete')" :cancel-text="t('common.cancel')" :danger="true" @confirm="confirmBulkDelete" @cancel="showBulkDeleteDialog = false" />
     <ConfirmDialog :show="showBulkResetStatusDialog" :title="t('admin.accounts.bulkResetStatusTitle')" :message="t('admin.accounts.bulkResetStatusConfirm', { count: selIds.length })" :confirm-text="t('common.confirm')" :cancel-text="t('common.cancel')" @confirm="confirmBulkResetStatus" @cancel="showBulkResetStatusDialog = false" />
     <ConfirmDialog :show="showBulkRefreshTokenDialog" :title="t('admin.accounts.bulkRefreshTokenTitle')" :message="t('admin.accounts.bulkRefreshTokenConfirm', { count: selIds.length })" :confirm-text="t('common.confirm')" :cancel-text="t('common.cancel')" @confirm="confirmBulkRefreshToken" @cancel="showBulkRefreshTokenDialog = false" />
+    <ConfirmDialog :show="showCreateShadowDialog" :title="t('admin.accounts.createSparkShadow')" :message="t('admin.accounts.createSparkShadowConfirm', { name: creatingShadowAcc?.name })" @confirm="confirmCreateSparkShadow" @cancel="showCreateShadowDialog = false" />
     <ConfirmDialog :show="showExportDataDialog" :title="t('admin.accounts.dataExport')" :message="t('admin.accounts.dataExportConfirmMessage')" :confirm-text="t('admin.accounts.dataExportConfirm')" :cancel-text="t('common.cancel')" @confirm="handleExportData" @cancel="showExportDataDialog = false">
       <label class="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
         <input type="checkbox" class="h-4 w-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500" v-model="includeProxyOnExport" />
@@ -514,6 +515,7 @@ const showDeleteDialog = ref(false)
 const showBulkDeleteDialog = ref(false)
 const showBulkResetStatusDialog = ref(false)
 const showBulkRefreshTokenDialog = ref(false)
+const showCreateShadowDialog = ref(false)
 const showReAuth = ref(false)
 const showTest = ref(false)
 const showStats = ref(false)
@@ -522,6 +524,7 @@ const showTLSFingerprintProfiles = ref(false)
 const edAcc = ref<Account | null>(null)
 const tempUnschedAcc = ref<Account | null>(null)
 const deletingAcc = ref<Account | null>(null)
+const creatingShadowAcc = ref<Account | null>(null)
 const reAuthAcc = ref<Account | null>(null)
 const testingAcc = ref<Account | null>(null)
 const statsAcc = ref<Account | null>(null)
@@ -1123,6 +1126,12 @@ function getAntigravityTierLabel(row: any): string | null {
   }
 }
 
+// 账号显示邮箱:优先账号自身(extra/credentials),影子账号回退母账号 parent_email。
+// 供名称单元格 v-if/标题/文本三处共用,避免同一回退链在模板里重复三次。
+function accountDisplayEmail(row: any): string {
+  return row.extra?.email_address || row.extra?.email || row.credentials?.email || row.parent_email || ''
+}
+
 type OpenAICompactBadgeState = 'active' | 'blocked' | 'auto'
 
 function getOpenAICompactState(row: any): OpenAICompactBadgeState | null {
@@ -1611,7 +1620,13 @@ const handleExportData = async () => {
     link.download = filename
     link.click()
     URL.revokeObjectURL(url)
-    appStore.showSuccess(t('admin.accounts.dataExported'))
+    // spark 影子账号被后端排除出备份(其凭据透传母账号、调度配置不可经凭据型导入重建);
+    // 跳过非零时明确提示用户,避免「下载成功但少了账号」的静默丢失。
+    if (dataPayload.skipped_shadows && dataPayload.skipped_shadows > 0) {
+      appStore.showWarning(t('admin.accounts.dataExportedSkippedShadows', { count: dataPayload.skipped_shadows }))
+    } else {
+      appStore.showSuccess(t('admin.accounts.dataExported'))
+    }
   } catch (error: any) {
     appStore.showError(error?.message || t('admin.accounts.dataExportFailed'))
   } finally {
@@ -1713,6 +1728,24 @@ const onRevertFallback = async (a: Account) => {
   } catch (error: any) {
     console.error('Failed to revert proxy fallback:', error)
     appStore.showError(error?.response?.data?.message || t('admin.accounts.revertProxyFailed'))
+  }
+}
+const handleCreateSparkShadow = (a: Account) => {
+  creatingShadowAcc.value = a
+  showCreateShadowDialog.value = true
+}
+const confirmCreateSparkShadow = async () => {
+  const a = creatingShadowAcc.value
+  if (!a) return
+  try {
+    await adminAPI.accounts.createSparkShadow(a.id, { name: `${a.name} (Spark)` })
+    showCreateShadowDialog.value = false
+    creatingShadowAcc.value = null
+    appStore.showSuccess(t('admin.accounts.createSparkShadowSuccess'))
+    reload()
+  } catch (error: any) {
+    console.error('Failed to create spark shadow:', error)
+    appStore.showError(error?.response?.data?.message || t('admin.accounts.createSparkShadowFailed'))
   }
 }
 const handleDelete = (a: Account) => { deletingAcc.value = a; showDeleteDialog.value = true }

@@ -14,7 +14,7 @@ import (
 	"github.com/dgraph-io/ristretto"
 )
 
-const apiKeyAuthSnapshotVersion = 14 // v14: carry Kiro endpoint mode (q/krs) in snapshot
+const apiKeyAuthSnapshotVersion = 15 // v15: include Kiro endpoint/cache fields and group peak rate fields
 
 type apiKeyAuthCacheConfig struct {
 	l1Size        int
@@ -287,6 +287,10 @@ func (s *APIKeyService) snapshotFromAPIKey(ctx context.Context, apiKey *APIKey) 
 			KiroStickySessionTTLSeconds:     groupForSnapshot.EffectiveKiroStickySessionTTLSeconds(),
 			KiroCacheEmulationRatio:         groupForSnapshot.EffectiveKiroCacheEmulationRatio(),
 			KiroEndpointMode:                groupForSnapshot.EffectiveKiroEndpointMode(),
+			PeakRateEnabled:                 groupForSnapshot.PeakRateEnabled,
+			PeakStart:                       groupForSnapshot.PeakStart,
+			PeakEnd:                         groupForSnapshot.PeakEnd,
+			PeakRateMultiplier:              groupForSnapshot.PeakRateMultiplier,
 		}
 	}
 	return snapshot
@@ -365,6 +369,10 @@ func (s *APIKeyService) snapshotToAPIKey(key string, snapshot *APIKeyAuthSnapsho
 			KiroStickySessionTTLSeconds:     snapshot.Group.KiroStickySessionTTLSeconds,
 			KiroCacheEmulationRatio:         snapshot.Group.KiroCacheEmulationRatio,
 			KiroEndpointMode:                snapshot.Group.KiroEndpointMode,
+			PeakRateEnabled:                 snapshot.Group.PeakRateEnabled,
+			PeakStart:                       snapshot.Group.PeakStart,
+			PeakEnd:                         snapshot.Group.PeakEnd,
+			PeakRateMultiplier:              snapshot.Group.PeakRateMultiplier,
 		}
 		normalizeKiroCacheEmulationFields(apiKey.Group)
 		normalizeKiroEndpointFields(apiKey.Group)

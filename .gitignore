@@ -123,6 +123,8 @@ scripts
 scripts/*
 !scripts/update_vps.sh
 !scripts/update_vps_contract_test.sh
+!backend/scripts/
+!backend/scripts/resolve-version.sh
 .code-review-state
 #openspec/
 code-reviews/

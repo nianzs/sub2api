@@ -9,49 +9,45 @@ import (
 )
 
 var codexModelMap = map[string]string{
-	"gpt-5.5":                    "gpt-5.5",
-	"gpt-5.5-pro":                "gpt-5.5-pro",
-	"codex-auto-review":          "codex-auto-review",
-	"gpt-5.4":                    "gpt-5.4",
-	"gpt-5.4-mini":               "gpt-5.4-mini",
-	"gpt-5.4-none":               "gpt-5.4",
-	"gpt-5.4-low":                "gpt-5.4",
-	"gpt-5.4-medium":             "gpt-5.4",
-	"gpt-5.4-high":               "gpt-5.4",
-	"gpt-5.4-xhigh":              "gpt-5.4",
-	"gpt-5.4-chat-latest":        "gpt-5.4",
-	"gpt-5.3":                    "gpt-5.3-codex",
-	"gpt-5.3-none":               "gpt-5.3-codex",
-	"gpt-5.3-low":                "gpt-5.3-codex",
-	"gpt-5.3-medium":             "gpt-5.3-codex",
-	"gpt-5.3-high":               "gpt-5.3-codex",
-	"gpt-5.3-xhigh":              "gpt-5.3-codex",
-	"gpt-5.3-codex":              "gpt-5.3-codex",
-	"gpt-5.3-codex-spark":        "gpt-5.3-codex-spark",
-	"gpt-5.3-codex-spark-low":    "gpt-5.3-codex-spark",
-	"gpt-5.3-codex-spark-medium": "gpt-5.3-codex-spark",
-	"gpt-5.3-codex-spark-high":   "gpt-5.3-codex-spark",
-	"gpt-5.3-codex-spark-xhigh":  "gpt-5.3-codex-spark",
-	"gpt-5.3-codex-low":          "gpt-5.3-codex",
-	"gpt-5.3-codex-medium":       "gpt-5.3-codex",
-	"gpt-5.3-codex-high":         "gpt-5.3-codex",
-	"gpt-5.3-codex-xhigh":        "gpt-5.3-codex",
-	"gpt-5.2":                    "gpt-5.2",
-	"gpt-5.2-none":               "gpt-5.2",
-	"gpt-5.2-low":                "gpt-5.2",
-	"gpt-5.2-medium":             "gpt-5.2",
-	"gpt-5.2-high":               "gpt-5.2",
-	"gpt-5.2-xhigh":              "gpt-5.2",
-	"gpt-5":                      "gpt-5.4",
-	"gpt-5-mini":                 "gpt-5.4",
-	"gpt-5-nano":                 "gpt-5.4",
-	"gpt-5.1":                    "gpt-5.4",
-	"gpt-5.1-codex":              "gpt-5.3-codex",
-	"gpt-5.1-codex-max":          "gpt-5.3-codex",
-	"gpt-5.1-codex-mini":         "gpt-5.3-codex",
-	"gpt-5.2-codex":              "gpt-5.2",
-	"codex-mini-latest":          "gpt-5.3-codex",
-	"gpt-5-codex":                "gpt-5.3-codex",
+	"gpt-5.5":              "gpt-5.5",
+	"gpt-5.5-pro":          "gpt-5.5-pro",
+	"codex-auto-review":    "codex-auto-review",
+	"gpt-5.4":              "gpt-5.4",
+	"gpt-5.4-mini":         "gpt-5.4-mini",
+	"gpt-5.4-none":         "gpt-5.4",
+	"gpt-5.4-low":          "gpt-5.4",
+	"gpt-5.4-medium":       "gpt-5.4",
+	"gpt-5.4-high":         "gpt-5.4",
+	"gpt-5.4-xhigh":        "gpt-5.4",
+	"gpt-5.4-chat-latest":  "gpt-5.4",
+	"gpt-5.3":              "gpt-5.3-codex",
+	"gpt-5.3-none":         "gpt-5.3-codex",
+	"gpt-5.3-low":          "gpt-5.3-codex",
+	"gpt-5.3-medium":       "gpt-5.3-codex",
+	"gpt-5.3-high":         "gpt-5.3-codex",
+	"gpt-5.3-xhigh":        "gpt-5.3-codex",
+	"gpt-5.3-codex":        "gpt-5.3-codex",
+	"gpt-5.3-codex-spark":  "gpt-5.3-codex-spark",
+	"gpt-5.3-codex-low":    "gpt-5.3-codex",
+	"gpt-5.3-codex-medium": "gpt-5.3-codex",
+	"gpt-5.3-codex-high":   "gpt-5.3-codex",
+	"gpt-5.3-codex-xhigh":  "gpt-5.3-codex",
+	"gpt-5.2":              "gpt-5.2",
+	"gpt-5.2-none":         "gpt-5.2",
+	"gpt-5.2-low":          "gpt-5.2",
+	"gpt-5.2-medium":       "gpt-5.2",
+	"gpt-5.2-high":         "gpt-5.2",
+	"gpt-5.2-xhigh":        "gpt-5.2",
+	"gpt-5":                "gpt-5.4",
+	"gpt-5-mini":           "gpt-5.4",
+	"gpt-5-nano":           "gpt-5.4",
+	"gpt-5.1":              "gpt-5.4",
+	"gpt-5.1-codex":        "gpt-5.3-codex",
+	"gpt-5.1-codex-max":    "gpt-5.3-codex",
+	"gpt-5.1-codex-mini":   "gpt-5.3-codex",
+	"gpt-5.2-codex":        "gpt-5.2",
+	"codex-mini-latest":    "gpt-5.3-codex",
+	"gpt-5-codex":          "gpt-5.3-codex",
 }
 
 var codexVersionModelPrefixes = []struct {
@@ -611,18 +607,21 @@ func hasOpenAIImageGenerationTool(reqBody map[string]any) bool {
 	return false
 }
 
-// stripCodexSparkImageGenerationTools removes image_generation tool entries from
-// reqBody["tools"]. gpt-5.3-codex-spark rejects that tool upstream with HTTP 400
-// (invalid_request_error, param=tools), and Codex CLI advertises it by default, so
-// it must be dropped for spark. When the tools list becomes empty the key is removed.
-// Returns true when the body was modified.
-func stripCodexSparkImageGenerationTools(reqBody map[string]any) bool {
+func stripOpenAIImageGenerationTools(reqBody map[string]any) bool {
 	rawTools, ok := reqBody["tools"]
 	if !ok || rawTools == nil {
+		if openAIAnyToolChoiceSelectsImageGeneration(reqBody["tool_choice"]) {
+			delete(reqBody, "tool_choice")
+			return true
+		}
 		return false
 	}
 	tools, ok := rawTools.([]any)
 	if !ok {
+		if openAIAnyToolChoiceSelectsImageGeneration(reqBody["tool_choice"]) {
+			delete(reqBody, "tool_choice")
+			return true
+		}
 		return false
 	}
 	filtered := make([]any, 0, len(tools))
@@ -635,15 +634,29 @@ func stripCodexSparkImageGenerationTools(reqBody map[string]any) bool {
 		}
 		filtered = append(filtered, rawTool)
 	}
-	if !removed {
+	if !removed && !openAIAnyToolChoiceSelectsImageGeneration(reqBody["tool_choice"]) {
 		return false
 	}
-	if len(filtered) == 0 {
-		delete(reqBody, "tools")
-	} else {
-		reqBody["tools"] = filtered
+	if removed {
+		if len(filtered) == 0 {
+			delete(reqBody, "tools")
+		} else {
+			reqBody["tools"] = filtered
+		}
+	}
+	if openAIAnyToolChoiceSelectsImageGeneration(reqBody["tool_choice"]) {
+		delete(reqBody, "tool_choice")
 	}
 	return true
+}
+
+// stripCodexSparkImageGenerationTools removes image_generation tool entries from
+// reqBody["tools"]. gpt-5.3-codex-spark rejects that tool upstream with HTTP 400
+// (invalid_request_error, param=tools), and Codex CLI advertises it by default, so
+// it must be dropped for spark. When the tools list becomes empty the key is removed.
+// Returns true when the body was modified.
+func stripCodexSparkImageGenerationTools(reqBody map[string]any) bool {
+	return stripOpenAIImageGenerationTools(reqBody)
 }
 
 func hasOpenAIInputImage(reqBody map[string]any) bool {

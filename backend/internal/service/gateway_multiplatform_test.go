@@ -202,6 +202,10 @@ func (m *mockAccountRepoForPlatform) RevertProxyFallback(ctx context.Context, ac
 	return nil
 }
 
+func (m *mockAccountRepoForPlatform) ListShadowsByParent(ctx context.Context, parentID int64) ([]*Account, error) {
+	return nil, nil
+}
+
 // Verify interface implementation
 var _ AccountRepository = (*mockAccountRepoForPlatform)(nil)
 
@@ -2090,6 +2094,10 @@ func (m *mockConcurrencyCache) GetAccountsLoadBatch(ctx context.Context, account
 }
 
 func (m *mockConcurrencyCache) CleanupExpiredAccountSlots(ctx context.Context, accountID int64) error {
+	return nil
+}
+
+func (m *mockConcurrencyCache) CleanupExpiredAccountSlotKeys(ctx context.Context) error {
 	return nil
 }
 

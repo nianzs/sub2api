@@ -109,6 +109,8 @@ const (
 	SubscriptionStatusActive    = domain.SubscriptionStatusActive
 	SubscriptionStatusExpired   = domain.SubscriptionStatusExpired
 	SubscriptionStatusSuspended = domain.SubscriptionStatusSuspended
+	// SubscriptionStatusRevoked 是 soft-deleted 订阅的 API 展示态，不写入 status 字段。
+	SubscriptionStatusRevoked = "revoked"
 )
 
 // LinuxDoConnectSyntheticEmailDomain 是 LinuxDo Connect 用户的合成邮箱后缀（RFC 保留域名）。
@@ -496,6 +498,12 @@ const SettingKeyDefaultPlatformQuotas = "default_platform_quotas"
 func SettingKeyAuthSourcePlatformQuotas(source string) string {
 	return fmt.Sprintf("auth_source_default_%s_platform_quotas", source)
 }
+
+// QuotaDimension constants for spark shadow accounts.
+const (
+	QuotaDimensionGlobal = "global"
+	QuotaDimensionSpark  = "spark"
+)
 
 // AdminAPIKeyPrefix is the prefix for admin API keys (distinct from user "sk-" keys).
 const AdminAPIKeyPrefix = "admin-"

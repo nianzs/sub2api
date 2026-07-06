@@ -86,7 +86,7 @@ func (p *KiroTokenProvider) GetAccessToken(ctx context.Context, account *Account
 				account = result.Account
 			}
 			if len(result.NewCredentials) > 0 {
-				account.Credentials = cloneCredentials(result.NewCredentials)
+				account.Credentials = shallowCopyMap(result.NewCredentials)
 			}
 			expiresAt = account.GetCredentialAsTime("expires_at")
 		}

@@ -194,6 +194,10 @@ func (r *apiKeyRepository) GetByKeyForAuth(ctx context.Context, key string) (*se
 				group.FieldMessagesDispatchModelConfig,
 				group.FieldModelsListConfig,
 				group.FieldRpmLimit,
+				group.FieldPeakRateEnabled,
+				group.FieldPeakStart,
+				group.FieldPeakEnd,
+				group.FieldPeakRateMultiplier,
 			)
 		}).
 		Only(ctx)
@@ -819,6 +823,10 @@ func groupEntityToService(g *dbent.Group) *service.Group {
 		KiroStickySessionTTLSeconds:     g.KiroStickySessionTTLSeconds,
 		KiroCacheEmulationRatio:         g.KiroCacheEmulationRatio,
 		KiroEndpointMode:                g.KiroEndpointMode,
+		PeakRateEnabled:                 g.PeakRateEnabled,
+		PeakStart:                       g.PeakStart,
+		PeakEnd:                         g.PeakEnd,
+		PeakRateMultiplier:              g.PeakRateMultiplier,
 		CreatedAt:                       g.CreatedAt,
 		UpdatedAt:                       g.UpdatedAt,
 	}
