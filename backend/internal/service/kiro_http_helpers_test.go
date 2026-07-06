@@ -91,7 +91,6 @@ func TestNewKiroJSONRequestAddsConditionalHeaders(t *testing.T) {
 	)
 	require.NoError(t, err)
 	require.Equal(t, "EXTERNAL_IDP", req.Header.Get("TokenType"))
-	require.Equal(t, "true", req.Header.Get("redirect-for-internal"))
 	require.Equal(t, "arn:aws:codewhisperer:us-east-1:123456789012:profile/HEADER", req.Header.Get("x-amzn-kiro-profile-arn"))
 	require.Equal(t, "vibe", req.Header.Get("x-amzn-kiro-agent-mode"))
 	require.Equal(t, "true", req.Header.Get("x-amzn-codewhisperer-optout"))

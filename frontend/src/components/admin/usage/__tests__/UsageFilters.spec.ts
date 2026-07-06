@@ -80,7 +80,7 @@ const defaultFilters = () => ({
   end_date: '',
 })
 
-function mountFilters(filters = defaultFilters()) {
+function mountFilters(filters = defaultFilters(), props: Record<string, any> = {}) {
   return mount(UsageFilters, {
     props: {
       modelValue: filters,
@@ -89,6 +89,7 @@ function mountFilters(filters = defaultFilters()) {
       endDate: '2026-05-28',
       showActions: false,
       modelOptions: [],
+      ...props,
     },
     global: {
       stubs: {
@@ -162,6 +163,23 @@ describe('UsageFilters — user search dropdown', () => {
     // Also confirm user_id was set by checking the emitted change came through
     // (the component uses toRef so modelValue is mutated in place and 'change' is emitted)
     expect(wrapper.props('modelValue').user_id).toBe(1)
+  })
+})
+
+describe('UsageFilters — error mode actions', () => {
+  it('keeps cleanup available for the error requests tab', async () => {
+    const wrapper = mountFilters(defaultFilters(), {
+      mode: 'errors',
+      showActions: true,
+    })
+
+    const cleanupButton = wrapper.findAll('button').find((button) => button.text() === 'Cleanup')
+    expect(cleanupButton).toBeTruthy()
+
+    await cleanupButton!.trigger('click')
+
+    expect(wrapper.emitted('cleanup')).toHaveLength(1)
+    expect(wrapper.text()).not.toContain('Export')
   })
 })
 
