@@ -3776,11 +3776,12 @@
                     :key="`codex-fp-${i}`"
                     class="mb-2 flex items-center gap-2"
                   >
-                    <select v-model="row.type" class="input w-32 text-sm">
-                      <option value="header_exact">{{ t("admin.settings.gatewayForwarding.codexFpTypeHeaderExact") }}</option>
-                      <option value="header_prefix">{{ t("admin.settings.gatewayForwarding.codexFpTypeHeaderPrefix") }}</option>
-                      <option value="body_path">{{ t("admin.settings.gatewayForwarding.codexFpTypeBodyPath") }}</option>
-                    </select>
+                    <Select
+                      v-model="row.type"
+                      :options="codexFingerprintTypeOptions"
+                      class="w-32"
+                      size="sm"
+                    />
                     <input
                       v-model="row.match"
                       type="text"
@@ -7380,6 +7381,7 @@ import {
   parseFingerprintSignalsToRows,
   serializeFingerprintRowsToJSON,
   defaultFingerprintSignalRows,
+  type FingerprintSignalType,
   type FingerprintSignalRow,
 } from "./codexFingerprintSignals";
 
@@ -7399,6 +7401,13 @@ const oidcTokenAuthMethodOptions = [
 const customMenuVisibilityOptions = computed(() => [
   { value: "user", label: t("admin.settings.customMenu.visibilityUser") },
   { value: "admin", label: t("admin.settings.customMenu.visibilityAdmin") },
+]);
+const codexFingerprintTypeOptions = computed<
+  { value: FingerprintSignalType; label: string }[]
+>(() => [
+  { value: "header_exact", label: t("admin.settings.gatewayForwarding.codexFpTypeHeaderExact") },
+  { value: "header_prefix", label: t("admin.settings.gatewayForwarding.codexFpTypeHeaderPrefix") },
+  { value: "body_path", label: t("admin.settings.gatewayForwarding.codexFpTypeBodyPath") },
 ]);
 const appStore = useAppStore();
 const adminSettingsStore = useAdminSettingsStore();

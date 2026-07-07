@@ -3236,10 +3236,9 @@
               {{ t('admin.accounts.anthropic.apiKeyAuthSchemeDesc') }}
             </p>
           </div>
-          <select v-model="anthropicAPIKeyAuthScheme" class="input w-52 text-sm">
-            <option value="x_api_key">{{ t('admin.accounts.anthropic.apiKeyAuthSchemeXApiKey') }}</option>
-            <option value="authorization_bearer">{{ t('admin.accounts.anthropic.apiKeyAuthSchemeBearer') }}</option>
-          </select>
+          <div class="w-52">
+            <Select v-model="anthropicAPIKeyAuthScheme" :options="anthropicAPIKeyAuthSchemeOptions" />
+          </div>
         </div>
       </div>
 
@@ -4418,6 +4417,10 @@ const cacheTTLTargetOptions = [
   { value: '5m', label: '5m' },
   { value: '1h', label: '1h' }
 ]
+const anthropicAPIKeyAuthSchemeOptions = computed<{ value: AnthropicAPIKeyAuthScheme; label: string }[]>(() => [
+  { value: 'x_api_key', label: t('admin.accounts.anthropic.apiKeyAuthSchemeXApiKey') },
+  { value: 'authorization_bearer', label: t('admin.accounts.anthropic.apiKeyAuthSchemeBearer') }
+])
 const webSearchModeOptions = computed(() => [
   { value: 'default', label: t('admin.accounts.anthropic.webSearchDefault') },
   { value: 'enabled', label: t('admin.accounts.anthropic.webSearchEnabled') },
