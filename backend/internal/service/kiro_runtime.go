@@ -16,7 +16,6 @@ import (
 
 	kiropkg "github.com/Wei-Shaw/sub2api/internal/pkg/kiro"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
-	"github.com/cespare/xxhash/v2"
 	"github.com/gin-gonic/gin"
 	"github.com/tidwall/gjson"
 	"github.com/tidwall/sjson"
@@ -159,8 +158,8 @@ func (s *GatewayService) forwardKiroMessages(ctx context.Context, c *gin.Context
 	if err != nil {
 		return nil, err
 	}
-	if tokenType != "oauth" {
-		return nil, fmt.Errorf("kiro requires oauth token, got %s", tokenType)
+	if tokenType != "oauth" && tokenType != "apikey" {
+		return nil, fmt.Errorf("kiro requires oauth or apikey token, got %s", tokenType)
 	}
 	if isOnlyWebSearchToolInBody(body) {
 		webSearchResult, webSearchErr := s.executeKiroWebSearch(ctx, account, parsed.Group, body, mappedModel, originalModel, token, c.Request.Header)
