@@ -35,7 +35,7 @@ const (
 	kiroToolResultCompactLimit = 12000
 	kiroToolResultKeepHead     = 4000
 	kiroToolResultKeepTail     = 2000
-	kiroDefaultMaxOutputTokens = 32000
+	kiroDefaultMaxOutputTokens = 64000
 	kiroRemoteImageMaxBytes    = 10 << 20
 	kiroRemoteImageTimeout     = 8 * time.Second
 	thinkingStartTag           = "<thinking>"
@@ -257,6 +257,8 @@ func MapModel(model string) string {
 		return "claude-opus-4.7"
 	case "claude-opus-4-6", "claude-opus-4-6-thinking", "claude-opus-4.6":
 		return "claude-opus-4.6"
+	case "claude-sonnet-5", "claude-sonnet-5-thinking":
+		return "claude-sonnet-5"
 	case "claude-sonnet-4-6", "claude-sonnet-4-6-thinking", "claude-sonnet-4.6":
 		return "claude-sonnet-4.6"
 	case "claude-opus-4-5-20251101", "claude-opus-4-5-20251101-thinking", "claude-opus-4.5":
@@ -337,11 +339,11 @@ func normalizeModelAlias(model string) string {
 func kiroMaxOutputTokensForModel(model string) int {
 	normalized := normalizeModelAlias(model)
 	switch normalized {
-	case "claude-opus-4-8", "claude-opus-4.8", "claude-opus-4-7", "claude-opus-4.7", "claude-opus-4-6", "claude-opus-4.6":
+	// 仅 Opus 4.7 / 4.8 上限 128000（对齐 Kiro 官方规格）。
+	case "claude-opus-4-8", "claude-opus-4.8", "claude-opus-4-7", "claude-opus-4.7":
 		return 128000
-	case "claude-sonnet-4-6", "claude-sonnet-4.6":
-		return 64000
 	default:
+		// 其余 Kiro 模型（opus-4.6 / sonnet-5 / sonnet-4.6 / 各 4.5 及未知兜底）统一 64000。
 		return kiroDefaultMaxOutputTokens
 	}
 }
@@ -1432,7 +1434,7 @@ func isOutputConfigPathModel(modelID string) bool {
 	normalized := normalizeClaudeVersionNumber(strings.ToLower(strings.TrimSpace(modelID)))
 	// Claude 4.6+ 所有模型使用 output_config 路径
 	for _, prefix := range []string{"claude-opus-4.6", "claude-opus-4.7", "claude-opus-4.8",
-		"claude-sonnet-4.6", "claude-sonnet-4.7", "claude-sonnet-4.8",
+		"claude-sonnet-5", "claude-sonnet-4.6", "claude-sonnet-4.7", "claude-sonnet-4.8",
 		"claude-haiku-4.6", "claude-haiku-4.7", "claude-haiku-4.8"} {
 		if normalized == prefix || strings.HasPrefix(normalized, prefix+"-") || strings.HasPrefix(normalized, prefix+".") {
 			return true

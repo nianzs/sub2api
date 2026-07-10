@@ -120,6 +120,8 @@ describe('useModelWhitelist', () => {
       'claude-opus-4-7-thinking',
       'claude-opus-4-6',
       'claude-opus-4-6-thinking',
+      'claude-sonnet-5',
+      'claude-sonnet-5-thinking',
       'claude-sonnet-4-6',
       'claude-sonnet-4-6-thinking',
       'claude-opus-4-5-20251101',
@@ -197,6 +199,8 @@ describe('useModelWhitelist', () => {
       { from: 'claude-opus-4-7-thinking', to: 'claude-opus-4.7' },
       { from: 'claude-opus-4-6', to: 'claude-opus-4.6' },
       { from: 'claude-opus-4-6-thinking', to: 'claude-opus-4.6' },
+      { from: 'claude-sonnet-5', to: 'claude-sonnet-5' },
+      { from: 'claude-sonnet-5-thinking', to: 'claude-sonnet-5' },
       { from: 'claude-sonnet-4-6', to: 'claude-sonnet-4.6' },
       { from: 'claude-sonnet-4-6-thinking', to: 'claude-sonnet-4.6' },
       { from: 'claude-opus-4-5-20251101', to: 'claude-opus-4.5' },
@@ -237,6 +241,8 @@ describe('useModelWhitelist', () => {
       { from: 'claude-opus-4-7-thinking', to: 'claude-opus-4.7' },
       { from: 'claude-opus-4-6', to: 'claude-opus-4.6' },
       { from: 'claude-opus-4-6-thinking', to: 'claude-opus-4.6' },
+      { from: 'claude-sonnet-5', to: 'claude-sonnet-5' },
+      { from: 'claude-sonnet-5-thinking', to: 'claude-sonnet-5' },
       { from: 'claude-sonnet-4-6', to: 'claude-sonnet-4.6' },
       { from: 'claude-sonnet-4-6-thinking', to: 'claude-sonnet-4.6' },
       { from: 'claude-opus-4-5-20251101', to: 'claude-opus-4.5' },
@@ -246,7 +252,7 @@ describe('useModelWhitelist', () => {
       { from: 'claude-haiku-4-5-20251001', to: 'claude-haiku-4.5' },
       { from: 'claude-haiku-4-5-20251001-thinking', to: 'claude-haiku-4.5' }
     ]))
-    expect(mappings).toHaveLength(14)
+    expect(mappings).toHaveLength(16)
     expect(mappings.every(item => !item.from.startsWith('kiro-'))).toBe(true)
     expect(mappings.every(item => !item.to.startsWith('kiro-'))).toBe(true)
     expect(mappings.every(item => !item.from.endsWith('-agentic'))).toBe(true)

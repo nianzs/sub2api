@@ -1764,6 +1764,8 @@ func TestMapModel_MatchesKiroReferenceMapping(t *testing.T) {
 		"claude-sonnet-4-6":                   "claude-sonnet-4.6",
 		"claude-sonnet-4-6-thinking":          "claude-sonnet-4.6",
 		"claude-sonnet-4.6":                   "claude-sonnet-4.6",
+		"claude-sonnet-5":                     "claude-sonnet-5",
+		"claude-sonnet-5-thinking":            "claude-sonnet-5",
 		"claude-opus-4-9":                     "claude-opus-4.9",
 		"claude-opus-4-9-thinking":            "claude-opus-4.9",
 		"claude-sonnet-5-0-thinking":          "claude-sonnet-5.0",

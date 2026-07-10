@@ -263,6 +263,9 @@ func (s *BillingService) initFallbackPricing() {
 	s.fallbackPrices["claude-sonnet-4.5"] = s.fallbackPrices["claude-sonnet-4"]
 	s.fallbackPrices["claude-sonnet-4.6"] = s.fallbackPrices["claude-sonnet-4.5"]
 
+	// Claude Sonnet 5 (暂与 Sonnet 4.6 同价，待官方定价更新)
+	s.fallbackPrices["claude-sonnet-5"] = s.fallbackPrices["claude-sonnet-4.6"]
+
 	// Claude Haiku 4.5 当前与 Claude 3.5 Haiku 同价
 	s.fallbackPrices["claude-haiku-4.5"] = s.fallbackPrices["claude-3-5-haiku"]
 
@@ -599,6 +602,8 @@ func (s *BillingService) getFallbackPricing(model string) *ModelPricing {
 	}
 	if strings.Contains(modelLower, "sonnet") {
 		switch {
+		case strings.Contains(modelLower, "sonnet-5") || strings.Contains(modelLower, "sonnet5"):
+			return s.fallbackPrices["claude-sonnet-5"]
 		case strings.Contains(modelLower, "4.6") || strings.Contains(modelLower, "4-6"):
 			return s.fallbackPrices["claude-sonnet-4.6"]
 		case strings.Contains(modelLower, "4.5") || strings.Contains(modelLower, "4-5"):
