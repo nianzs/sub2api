@@ -159,8 +159,8 @@ func (s *GatewayService) forwardKiroMessages(ctx context.Context, c *gin.Context
 	if err != nil {
 		return nil, err
 	}
-	if tokenType != "oauth" && tokenType != "apikey" {
-		return nil, fmt.Errorf("kiro requires oauth or apikey token, got %s", tokenType)
+	if tokenType != "oauth" {
+		return nil, fmt.Errorf("kiro requires oauth token, got %s", tokenType)
 	}
 	if isOnlyWebSearchToolInBody(body) {
 		webSearchResult, webSearchErr := s.executeKiroWebSearch(ctx, account, parsed.Group, body, mappedModel, originalModel, token, c.Request.Header)
