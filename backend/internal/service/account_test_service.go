@@ -464,7 +464,7 @@ func (s *AccountTestService) testKiroAccountConnection(c *gin.Context, account *
 	pr, pw := io.Pipe()
 	go func() {
 		defer func() { _ = resp.Body.Close() }()
-		_, streamErr := kiropkg.StreamEventStreamAsAnthropicWithContext(ctx, resp.Body, pw, testModelID, estimateKiroInputTokens(payloadBytes), kiropkg.KiroRequestContext{})
+		_, streamErr := kiropkg.StreamEventStreamAsAnthropicWithContext(ctx, resp.Body, pw, testModelID, estimateKiroInputTokens(ctx, payloadBytes), kiropkg.KiroRequestContext{})
 		if streamErr != nil {
 			_ = pw.CloseWithError(streamErr)
 			return

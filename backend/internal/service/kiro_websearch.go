@@ -205,7 +205,7 @@ func (s *GatewayService) executeKiroWebSearch(ctx context.Context, account *Acco
 		currentBody = anthropicBody
 	}
 
-	inputTokens := estimateKiroInputTokens(anthropicBody)
+	inputTokens := estimateKiroInputTokens(ctx, anthropicBody)
 	currentToolUseID := "srvtoolu_" + kiropkg.GenerateToolUseID()
 	searches := make([]kiropkg.SearchIndicator, 0, 2)
 	requestID := ""
@@ -244,7 +244,7 @@ func (s *GatewayService) executeKiroWebSearch(ctx context.Context, account *Acco
 		parseResult, parseErr := func() (*kiropkg.ParseResult, error) {
 			defer func() { _ = resp.Body.Close() }()
 			if !cacheUsageResolved {
-				cacheUsage = s.buildKiroCacheEmulationUsage(account, group, anthropicBody, mappedModel, inputTokens)
+				cacheUsage = s.buildKiroCacheEmulationUsage(ctx, account, group, anthropicBody, mappedModel, inputTokens)
 				cacheUsageResolved = true
 			}
 			return kiropkg.ParseNonStreamingEventStreamWithContext(resp.Body, requestModel, kiropkg.KiroRequestContext{CacheEmulationUsage: cacheUsage.toKiroUsage()})
