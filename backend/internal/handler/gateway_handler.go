@@ -1123,6 +1123,17 @@ func writeOpenAIModelsList(c *gin.Context, modelIDs []string) {
 	})
 }
 
+// customModelsListSource 计算自定义 /v1/models 列表的“允许集合”。
+//
+// 仅 anthropic 平台需要合并平台默认模型：其 OAuth 账号可能完全没有 model_mapping，
+// 却能服务整个 claude 默认模型族；当分组内混用「无 mapping 的 OAuth 账号」与
+// 「带 mapping 的 APIKey 账号」时，GetAvailableModels 只会返回后者的 mapping keys，
+// 需要 merge 默认模型把 OAuth 能服务的 claude 模型补回来。
+//
+// 其它平台（含 kiro、openai、gemini 等）的 model_mapping 是严格白名单，明确限定了账号
+// 可调度/可转发的模型集合（kiro 未显式配置时也会套用 DefaultKiroModelMapping），未映射
+// 的模型本就无法服务，因此只返回账号可用模型、不合并默认模型——否则从账号 mapping 中移除
+// 某模型后，仍会被默认模型兜底塞回，导致 /v1/models 与账号实际可服务集合不一致。
 func customModelsListSource(platform string, availableModels, fallbackModels []string) []string {
 	if platform == service.PlatformAnthropic && len(availableModels) > 0 {
 		return mergeModelIDs(availableModels, fallbackModels)

@@ -561,6 +561,59 @@ func TestGatewayModels_OpenAICustomModelsListKeepsOpenAIResponseShapeForDefaultF
 	require.Empty(t, got.Data[0].CreatedAt)
 }
 
+// TestGatewayModels_KiroCustomModelsListRespectsAccountMappingWhitelist 复现回归：
+// kiro 的 model_mapping 是严格白名单——账号未映射的模型无法服务。即便分组在自定义列表中
+// 勾选了某个未被任何账号映射的模型（如从账号移除 haiku 后仍勾着），/v1/models 也不得返回它，
+// 否则会与账号实际可服务集合不一致。
+func TestGatewayModels_KiroCustomModelsListRespectsAccountMappingWhitelist(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	groupID := int64(29)
+	h := newGatewayModelsHandlerForTest(
+		&gatewayModelsAccountRepoStub{
+			byGroup: map[int64][]service.Account{
+				groupID: {
+					{
+						ID:       1,
+						Platform: service.PlatformKiro,
+						Credentials: map[string]any{
+							// 账号仅映射 sonnet 与 opus，haiku 已从映射中移除。
+							"model_mapping": map[string]any{
+								"claude-sonnet-4-6": "claude-sonnet-4.6",
+								"claude-opus-4-8":   "claude-opus-4.8",
+							},
+						},
+					},
+				},
+			},
+		},
+	)
+
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodGet, "/v1/models", nil)
+	c.Set(string(middleware2.ContextKeyAPIKey), &service.APIKey{
+		Group: &service.Group{
+			ID:       groupID,
+			Platform: service.PlatformKiro,
+			ModelsListConfig: service.GroupModelsListConfig{
+				Enabled: true,
+				// haiku 仍被分组勾选，但账号已不再映射它——必须被过滤掉。
+				Models: []string{"claude-opus-4-8", "claude-sonnet-4-6", "claude-haiku-4-5-20251001"},
+			},
+		},
+	})
+
+	h.Models(c)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+
+	var got gatewayModelsResponseForTest
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &got))
+	require.Equal(t, []string{"claude-opus-4-8", "claude-sonnet-4-6"}, modelIDsForTest(got.Data))
+	require.NotContains(t, modelIDsForTest(got.Data), "claude-haiku-4-5-20251001")
+}
+
 func modelIDsForTest(models []gatewayModelItemForTest) []string {
 	ids := make([]string, 0, len(models))
 	for _, model := range models {
