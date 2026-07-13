@@ -718,7 +718,9 @@ func TestStreamingToolCallDoneWithoutDeltaEmitsArguments(t *testing.T) {
 	assert.Equal(t, "content_block_stop", events[1].Type)
 }
 
-func TestStreamingReadToolStreamsDeltas(t *testing.T) {
+// 本 fork：Read 累积 delta，done 时净化 pages 空串后一次性发送。
+// 与上游 a5d40c98「Read 实时流式」互斥，按本 fork 契约断言。
+func TestStreamingReadToolAccumulatesAndSanitizesOnDone(t *testing.T) {
 	state := NewResponsesEventToAnthropicState()
 
 	ResponsesEventToAnthropicEvents(&ResponsesStreamEvent{
@@ -739,17 +741,18 @@ func TestStreamingReadToolStreamsDeltas(t *testing.T) {
 		OutputIndex: 0,
 		Delta:       `{"file_path":"/tmp/demo.py","limit":2000,"offset":0,"pages":""}`,
 	}, state)
-	require.Len(t, events, 1, "Read tool deltas must be streamed like any other tool")
-	assert.Equal(t, "content_block_delta", events[0].Type)
-	assert.Equal(t, "input_json_delta", events[0].Delta.Type)
+	require.Len(t, events, 0, "Read tool deltas accumulate, not stream")
 
 	events = ResponsesEventToAnthropicEvents(&ResponsesStreamEvent{
 		Type:        "response.function_call_arguments.done",
 		OutputIndex: 0,
 		Arguments:   `{"file_path":"/tmp/demo.py","limit":2000,"offset":0,"pages":""}`,
 	}, state)
-	require.Len(t, events, 1, "after streaming deltas, .done should just close the block")
-	assert.Equal(t, "content_block_stop", events[0].Type)
+	require.Len(t, events, 2, "done should emit sanitized input_json_delta + content_block_stop")
+	assert.Equal(t, "content_block_delta", events[0].Type)
+	assert.Equal(t, "input_json_delta", events[0].Delta.Type)
+	assert.JSONEq(t, `{"file_path":"/tmp/demo.py","limit":2000,"offset":0}`, events[0].Delta.PartialJSON)
+	assert.Equal(t, "content_block_stop", events[1].Type)
 }
 
 func TestStreamingReasoning(t *testing.T) {
