@@ -348,6 +348,8 @@ type AccountUsageService struct {
 	identityCache           IdentityCache
 	tlsFPProfileService     *TLSFingerprintProfileService
 	kiroCooldownStore       KiroCooldownStore
+	agentIdentityTaskMu     sync.Mutex
+	agentIdentityWS         agentIdentityWSConnectionInvalidator
 }
 
 // NewAccountUsageService 创建AccountUsageService实例
@@ -357,24 +359,13 @@ func NewAccountUsageService(
 	usageFetcher ClaudeUsageFetcher,
 	geminiQuotaService *GeminiQuotaService,
 	antigravityQuotaFetcher *AntigravityQuotaFetcher,
+	grokQuotaFetcher *GrokQuotaFetcher,
+	grokQuotaService *GrokQuotaService,
+	openAIQuotaService *OpenAIQuotaService,
 	cache *UsageCache,
 	identityCache IdentityCache,
 	tlsFPProfileService *TLSFingerprintProfileService,
-	optionalDeps ...any,
 ) *AccountUsageService {
-	var grokQuotaFetcher *GrokQuotaFetcher
-	var grokQuotaService *GrokQuotaService
-	var openAIQuotaService *OpenAIQuotaService
-	for _, dep := range optionalDeps {
-		switch v := dep.(type) {
-		case *GrokQuotaFetcher:
-			grokQuotaFetcher = v
-		case *GrokQuotaService:
-			grokQuotaService = v
-		case *OpenAIQuotaService:
-			openAIQuotaService = v
-		}
-	}
 	return &AccountUsageService{
 		accountRepo:             accountRepo,
 		usageLogRepo:            usageLogRepo,
@@ -388,35 +379,6 @@ func NewAccountUsageService(
 		identityCache:           identityCache,
 		tlsFPProfileService:     tlsFPProfileService,
 	}
-}
-
-func ProvideAccountUsageService(
-	accountRepo AccountRepository,
-	usageLogRepo UsageLogRepository,
-	usageFetcher ClaudeUsageFetcher,
-	geminiQuotaService *GeminiQuotaService,
-	antigravityQuotaFetcher *AntigravityQuotaFetcher,
-	grokQuotaFetcher *GrokQuotaFetcher,
-	grokQuotaService *GrokQuotaService,
-	openAIQuotaService *OpenAIQuotaService,
-	cache *UsageCache,
-	identityCache IdentityCache,
-	tlsFPProfileService *TLSFingerprintProfileService,
-	kiroTokenProvider *KiroTokenProvider,
-) *AccountUsageService {
-	return NewAccountUsageService(
-		accountRepo,
-		usageLogRepo,
-		usageFetcher,
-		geminiQuotaService,
-		antigravityQuotaFetcher,
-		cache,
-		identityCache,
-		tlsFPProfileService,
-		grokQuotaFetcher,
-		grokQuotaService,
-		openAIQuotaService,
-	).SetKiroTokenProvider(kiroTokenProvider)
 }
 
 func (s *AccountUsageService) SetKiroTokenProvider(provider KiroUsageTokenProvider) *AccountUsageService {
@@ -806,8 +768,11 @@ func (s *AccountUsageService) probeOpenAICodexSnapshot(ctx context.Context, acco
 	if account == nil || !account.IsOAuth() {
 		return nil, nil
 	}
-	accessToken := account.GetOpenAIAccessToken()
-	if accessToken == "" {
+	accessToken := ""
+	if !account.IsOpenAIAgentIdentity() {
+		accessToken = account.GetOpenAIAccessToken()
+	}
+	if accessToken == "" && !account.IsOpenAIAgentIdentity() {
 		return nil, fmt.Errorf("no access token available")
 	}
 	modelID := openaipkg.DefaultTestModel
@@ -825,7 +790,19 @@ func (s *AccountUsageService) probeOpenAICodexSnapshot(ctx context.Context, acco
 	}
 	req.Host = "chatgpt.com"
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+accessToken)
+	if account.IsOpenAIAgentIdentity() {
+		authHeaders, authErr := buildAgentIdentityAuthenticationHeaders(ctx, s.accountRepo, s.agentIdentityWS, &s.agentIdentityTaskMu, account)
+		if authErr != nil {
+			return nil, fmt.Errorf("build Agent Identity authentication: %w", authErr)
+		}
+		for key, values := range authHeaders {
+			for _, value := range values {
+				req.Header.Add(key, value)
+			}
+		}
+	} else {
+		req.Header.Set("Authorization", "Bearer "+accessToken)
+	}
 	req.Header.Set("Accept", "text/event-stream")
 	req.Header.Set("OpenAI-Beta", "responses=experimental")
 	req.Header.Set("Originator", "codex_cli_rs")

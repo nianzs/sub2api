@@ -457,7 +457,9 @@ func resToAnthHandleFuncArgsDelta(evt *ResponsesStreamEvent, state *ResponsesEve
 	}
 
 	if block.ToolName == "Read" {
+		// Read：累积参数，done 时 sanitize(pages 空串) 后一次性发送。
 		block.ToolArgs += evt.Delta
+		// 不标记 HadDelta，让 done 路径能刷出完整净化后的参数。
 		syncCurrentToolFromBlock(state, blockIdx, block)
 		return nil
 	}
