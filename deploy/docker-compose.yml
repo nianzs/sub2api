@@ -16,7 +16,7 @@ services:
   # Sub2API Application
   # ===========================================================================
   sub2api:
-    image: sub2api:latest
+    image: weishaw/sub2api:latest
     container_name: sub2api
     restart: unless-stopped
     ulimits:
@@ -72,6 +72,7 @@ services:
       # =======================================================================
       - REDIS_HOST=redis
       - REDIS_PORT=6379
+      - REDIS_USERNAME=${REDIS_USERNAME:-}
       - REDIS_PASSWORD=${REDIS_PASSWORD:-}
       - REDIS_DB=${REDIS_DB:-0}
       - REDIS_POOL_SIZE=${REDIS_POOL_SIZE:-1024}
