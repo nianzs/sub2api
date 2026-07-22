@@ -513,7 +513,8 @@ func BuildKiroPayloadWithContext(claudeBody []byte, modelID, profileArn, origin 
 }
 
 func ParseNonStreamingEventStreamWithContext(body io.Reader, model string, requestCtx KiroRequestContext) (*ParseResult, error) {
-	content, toolUses, usage, stopReason, err := parseEventStream(body)
+	includeReasoning := !isKiroGPT56Model(firstNonEmptyString(requestCtx.UpstreamModel, model))
+	content, toolUses, usage, stopReason, err := parseEventStream(body, includeReasoning)
 	if err != nil {
 		return nil, err
 	}
@@ -1141,7 +1142,11 @@ func StreamEventStreamAsAnthropicWithContext(ctx context.Context, body io.Reader
 			pendingAssistantText += evt.Content
 			return flushPendingAssistantText()
 		case kiroSemanticReasoning:
-			if evt.Reasoning == "" || !requestCtx.ThinkingEnabled {
+			if evt.Reasoning == "" {
+				return nil
+			}
+			if !requestCtx.ThinkingEnabled {
+				_, _ = outputTextBuf.WriteString(evt.Reasoning)
 				return nil
 			}
 			// 连续的 reasoningContentEvent 片段累积进同一个 thinking 块。
@@ -2931,7 +2936,7 @@ func blockToMap(block gjson.Result) map[string]any {
 	return result
 }
 
-func parseEventStream(body io.Reader) (string, []KiroToolUse, Usage, string, error) {
+func parseEventStream(body io.Reader, includeReasoning bool) (string, []KiroToolUse, Usage, string, error) {
 	reader := bufio.NewReader(body)
 	var content strings.Builder
 	var toolUses []KiroToolUse
@@ -2939,6 +2944,7 @@ func parseEventStream(body io.Reader) (string, []KiroToolUse, Usage, string, err
 	stopReason := ""
 	processedIDs := make(map[string]bool)
 	var currentTool *toolUseState
+	var suppressedReasoning strings.Builder
 	reasoningOpen := false
 	closeReasoning := func() {
 		if reasoningOpen {
@@ -3003,6 +3009,10 @@ func parseEventStream(body io.Reader) (string, []KiroToolUse, Usage, string, err
 			if text == "" {
 				text = getString(event, "text")
 			}
+			if !includeReasoning {
+				_, _ = suppressedReasoning.WriteString(text)
+				continue
+			}
 			if text != "" {
 				// 连续 reasoning 片段累积进同一对 <thinking></thinking>，
 				// 仅在首片写开始标签，结束标签在边界（content/tool/EOF）由 closeReasoning 补上。
@@ -3035,6 +3045,7 @@ func parseEventStream(body io.Reader) (string, []KiroToolUse, Usage, string, err
 
 	if usage.OutputTokens == 0 {
 		var outputBuf strings.Builder
+		_, _ = outputBuf.WriteString(suppressedReasoning.String())
 		_, _ = outputBuf.WriteString(cleanText)
 		for _, tu := range toolUses {
 			if b, err := json.Marshal(tu.Input); err == nil {

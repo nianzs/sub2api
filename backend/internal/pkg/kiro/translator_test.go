@@ -984,6 +984,42 @@ func TestParseNonStreamingEventStreamThinkingOnlyResponse(t *testing.T) {
 	require.Equal(t, "", gjson.GetBytes(result.ResponseBody, "content.1.text").String())
 }
 
+func TestParseNonStreamingEventStreamSuppressesGPT56Reasoning(t *testing.T) {
+	stream := bytes.NewBuffer(nil)
+	_, _ = stream.Write(buildEventStreamFrame(t, "reasoningContentEvent", map[string]any{
+		"reasoningContentEvent": map[string]any{
+			"text": "internal reasoning",
+		},
+	}))
+	_, _ = stream.Write(buildEventStreamFrame(t, "assistantResponseEvent", map[string]any{
+		"assistantResponseEvent": map[string]any{
+			"content": "answer",
+		},
+	}))
+
+	result, err := ParseNonStreamingEventStreamWithContext(stream, "client-alias", KiroRequestContext{
+		UpstreamModel: "gpt-5.6-sol",
+	})
+	require.NoError(t, err)
+	require.Equal(t, "answer", gjson.GetBytes(result.ResponseBody, "content.0.text").String())
+	require.NotContains(t, string(result.ResponseBody), "internal reasoning")
+	require.NotContains(t, string(result.ResponseBody), `"type":"thinking"`)
+}
+
+func TestParseNonStreamingEventStreamCountsSuppressedGPT56Reasoning(t *testing.T) {
+	stream := bytes.NewBuffer(nil)
+	_, _ = stream.Write(buildEventStreamFrame(t, "reasoningContentEvent", map[string]any{
+		"reasoningContentEvent": map[string]any{
+			"text": "internal reasoning without terminal usage",
+		},
+	}))
+
+	result, err := ParseNonStreamingEventStreamWithContext(stream, "gpt-5.6-sol", KiroRequestContext{})
+	require.NoError(t, err)
+	require.Greater(t, result.Usage.OutputTokens, 0)
+	require.NotContains(t, string(result.ResponseBody), "internal reasoning")
+}
+
 func TestParseNonStreamingEventStreamMergesManyReasoningFragments(t *testing.T) {
 	stream := bytes.NewBuffer(nil)
 	for _, frag := range []string{"I ", "need ", "to ", "think"} {
@@ -1964,6 +2000,7 @@ func TestStreamEventStreamAsAnthropicIgnoresReasoningContentWhenThinkingDisabled
 	result, err := StreamEventStreamAsAnthropicWithContext(context.Background(), stream, &out, "claude-sonnet-4-5", 9, KiroRequestContext{})
 	require.NoError(t, err)
 	require.Equal(t, "end_turn", result.StopReason)
+	require.Greater(t, result.Usage.OutputTokens, 0)
 	require.NotContains(t, out.String(), "hidden reasoning")
 	require.NotContains(t, out.String(), `"type":"thinking"`)
 }
