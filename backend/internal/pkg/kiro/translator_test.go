@@ -486,27 +486,51 @@ func TestBuildKiroPayloadUsesEffectiveGPT56ModelForOutputCap(t *testing.T) {
 	require.Equal(t, int64(128000), gjson.GetBytes(result.Payload, "inferenceConfig.maxTokens").Int())
 }
 
-func TestBuildKiroPayloadGPT56IgnoresClaudeThinkingControls(t *testing.T) {
-	for _, model := range []string{"gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"} {
-		t.Run(model, func(t *testing.T) {
+func TestBuildKiroPayloadGPT56UsesNativeReasoningEffort(t *testing.T) {
+	tests := []struct {
+		name       string
+		model      string
+		effortJSON string
+		wantEffort string
+	}{
+		{name: "responses high", model: "gpt-5.6-sol", effortJSON: `"output_config":{"effort":"high"}`, wantEffort: "high"},
+		{name: "chat max", model: "gpt-5.6-terra", effortJSON: `"reasoning_effort":"max"`, wantEffort: "xhigh"},
+		{name: "nested low", model: "gpt-5.6-luna", effortJSON: `"reasoning":{"effort":"low"}`, wantEffort: "low"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
 			body := []byte(`{
-				"model":"` + model + `",
+				"model":"` + tt.model + `",
 				"thinking":{"type":"adaptive"},
-				"output_config":{"effort":"high"},
+				` + tt.effortJSON + `,
 				"messages":[{"role":"user","content":"hi"}]
 			}`)
 
-			result, err := BuildKiroPayloadWithContext(body, model, "", "AI_EDITOR", nil)
+			result, err := BuildKiroPayloadWithContext(body, tt.model, "", "AI_EDITOR", nil)
 
 			require.NoError(t, err)
 			require.False(t, result.Context.ThinkingEnabled)
-			require.False(t, gjson.GetBytes(result.Payload, "additionalModelRequestFields").Exists())
+			require.Equal(t, tt.wantEffort, gjson.GetBytes(result.Payload, "additionalModelRequestFields.reasoning.effort").String())
 			systemContent := gjson.GetBytes(result.Payload, "conversationState.history.0.userInputMessage.content").String()
 			require.NotContains(t, systemContent, "<thinking_mode>")
 			require.NotContains(t, systemContent, "<thinking_effort>")
 			require.NotContains(t, systemContent, "<max_thinking_length>")
 		})
 	}
+}
+
+func TestBuildKiroPayloadGPT56OmitsUnsupportedReasoningEffort(t *testing.T) {
+	body := []byte(`{
+		"model":"gpt-5.6-sol",
+		"output_config":{"effort":"none"},
+		"messages":[{"role":"user","content":"hi"}]
+	}`)
+
+	result, err := BuildKiroPayloadWithContext(body, "gpt-5.6-sol", "", "AI_EDITOR", nil)
+
+	require.NoError(t, err)
+	require.False(t, gjson.GetBytes(result.Payload, "additionalModelRequestFields").Exists())
 }
 
 func TestBuildKiroPayloadInjectsThinkingForThinkingAliasModel(t *testing.T) {

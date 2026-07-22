@@ -503,7 +503,7 @@ func BuildKiroPayloadWithContext(claudeBody []byte, modelID, profileArn, origin 
 		},
 		ProfileArn:                   profileArn,
 		InferenceConfig:              inferenceConfig,
-		AdditionalModelRequestFields: buildAdditionalModelRequestFields(thinking, modelID),
+		AdditionalModelRequestFields: buildAdditionalModelRequestFields(claudeBody, thinking, modelID),
 	}
 	payloadBytes, err := json.Marshal(payload)
 	if err != nil {
@@ -1528,14 +1528,23 @@ func buildKiroTemporalContext() string {
 }
 
 // buildAdditionalModelRequestFields 构建 Kiro payload 的 additionalModelRequestFields。
-// 对 Claude 4.6+ 模型，使用 output_config.effort 路径（官方 Kiro IDE 的 kr() 逻辑）：
+// GPT-5.6 使用 Kiro 原生 reasoning.effort；Claude 4.6+ 使用 output_config.effort：
 //
+//	GPT-5.6 → { reasoning: {effort} }
 //	output_config 路径 → { thinking: {type:'adaptive',display:'summarized'}, output_config: {effort} }
 //
 // 对于旧模型或 enabled 模式，不注入（依赖 system prompt 标签兜底）。
 //
 // 这实现了管理器的 P1 功能：确保 Claude 4.6+ 新模型的 thinking 使用 effort-based 控制。
-func buildAdditionalModelRequestFields(thinking *thinkingDirective, modelID string) map[string]any {
+func buildAdditionalModelRequestFields(body []byte, thinking *thinkingDirective, modelID string) map[string]any {
+	if isKiroGPT56Model(modelID) {
+		if effort := extractKiroGPT56ReasoningEffort(body); effort != "" {
+			return map[string]any{
+				"reasoning": map[string]any{"effort": effort},
+			}
+		}
+		return nil
+	}
 	if thinking == nil {
 		return nil
 	}
@@ -1562,6 +1571,23 @@ func buildAdditionalModelRequestFields(thinking *thinkingDirective, modelID stri
 		}
 	}
 	return nil
+}
+
+func extractKiroGPT56ReasoningEffort(body []byte) string {
+	effort := ""
+	for _, path := range []string{"output_config.effort", "reasoning_effort", "reasoning.effort"} {
+		if effort = strings.ToLower(strings.TrimSpace(gjson.GetBytes(body, path).String())); effort != "" {
+			break
+		}
+	}
+	switch effort {
+	case "max":
+		return "xhigh"
+	case "low", "medium", "high", "xhigh":
+		return effort
+	default:
+		return ""
+	}
 }
 
 // isOutputConfigPathModel 判断模型是否使用 output_config 路径（Claude 4.6+）。
