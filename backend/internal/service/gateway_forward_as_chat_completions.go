@@ -110,12 +110,13 @@ func (s *GatewayService) ForwardAsChatCompletions(
 	anthropicBody = enforceCacheControlLimit(anthropicBody)
 
 	var resp *http.Response
+	kiroFallbackInputTokens := 0
 	if isKiroDirectModeAccount(account) {
 		var group *Group
 		if parsed != nil {
 			group = parsed.Group
 		}
-		resp, _, err = s.openKiroAnthropicStreamResponse(ctx, account, parsed, anthropicBody, mappedModel, originalModel, c.Request.Header, group)
+		resp, kiroFallbackInputTokens, err = s.openKiroAnthropicStreamResponse(ctx, account, parsed, anthropicBody, mappedModel, originalModel, c.Request.Header, group)
 		if err != nil {
 			safeErr := sanitizeUpstreamErrorMessage(err.Error())
 			setOpsUpstreamError(c, 0, safeErr, "")
@@ -217,9 +218,9 @@ func (s *GatewayService) ForwardAsChatCompletions(
 	var result *ForwardResult
 	var handleErr error
 	if clientStream {
-		result, handleErr = s.handleCCStreamingFromAnthropic(resp, c, originalModel, mappedModel, reasoningEffort, startTime, includeUsage)
+		result, handleErr = s.handleCCStreamingFromAnthropic(resp, c, originalModel, mappedModel, reasoningEffort, startTime, includeUsage, kiroFallbackInputTokens)
 	} else {
-		result, handleErr = s.handleCCBufferedFromAnthropic(resp, c, originalModel, mappedModel, reasoningEffort, startTime)
+		result, handleErr = s.handleCCBufferedFromAnthropic(resp, c, originalModel, mappedModel, reasoningEffort, startTime, kiroFallbackInputTokens)
 	}
 
 	return result, handleErr
@@ -252,6 +253,7 @@ func (s *GatewayService) handleCCBufferedFromAnthropic(
 	mappedModel string,
 	reasoningEffort *string,
 	startTime time.Time,
+	kiroFallbackInputTokens int,
 ) (*ForwardResult, error) {
 	requestID := resp.Header.Get("x-request-id")
 
@@ -264,6 +266,7 @@ func (s *GatewayService) handleCCBufferedFromAnthropic(
 
 	var finalResp *apicompat.AnthropicResponse
 	var usage ClaudeUsage
+	terminalInputUsageReported := false
 
 	for scanner.Scan() {
 		line := scanner.Text()
@@ -298,6 +301,9 @@ func (s *GatewayService) handleCCBufferedFromAnthropic(
 				mergeAnthropicUsage(&usage, *event.Usage)
 			}
 			mergeKiroCreditsFromAnthropicPayload(&usage, payload)
+			if kiroFallbackInputTokens > 0 && mergeAuthoritativeKiroInputUsageFromAnthropicPayload(&usage, payload) {
+				terminalInputUsageReported = true
+			}
 			if event.Delta != nil && event.Delta.StopReason != "" && finalResp != nil {
 				finalResp.StopReason = apicompat.AnthropicStopReasonPtr(event.Delta.StopReason)
 			}
@@ -319,6 +325,7 @@ func (s *GatewayService) handleCCBufferedFromAnthropic(
 			}
 		}
 	}
+	applyKiroInputUsageFallback(&usage, kiroFallbackInputTokens, terminalInputUsageReported)
 
 	if err := scanner.Err(); err != nil {
 		if !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
@@ -387,6 +394,7 @@ func (s *GatewayService) handleCCStreamingFromAnthropic(
 	reasoningEffort *string,
 	startTime time.Time,
 	includeUsage bool,
+	kiroFallbackInputTokens int,
 ) (*ForwardResult, error) {
 	requestID := resp.Header.Get("x-request-id")
 
@@ -409,6 +417,14 @@ func (s *GatewayService) handleCCStreamingFromAnthropic(
 	var usage ClaudeUsage
 	var firstTokenMs *int
 	firstChunk := true
+	clientDisconnected := false
+	terminalInputUsageReported := false
+	var disconnectDrainTimer *time.Timer
+	defer func() {
+		if disconnectDrainTimer != nil {
+			disconnectDrainTimer.Stop()
+		}
+	}()
 
 	scanner := bufio.NewScanner(resp.Body)
 	maxLineSize := defaultMaxLineSize
@@ -418,19 +434,24 @@ func (s *GatewayService) handleCCStreamingFromAnthropic(
 	scanner.Buffer(make([]byte, 0, 64*1024), maxLineSize)
 
 	resultWithUsage := func() *ForwardResult {
+		applyKiroInputUsageFallback(&usage, kiroFallbackInputTokens, terminalInputUsageReported)
 		return &ForwardResult{
-			RequestID:       requestID,
-			Usage:           usage,
-			Model:           originalModel,
-			UpstreamModel:   mappedModel,
-			ReasoningEffort: reasoningEffort,
-			Stream:          true,
-			Duration:        time.Since(startTime),
-			FirstTokenMs:    firstTokenMs,
+			RequestID:        requestID,
+			Usage:            usage,
+			Model:            originalModel,
+			UpstreamModel:    mappedModel,
+			ReasoningEffort:  reasoningEffort,
+			Stream:           true,
+			Duration:         time.Since(startTime),
+			FirstTokenMs:     firstTokenMs,
+			ClientDisconnect: clientDisconnected,
 		}
 	}
 
 	writeChunk := func(chunk apicompat.ChatCompletionsChunk) bool {
+		if clientDisconnected {
+			return true
+		}
 		sse, err := apicompat.ChatChunkToSSE(chunk)
 		if err != nil {
 			return false
@@ -439,6 +460,7 @@ func (s *GatewayService) handleCCStreamingFromAnthropic(
 		// c 可能持有请求侧注入的 ToolNameRewrite；无则仅做静态前缀还原。
 		out := string(reverseToolNamesIfPresent(c, []byte(sse)))
 		if _, err := fmt.Fprint(c.Writer, out); err != nil {
+			clientDisconnected = true
 			return true // client disconnected
 		}
 		return false
@@ -494,9 +516,21 @@ func (s *GatewayService) handleCCStreamingFromAnthropic(
 			continue
 		}
 		mergeKiroCreditsFromAnthropicPayload(&usage, payload)
+		if disconnectDrainTimer != nil {
+			disconnectDrainTimer.Reset(s.kiroDisconnectDrainTimeout())
+		}
 
-		if processAnthropicEvent(&event) {
-			return resultWithUsage(), nil
+		if event.Type == "message_delta" && kiroFallbackInputTokens > 0 && mergeAuthoritativeKiroInputUsageFromAnthropicPayload(&usage, payload) {
+			terminalInputUsageReported = true
+		}
+
+		if disconnected := processAnthropicEvent(&event); disconnected {
+			if kiroFallbackInputTokens <= 0 {
+				return resultWithUsage(), nil
+			}
+			if disconnectDrainTimer == nil {
+				disconnectDrainTimer = s.startKiroDisconnectDrainTimer(resp)
+			}
 		}
 	}
 
@@ -523,8 +557,10 @@ func (s *GatewayService) handleCCStreamingFromAnthropic(
 	}
 
 	// Write [DONE] marker
-	fmt.Fprint(c.Writer, "data: [DONE]\n\n") //nolint:errcheck
-	c.Writer.Flush()
+	if !clientDisconnected {
+		fmt.Fprint(c.Writer, "data: [DONE]\n\n") //nolint:errcheck
+		c.Writer.Flush()
+	}
 
 	return resultWithUsage(), nil
 }

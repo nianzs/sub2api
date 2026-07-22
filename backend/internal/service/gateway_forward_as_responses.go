@@ -109,12 +109,13 @@ func (s *GatewayService) ForwardAsResponses(
 	anthropicBody = enforceCacheControlLimit(anthropicBody)
 
 	var resp *http.Response
+	kiroFallbackInputTokens := 0
 	if isKiroDirectModeAccount(account) {
 		var group *Group
 		if parsed != nil {
 			group = parsed.Group
 		}
-		resp, _, err = s.openKiroAnthropicStreamResponse(ctx, account, parsed, anthropicBody, mappedModel, originalModel, c.Request.Header, group)
+		resp, kiroFallbackInputTokens, err = s.openKiroAnthropicStreamResponse(ctx, account, parsed, anthropicBody, mappedModel, originalModel, c.Request.Header, group)
 		if err != nil {
 			safeErr := sanitizeUpstreamErrorMessage(err.Error())
 			setOpsUpstreamError(c, 0, safeErr, "")
@@ -209,9 +210,9 @@ func (s *GatewayService) ForwardAsResponses(
 	var result *ForwardResult
 	var handleErr error
 	if clientStream {
-		result, handleErr = s.handleResponsesStreamingResponse(resp, c, originalModel, mappedModel, reasoningEffort, startTime)
+		result, handleErr = s.handleResponsesStreamingResponse(resp, c, originalModel, mappedModel, reasoningEffort, startTime, kiroFallbackInputTokens)
 	} else {
-		result, handleErr = s.handleResponsesBufferedStreamingResponse(resp, c, originalModel, mappedModel, reasoningEffort, startTime)
+		result, handleErr = s.handleResponsesBufferedStreamingResponse(resp, c, originalModel, mappedModel, reasoningEffort, startTime, kiroFallbackInputTokens)
 	}
 
 	return result, handleErr
@@ -262,6 +263,48 @@ func mergeKiroCreditsFromAnthropicPayload(dst *ClaudeUsage, payload string) {
 	}
 }
 
+func mergeAuthoritativeKiroInputUsageFromAnthropicPayload(dst *ClaudeUsage, payload string) bool {
+	if dst == nil || payload == "" || !gjson.Valid(payload) {
+		return false
+	}
+	usage := gjson.Get(payload, "usage")
+	input := usage.Get("input_tokens")
+	cacheRead := usage.Get("cache_read_input_tokens")
+	cacheCreation := usage.Get("cache_creation_input_tokens")
+	if !input.Exists() && !cacheRead.Exists() && !cacheCreation.Exists() {
+		return false
+	}
+	dst.InputTokens = int(input.Int())
+	dst.CacheReadInputTokens = int(cacheRead.Int())
+	dst.CacheCreationInputTokens = int(cacheCreation.Int())
+	return true
+}
+
+func applyKiroInputUsageFallback(dst *ClaudeUsage, fallbackInputTokens int, terminalInputUsageReported bool) {
+	if dst == nil || fallbackInputTokens <= 0 || terminalInputUsageReported {
+		return
+	}
+	if dst.InputTokens == 0 && dst.CacheReadInputTokens == 0 && dst.CacheCreationInputTokens == 0 {
+		dst.InputTokens = fallbackInputTokens
+	}
+}
+
+func (s *GatewayService) kiroDisconnectDrainTimeout() time.Duration {
+	timeout := 30 * time.Second
+	if s != nil && s.cfg != nil && s.cfg.Gateway.StreamDataIntervalTimeout > 0 {
+		timeout = time.Duration(s.cfg.Gateway.StreamDataIntervalTimeout) * time.Second
+	}
+	return timeout
+}
+
+func (s *GatewayService) startKiroDisconnectDrainTimer(resp *http.Response) *time.Timer {
+	return time.AfterFunc(s.kiroDisconnectDrainTimeout(), func() {
+		if resp != nil && resp.Body != nil {
+			_ = resp.Body.Close()
+		}
+	})
+}
+
 // parseAnthropicSSEField parses an SSE field line in the form "field:value" or "field: value".
 // According to the SSE spec (https://html.spec.whatwg.org/multipage/server-sent-events.html#event-stream-interpretation),
 // the space after the colon is optional. This function handles both formats.
@@ -283,6 +326,7 @@ func (s *GatewayService) handleResponsesBufferedStreamingResponse(
 	mappedModel string,
 	reasoningEffort *string,
 	startTime time.Time,
+	kiroFallbackInputTokens int,
 ) (*ForwardResult, error) {
 	requestID := resp.Header.Get("x-request-id")
 
@@ -296,6 +340,7 @@ func (s *GatewayService) handleResponsesBufferedStreamingResponse(
 	// Accumulate the final Anthropic response from streaming events
 	var finalResp *apicompat.AnthropicResponse
 	var usage ClaudeUsage
+	terminalInputUsageReported := false
 
 	for scanner.Scan() {
 		line := scanner.Text()
@@ -336,6 +381,9 @@ func (s *GatewayService) handleResponsesBufferedStreamingResponse(
 				mergeAnthropicUsage(&usage, *event.Usage)
 			}
 			mergeKiroCreditsFromAnthropicPayload(&usage, payload)
+			if kiroFallbackInputTokens > 0 && mergeAuthoritativeKiroInputUsageFromAnthropicPayload(&usage, payload) {
+				terminalInputUsageReported = true
+			}
 			if event.Delta != nil && event.Delta.StopReason != "" && finalResp != nil {
 				finalResp.StopReason = apicompat.AnthropicStopReasonPtr(event.Delta.StopReason)
 			}
@@ -359,6 +407,7 @@ func (s *GatewayService) handleResponsesBufferedStreamingResponse(
 			}
 		}
 	}
+	applyKiroInputUsageFallback(&usage, kiroFallbackInputTokens, terminalInputUsageReported)
 
 	if err := scanner.Err(); err != nil {
 		if !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
@@ -424,6 +473,7 @@ func (s *GatewayService) handleResponsesStreamingResponse(
 	mappedModel string,
 	reasoningEffort *string,
 	startTime time.Time,
+	kiroFallbackInputTokens int,
 ) (*ForwardResult, error) {
 	requestID := resp.Header.Get("x-request-id")
 
@@ -441,6 +491,14 @@ func (s *GatewayService) handleResponsesStreamingResponse(
 	var usage ClaudeUsage
 	var firstTokenMs *int
 	firstChunk := true
+	clientDisconnected := false
+	terminalInputUsageReported := false
+	var disconnectDrainTimer *time.Timer
+	defer func() {
+		if disconnectDrainTimer != nil {
+			disconnectDrainTimer.Stop()
+		}
+	}()
 
 	scanner := bufio.NewScanner(resp.Body)
 	maxLineSize := defaultMaxLineSize
@@ -450,15 +508,17 @@ func (s *GatewayService) handleResponsesStreamingResponse(
 	scanner.Buffer(make([]byte, 0, 64*1024), maxLineSize)
 
 	resultWithUsage := func() *ForwardResult {
+		applyKiroInputUsageFallback(&usage, kiroFallbackInputTokens, terminalInputUsageReported)
 		return &ForwardResult{
-			RequestID:       requestID,
-			Usage:           usage,
-			Model:           originalModel,
-			UpstreamModel:   mappedModel,
-			ReasoningEffort: reasoningEffort,
-			Stream:          true,
-			Duration:        time.Since(startTime),
-			FirstTokenMs:    firstTokenMs,
+			RequestID:        requestID,
+			Usage:            usage,
+			Model:            originalModel,
+			UpstreamModel:    mappedModel,
+			ReasoningEffort:  reasoningEffort,
+			Stream:           true,
+			Duration:         time.Since(startTime),
+			FirstTokenMs:     firstTokenMs,
+			ClientDisconnect: clientDisconnected,
 		}
 	}
 
@@ -482,6 +542,9 @@ func (s *GatewayService) handleResponsesStreamingResponse(
 		// Convert to Responses events
 		events := apicompat.AnthropicEventToResponsesEvents(event, state)
 		for _, evt := range events {
+			if clientDisconnected {
+				continue
+			}
 			sse, err := apicompat.ResponsesEventToSSE(evt)
 			if err != nil {
 				logger.L().Warn("forward_as_responses stream: failed to marshal event",
@@ -495,10 +558,11 @@ func (s *GatewayService) handleResponsesStreamingResponse(
 				logger.L().Info("forward_as_responses stream: client disconnected",
 					zap.String("request_id", requestID),
 				)
+				clientDisconnected = true
 				return true // client disconnected
 			}
 		}
-		if len(events) > 0 {
+		if len(events) > 0 && !clientDisconnected {
 			c.Writer.Flush()
 		}
 		return false
@@ -547,9 +611,21 @@ func (s *GatewayService) handleResponsesStreamingResponse(
 			continue
 		}
 		mergeKiroCreditsFromAnthropicPayload(&usage, payload)
+		if disconnectDrainTimer != nil {
+			disconnectDrainTimer.Reset(s.kiroDisconnectDrainTimeout())
+		}
 
-		if processEvent(&event) {
-			return resultWithUsage(), nil
+		if event.Type == "message_delta" && kiroFallbackInputTokens > 0 && mergeAuthoritativeKiroInputUsageFromAnthropicPayload(&usage, payload) {
+			terminalInputUsageReported = true
+		}
+
+		if disconnected := processEvent(&event); disconnected {
+			if kiroFallbackInputTokens <= 0 {
+				return resultWithUsage(), nil
+			}
+			if disconnectDrainTimer == nil {
+				disconnectDrainTimer = s.startKiroDisconnectDrainTimer(resp)
+			}
 		}
 	}
 

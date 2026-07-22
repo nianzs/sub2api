@@ -12,6 +12,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	kiropkg "github.com/Wei-Shaw/sub2api/internal/pkg/kiro"
@@ -27,6 +28,57 @@ type kiroEndpointConfig struct {
 	URL       string
 	AmzTarget string
 	Name      string
+}
+
+type kiroStreamReadCloser struct {
+	reader   io.ReadCloser
+	upstream io.Closer
+	cancel   context.CancelFunc
+	once     sync.Once
+}
+
+func (s *GatewayService) newKiroStreamContext(parent context.Context) (context.Context, context.CancelFunc) {
+	if parent == nil {
+		return context.WithCancel(context.Background())
+	}
+	if parent.Err() != nil {
+		return context.WithCancel(parent)
+	}
+	streamCtx, cancel := context.WithCancel(context.WithoutCancel(parent))
+	go func() {
+		select {
+		case <-parent.Done():
+			timer := time.NewTimer(s.kiroDisconnectDrainTimeout())
+			defer timer.Stop()
+			select {
+			case <-timer.C:
+				cancel()
+			case <-streamCtx.Done():
+			}
+		case <-streamCtx.Done():
+		}
+	}()
+	return streamCtx, cancel
+}
+
+func (r *kiroStreamReadCloser) Read(p []byte) (int, error) {
+	return r.reader.Read(p)
+}
+
+func (r *kiroStreamReadCloser) Close() error {
+	var closeErr error
+	r.once.Do(func() {
+		if r.cancel != nil {
+			r.cancel()
+		}
+		if r.upstream != nil {
+			closeErr = r.upstream.Close()
+		}
+		if err := r.reader.Close(); closeErr == nil {
+			closeErr = err
+		}
+	})
+	return closeErr
 }
 
 const kiroInvalidModelTempUnschedDuration = time.Minute
@@ -284,13 +336,15 @@ func (s *GatewayService) openKiroAnthropicStreamResponse(ctx context.Context, ac
 		return nil, 0, fmt.Errorf("kiro requires oauth or apikey token, got %s", tokenType)
 	}
 
-	inputTokens := estimateKiroInputTokens(ctx, anthropicBody)
+	streamCtx, cancelStream := s.newKiroStreamContext(ctx)
+	inputTokens := estimateKiroInputTokens(streamCtx, anthropicBody)
 	if isOnlyWebSearchToolInBody(anthropicBody) {
 		pr, pw := io.Pipe()
 		headers := make(http.Header)
 		headers.Set("Content-Type", "text/event-stream")
 		go func() {
-			streamErr := s.streamKiroWebSearchAsAnthropic(ctx, account, group, anthropicBody, mappedModel, requestModel, token, headers, pw)
+			defer cancelStream()
+			streamErr := s.streamKiroWebSearchAsAnthropic(streamCtx, account, group, anthropicBody, mappedModel, requestModel, token, headers, pw)
 			if streamErr != nil {
 				_ = pw.CloseWithError(streamErr)
 				return
@@ -300,12 +354,13 @@ func (s *GatewayService) openKiroAnthropicStreamResponse(ctx context.Context, ac
 		return &http.Response{
 			StatusCode: http.StatusOK,
 			Header:     headers,
-			Body:       pr,
+			Body:       &kiroStreamReadCloser{reader: pr, cancel: cancelStream},
 		}, inputTokens, nil
 	}
 
-	resp, requestCtx, err := s.executeKiroUpstreamWithParsed(ctx, account, parsed, anthropicBody, mappedModel, requestModel, token, headers)
+	resp, requestCtx, err := s.executeKiroUpstreamWithParsed(streamCtx, account, parsed, anthropicBody, mappedModel, requestModel, token, headers)
 	if err != nil {
+		cancelStream()
 		var failoverErr *UpstreamFailoverError
 		if errors.As(err, &failoverErr) {
 			return nil, inputTokens, err
@@ -313,9 +368,10 @@ func (s *GatewayService) openKiroAnthropicStreamResponse(ctx context.Context, ac
 		return nil, inputTokens, err
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		resp.Body = &kiroStreamReadCloser{reader: resp.Body, cancel: cancelStream}
 		return resp, inputTokens, nil
 	}
-	cacheUsage := s.buildKiroCacheEmulationUsage(ctx, account, group, anthropicBody, mappedModel, inputTokens)
+	cacheUsage := s.buildKiroCacheEmulationUsage(streamCtx, account, group, anthropicBody, mappedModel, inputTokens)
 	requestCtx.CacheEmulationUsage = cacheUsage.toKiroUsage()
 
 	pr, pw := io.Pipe()
@@ -326,8 +382,9 @@ func (s *GatewayService) openKiroAnthropicStreamResponse(ctx context.Context, ac
 	wrappedHeaders.Set("request-id", claudeReqID)
 
 	go func() {
+		defer cancelStream()
 		defer func() { _ = resp.Body.Close() }()
-		_, streamErr := kiropkg.StreamEventStreamAsAnthropicWithContext(ctx, resp.Body, pw, requestModel, inputTokens, requestCtx)
+		_, streamErr := kiropkg.StreamEventStreamAsAnthropicWithContext(streamCtx, resp.Body, pw, requestModel, inputTokens, requestCtx)
 		if streamErr != nil {
 			_, _ = io.WriteString(pw, "event: error\ndata: {\"type\":\"error\",\"error\":{\"type\":\"api_error\",\"message\":\"stream interrupted\"}}\n\n")
 			_ = pw.CloseWithError(streamErr)
@@ -339,7 +396,11 @@ func (s *GatewayService) openKiroAnthropicStreamResponse(ctx context.Context, ac
 	return &http.Response{
 		StatusCode: resp.StatusCode,
 		Header:     wrappedHeaders,
-		Body:       pr,
+		Body: &kiroStreamReadCloser{
+			reader:   pr,
+			upstream: resp.Body,
+			cancel:   cancelStream,
+		},
 	}, inputTokens, nil
 }
 

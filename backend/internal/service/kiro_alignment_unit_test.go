@@ -11,6 +11,49 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestKiroStreamReadCloserClosesPipeUpstreamAndContext(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	reader := newOpenAICompatBlockingReadCloser(nil)
+	upstream := newOpenAICompatBlockingReadCloser(nil)
+	body := &kiroStreamReadCloser{reader: reader, upstream: upstream, cancel: cancel}
+
+	require.NoError(t, body.Close())
+	select {
+	case <-ctx.Done():
+	default:
+		t.Fatal("stream context was not canceled")
+	}
+	select {
+	case <-reader.closed:
+	default:
+		t.Fatal("pipe reader was not closed")
+	}
+	select {
+	case <-upstream.closed:
+	default:
+		t.Fatal("upstream body was not closed")
+	}
+}
+
+func TestNewKiroStreamContextBoundsCanceledParent(t *testing.T) {
+	parent, cancelParent := context.WithCancel(context.Background())
+	svc := &GatewayService{cfg: &config.Config{Gateway: config.GatewayConfig{StreamDataIntervalTimeout: 1}}}
+	streamCtx, cancelStream := svc.newKiroStreamContext(parent)
+	defer cancelStream()
+
+	cancelParent()
+	select {
+	case <-streamCtx.Done():
+		t.Fatal("stream context canceled before the drain grace elapsed")
+	case <-time.After(100 * time.Millisecond):
+	}
+	select {
+	case <-streamCtx.Done():
+	case <-time.After(2 * time.Second):
+		t.Fatal("stream context was not canceled after the bounded drain grace")
+	}
+}
+
 func TestGetBaseURL_KiroAPIKeyWithoutBaseURLReturnsEmpty(t *testing.T) {
 	account := Account{
 		Type:        AccountTypeAPIKey,
