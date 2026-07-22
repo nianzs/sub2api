@@ -2577,6 +2577,49 @@ func TestKiroRealCacheUsagePreservesReportedZeroUncachedTokens(t *testing.T) {
 	require.Zero(t, int(gjson.GetBytes(result.ResponseBody, "usage.input_tokens").Int()))
 }
 
+func TestKiroGPT56ReportedInputTakesPrecedenceWhenCacheFieldsAreOmitted(t *testing.T) {
+	buildStream := func(t *testing.T) *bytes.Buffer {
+		t.Helper()
+		stream := bytes.NewBuffer(nil)
+		_, _ = stream.Write(buildEventStreamFrame(t, "messageMetadataEvent", map[string]any{
+			"messageMetadataEvent": map[string]any{
+				"tokenUsage": map[string]any{
+					"uncachedInputTokens": 90,
+					"outputTokens":        7,
+				},
+			},
+		}))
+		return stream
+	}
+	requestCtx := KiroRequestContext{
+		UpstreamModel: "gpt-5.6-sol",
+		CacheEmulationUsage: &Usage{
+			InputTokens:              20,
+			CacheReadInputTokens:     70,
+			CacheCreationInputTokens: 30,
+		},
+	}
+
+	t.Run("non-streaming", func(t *testing.T) {
+		result, err := ParseNonStreamingEventStreamWithContext(buildStream(t), "client-alias", requestCtx)
+		require.NoError(t, err)
+		require.Equal(t, 90, result.Usage.InputTokens)
+		require.Zero(t, result.Usage.CacheReadInputTokens)
+		require.Zero(t, result.Usage.CacheCreationInputTokens)
+	})
+
+	t.Run("streaming", func(t *testing.T) {
+		var out bytes.Buffer
+		result, err := StreamEventStreamAsAnthropicWithContext(context.Background(), buildStream(t), &out, "client-alias", 120, requestCtx)
+		require.NoError(t, err)
+		require.Equal(t, 90, result.Usage.InputTokens)
+		require.Zero(t, result.Usage.CacheReadInputTokens)
+		require.Zero(t, result.Usage.CacheCreationInputTokens)
+		require.NotContains(t, out.String(), `"cache_read_input_tokens":70`)
+		require.NotContains(t, out.String(), `"cache_creation_input_tokens":30`)
+	})
+}
+
 func TestRewriteClaudeResponseUsage(t *testing.T) {
 	body, err := RewriteClaudeResponseUsage([]byte(`{"type":"message","usage":{"input_tokens":1}}`), Usage{
 		InputTokens:              14,

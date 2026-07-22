@@ -519,7 +519,11 @@ func ParseNonStreamingEventStreamWithContext(body io.Reader, model string, reque
 		return nil, err
 	}
 	if requestCtx.CacheEmulationUsage != nil {
-		usage = mergeKiroCacheEmulationUsage(usage, requestCtx.CacheEmulationUsage)
+		usage = mergeKiroCacheEmulationUsage(
+			usage,
+			requestCtx.CacheEmulationUsage,
+			isKiroGPT56Model(firstNonEmptyString(requestCtx.UpstreamModel, model)),
+		)
 	}
 	return &ParseResult{
 		ResponseBody: buildClaudeResponse(content, toolUses, model, usage, stopReason, requestCtx),
@@ -580,7 +584,7 @@ func StreamEventStreamAsAnthropicWithContext(ctx context.Context, body io.Reader
 			// cannot later be overwritten by an explicit zero on a full cache hit.
 			startUsage.InputTokens = 0
 		} else if requestCtx.CacheEmulationUsage != nil {
-			startUsage = mergeKiroCacheEmulationUsage(startUsage, requestCtx.CacheEmulationUsage)
+			startUsage = mergeKiroCacheEmulationUsage(startUsage, requestCtx.CacheEmulationUsage, false)
 		}
 		usageMap := map[string]any{
 			"input_tokens":  startUsage.InputTokens,
@@ -1259,7 +1263,11 @@ func StreamEventStreamAsAnthropicWithContext(ctx context.Context, body io.Reader
 		usage.TotalTokens = usage.InputTokens + usage.OutputTokens
 	}
 	if requestCtx.CacheEmulationUsage != nil {
-		usage = mergeKiroCacheEmulationUsage(usage, requestCtx.CacheEmulationUsage)
+		usage = mergeKiroCacheEmulationUsage(
+			usage,
+			requestCtx.CacheEmulationUsage,
+			isKiroGPT56Model(firstNonEmptyString(requestCtx.UpstreamModel, model)),
+		)
 	}
 	switch stopReason {
 	case "max_tokens", "stop_sequence":
@@ -4471,8 +4479,11 @@ func toPositiveFiniteFloat(value any) (float64, bool) {
 	return out, true
 }
 
-func mergeKiroCacheEmulationUsage(base Usage, simulated *Usage) Usage {
+func mergeKiroCacheEmulationUsage(base Usage, simulated *Usage, preserveReportedInput bool) Usage {
 	if simulated == nil {
+		return base
+	}
+	if preserveReportedInput && base.InputTokensReported {
 		return base
 	}
 	if base.realCacheUsageReported || base.CacheReadInputTokens > 0 || base.CacheCreationInputTokens > 0 || base.CacheCreation5mInputTokens > 0 || base.CacheCreation1hInputTokens > 0 {
