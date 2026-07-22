@@ -288,16 +288,28 @@ func (s *GatewayService) openKiroAnthropicStreamResponse(ctx context.Context, ac
 	if isOnlyWebSearchToolInBody(anthropicBody) {
 		cacheUsage := s.buildKiroCacheEmulationUsage(ctx, account, group, anthropicBody, mappedModel, inputTokens)
 		pr, pw := io.Pipe()
+		ready := make(chan error, 1)
 		headers := make(http.Header)
 		headers.Set("Content-Type", "text/event-stream")
 		go func() {
-			streamErr := s.streamKiroWebSearchAsAnthropic(ctx, account, anthropicBody, mappedModel, requestModel, token, inputTokens, headers, pw, cacheUsage)
+			streamErr := s.streamKiroWebSearchAsAnthropicWithReady(ctx, account, anthropicBody, mappedModel, requestModel, token, inputTokens, headers, pw, cacheUsage, func(err error) {
+				ready <- err
+			})
 			if streamErr != nil {
 				_ = pw.CloseWithError(streamErr)
 				return
 			}
 			_ = pw.Close()
 		}()
+		if readyErr := <-ready; readyErr != nil {
+			var httpErr *kiroWebSearchHTTPError
+			if errors.As(readyErr, &httpErr) && httpErr.Response != nil {
+				_ = pr.Close()
+				return httpErr.Response, inputTokens, nil
+			}
+			_ = pr.CloseWithError(readyErr)
+			return nil, inputTokens, readyErr
+		}
 		return &http.Response{
 			StatusCode: http.StatusOK,
 			Header:     headers,
