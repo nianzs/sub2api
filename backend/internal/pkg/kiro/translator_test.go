@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/pkg/apicompat"
 	"github.com/stretchr/testify/require"
 	"github.com/tidwall/gjson"
 )
@@ -589,6 +590,118 @@ func TestParseNonStreamingEventStreamPreservesLargeIntegerInMapInput(t *testing.
 	require.NoError(t, err)
 	require.Equal(t, "tool_use", result.StopReason)
 	require.Equal(t, "9007199254740993", gjson.GetBytes(result.ResponseBody, "content.0.input.id").Raw)
+}
+
+func TestKiroToolInputStringSnapshotAfterFragmentsRoundTrip(t *testing.T) {
+	const (
+		toolUseID = "toolu_repeated_snapshot"
+		toolName  = "get_weather"
+		arguments = `{"location":"Taipei","unit":"celsius"}`
+	)
+
+	buildStream := func(t *testing.T) *bytes.Buffer {
+		t.Helper()
+		stream := bytes.NewBuffer(nil)
+		for _, fragment := range []string{`{"location":"Tai`, `pei","unit":"celsius"}`} {
+			_, _ = stream.Write(buildEventStreamFrame(t, "toolUseEvent", map[string]any{
+				"toolUseEvent": map[string]any{
+					"toolUseId": toolUseID,
+					"name":      toolName,
+					"input":     fragment,
+				},
+			}))
+		}
+		// Kiro can repeat the complete string input on the terminal frame after
+		// emitting it as fragments. Treat this value as a snapshot, not a delta.
+		_, _ = stream.Write(buildEventStreamFrame(t, "toolUseEvent", map[string]any{
+			"toolUseEvent": map[string]any{
+				"toolUseId": toolUseID,
+				"name":      toolName,
+				"input":     arguments,
+				"stop":      true,
+			},
+		}))
+		return stream
+	}
+
+	t.Run("non-streaming Responses tool round-trip", func(t *testing.T) {
+		result, err := ParseNonStreamingEventStreamWithContext(buildStream(t), "claude-sonnet-4-5", KiroRequestContext{})
+		require.NoError(t, err)
+
+		var anthropicResp apicompat.AnthropicResponse
+		require.NoError(t, json.Unmarshal(result.ResponseBody, &anthropicResp))
+		responsesResp := apicompat.AnthropicToResponsesResponse(&anthropicResp)
+		require.Len(t, responsesResp.Output, 1)
+		functionCall := responsesResp.Output[0]
+		require.Equal(t, "function_call", functionCall.Type)
+		require.JSONEq(t, arguments, functionCall.Arguments)
+
+		responsesInput, err := json.Marshal([]apicompat.ResponsesInputItem{
+			{
+				Type:      "function_call",
+				CallID:    functionCall.CallID,
+				Name:      functionCall.Name,
+				Arguments: functionCall.Arguments,
+			},
+			{
+				Type:   "function_call_output",
+				CallID: functionCall.CallID,
+				Output: `{"temperature":31}`,
+			},
+		})
+		require.NoError(t, err)
+		anthropicReq, err := apicompat.ResponsesToAnthropicRequest(&apicompat.ResponsesRequest{
+			Model: "claude-sonnet-4-5",
+			Input: responsesInput,
+		})
+		require.NoError(t, err)
+		anthropicBody, err := json.Marshal(anthropicReq)
+		require.NoError(t, err)
+
+		kiroRequest, err := BuildKiroPayloadWithContext(anthropicBody, "claude-sonnet-4.5", "", "AI_EDITOR", nil)
+		require.NoError(t, err)
+		var roundTripInput gjson.Result
+		for _, message := range gjson.GetBytes(kiroRequest.Payload, "conversationState.history").Array() {
+			for _, toolUse := range message.Get("assistantResponseMessage.toolUses").Array() {
+				if toolUse.Get("toolUseId").String() == toolUseID {
+					roundTripInput = toolUse.Get("input")
+				}
+			}
+		}
+		require.True(t, roundTripInput.Exists())
+		require.JSONEq(t, arguments, roundTripInput.Raw)
+		require.Equal(t, toolUseID, gjson.GetBytes(kiroRequest.Payload, "conversationState.currentMessage.userInputMessage.userInputMessageContext.toolResults.0.toolUseId").String())
+	})
+
+	t.Run("streaming emits one valid arguments value", func(t *testing.T) {
+		var out bytes.Buffer
+		result, err := StreamEventStreamAsAnthropicWithContext(context.Background(), buildStream(t), &out, "claude-sonnet-4-5", 9, KiroRequestContext{})
+		require.NoError(t, err)
+		require.Equal(t, "tool_use", result.StopReason)
+		require.Equal(t, 1, strings.Count(out.String(), `"type":"input_json_delta"`))
+		require.JSONEq(t, arguments, extractStreamedToolInputJSON(t, out.String(), toolUseID))
+	})
+}
+
+func TestStreamEventStreamAsAnthropicPreservesCompleteNestedObjectFragment(t *testing.T) {
+	const toolUseID = "toolu_nested_object_fragment"
+	stream := bytes.NewBuffer(nil)
+	for i, fragment := range []string{`{"locations":[`, `{"city":"Taipei"}`, `]}`} {
+		_, _ = stream.Write(buildEventStreamFrame(t, "toolUseEvent", map[string]any{
+			"toolUseEvent": map[string]any{
+				"toolUseId": toolUseID,
+				"name":      "get_weather",
+				"input":     fragment,
+				"stop":      i == 2,
+			},
+		}))
+	}
+
+	var out bytes.Buffer
+	result, err := StreamEventStreamAsAnthropicWithContext(context.Background(), stream, &out, "claude-sonnet-4-5", 9, KiroRequestContext{})
+	require.NoError(t, err)
+	require.Equal(t, "tool_use", result.StopReason)
+	require.JSONEq(t, `{"locations":[{"city":"Taipei"}]}`, extractStreamedToolInputJSON(t, out.String(), toolUseID))
 }
 
 func TestParseNonStreamingEventStreamRejectsTrailingJSONValueInToolInput(t *testing.T) {

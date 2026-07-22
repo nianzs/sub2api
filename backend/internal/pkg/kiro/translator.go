@@ -727,7 +727,7 @@ func StreamEventStreamAsAnthropicWithContext(ctx context.Context, body io.Reader
 			buf = &strings.Builder{}
 			streamingToolInputBuf[toolUseID] = buf
 		}
-		if snapshot {
+		if snapshot || shouldReplaceCompleteToolInput(buf.String(), fragment) {
 			buf.Reset()
 		}
 		if len(fragment) > maxEventMsgSize-buf.Len() {
@@ -2972,7 +2972,6 @@ func parseEventStream(body io.Reader) (string, []KiroToolUse, Usage, string, err
 				"toolUseId": currentTool.ToolUseID,
 				"name":      currentTool.Name,
 				"stop":      true,
-				"input":     currentTool.InputBuffer.String(),
 			},
 		}, currentTool, processedIDs)
 		toolUses = append(toolUses, completed...)
@@ -3604,6 +3603,9 @@ func processToolUseEvent(event map[string]any, currentTool *toolUseState, proces
 		}
 	}
 	if currentTool != nil && inputFragment != "" {
+		if shouldReplaceCompleteToolInput(currentTool.InputBuffer.String(), inputFragment) {
+			currentTool.InputBuffer.Reset()
+		}
 		_, _ = currentTool.InputBuffer.WriteString(inputFragment)
 	}
 	if currentTool != nil && inputMap != nil {
@@ -3780,6 +3782,18 @@ func normalizeStreamingToolInput(name, raw string) (string, map[string]any, bool
 		return "", nil, false
 	}
 	return string(encoded), input, true
+}
+
+func shouldReplaceCompleteToolInput(existing, fragment string) bool {
+	if strings.TrimSpace(existing) == "" || strings.TrimSpace(fragment) == "" {
+		return false
+	}
+	_, _, fragmentComplete := normalizeStreamingToolInput("", fragment)
+	if !fragmentComplete {
+		return false
+	}
+	_, _, existingComplete := normalizeStreamingToolInput("", existing)
+	return existingComplete
 }
 
 func repairJSON(input string) string {
