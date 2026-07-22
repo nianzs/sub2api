@@ -2620,6 +2620,52 @@ func TestKiroGPT56ReportedInputTakesPrecedenceWhenCacheFieldsAreOmitted(t *testi
 	})
 }
 
+func TestKiroGPT56LegacyInputTokensTakePrecedenceOverCacheEmulation(t *testing.T) {
+	stream := bytes.NewBuffer(nil)
+	_, _ = stream.Write(buildEventStreamFrame(t, "messageMetadataEvent", map[string]any{
+		"messageMetadataEvent": map[string]any{
+			"inputTokens":  90,
+			"outputTokens": 7,
+		},
+	}))
+
+	result, err := ParseNonStreamingEventStreamWithContext(stream, "client-alias", KiroRequestContext{
+		UpstreamModel: "gpt-5.6-sol",
+		CacheEmulationUsage: &Usage{
+			InputTokens:              20,
+			CacheReadInputTokens:     70,
+			CacheCreationInputTokens: 30,
+		},
+	})
+	require.NoError(t, err)
+	require.True(t, result.Usage.InputTokensReported)
+	require.Equal(t, 90, result.Usage.InputTokens)
+	require.Zero(t, result.Usage.CacheReadInputTokens)
+	require.Zero(t, result.Usage.CacheCreationInputTokens)
+}
+
+func TestKiroGPT56NegativeLegacyInputTokensFallBackToCacheEmulation(t *testing.T) {
+	stream := bytes.NewBuffer(nil)
+	_, _ = stream.Write(buildEventStreamFrame(t, "messageMetadataEvent", map[string]any{
+		"messageMetadataEvent": map[string]any{
+			"inputTokens":  -1,
+			"outputTokens": 7,
+		},
+	}))
+
+	result, err := ParseNonStreamingEventStreamWithContext(stream, "gpt-5.6-sol", KiroRequestContext{
+		CacheEmulationUsage: &Usage{
+			InputTokens:              20,
+			CacheReadInputTokens:     70,
+			CacheCreationInputTokens: 30,
+		},
+	})
+	require.NoError(t, err)
+	require.Equal(t, 20, result.Usage.InputTokens)
+	require.Equal(t, 70, result.Usage.CacheReadInputTokens)
+	require.Equal(t, 30, result.Usage.CacheCreationInputTokens)
+}
+
 func TestRewriteClaudeResponseUsage(t *testing.T) {
 	body, err := RewriteClaudeResponseUsage([]byte(`{"type":"message","usage":{"input_tokens":1}}`), Usage{
 		InputTokens:              14,

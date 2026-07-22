@@ -4336,8 +4336,11 @@ func updateUsageFromEvent(usage *Usage, eventType string, event map[string]any) 
 	}
 	updateKiroCreditsFromMap(usage, event)
 	updateKiroCreditsFromMap(usage, meta)
-	if value, ok := toInt(event["inputTokens"]); ok && value > 0 {
-		usage.InputTokens = value
+	if raw, reported := event["inputTokens"]; reported {
+		if value, ok := toInt(raw); ok && value >= 0 {
+			usage.InputTokens = value
+			usage.InputTokensReported = true
+		}
 	}
 	if value, ok := toInt(event["outputTokens"]); ok && value > 0 {
 		usage.OutputTokens = value
@@ -4345,8 +4348,11 @@ func updateUsageFromEvent(usage *Usage, eventType string, event map[string]any) 
 	if value, ok := toInt(event["totalTokens"]); ok && value > 0 {
 		usage.TotalTokens = value
 	}
-	if value, ok := toInt(meta["inputTokens"]); ok && value > 0 {
-		usage.InputTokens = value
+	if raw, reported := meta["inputTokens"]; reported {
+		if value, ok := toInt(raw); ok && value >= 0 {
+			usage.InputTokens = value
+			usage.InputTokensReported = true
+		}
 	}
 	if value, ok := toInt(meta["outputTokens"]); ok && value > 0 {
 		usage.OutputTokens = value
