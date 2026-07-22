@@ -176,15 +176,6 @@ func (s *GatewayService) streamKiroWebSearchAsAnthropicWithReady(
 		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 			return &kiroWebSearchHTTPError{Response: resp}
 		}
-		if ready != nil {
-			notifyReady(nil)
-			if _, err := io.Copy(w, &prelude); err != nil {
-				return err
-			}
-			streamWriter = w
-			ready = nil
-		}
-
 		chunks, _, streamErr := func() ([][]byte, *kiropkg.StreamResult, error) {
 			defer func() { _ = resp.Body.Close() }()
 			return bufferKiroAnthropicStream(ctx, resp.Body, requestModel, inputTokens)
@@ -209,6 +200,15 @@ func (s *GatewayService) streamKiroWebSearchAsAnthropicWithReady(
 				currentToolUseID = analysis.WebSearchToolUseID
 			}
 			continue
+		}
+
+		if ready != nil {
+			notifyReady(nil)
+			if _, err := io.Copy(w, &prelude); err != nil {
+				return err
+			}
+			streamWriter = w
+			ready = nil
 		}
 
 		for _, chunk := range chunks {
