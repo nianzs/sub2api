@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/binary"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -179,8 +180,9 @@ func (*kiroFailbackConcurrencyCache) CleanupStaleProcessSlots(context.Context, s
 }
 
 type kiroFailbackUpstream struct {
-	statusByAccount map[int64]int
-	accountIDs      []int64
+	statusByAccount       map[int64]int
+	transportErrByAccount map[int64]error
+	accountIDs            []int64
 }
 
 func (u *kiroFailbackUpstream) Do(req *http.Request, proxyURL string, accountID int64, accountConcurrency int) (*http.Response, error) {
@@ -189,6 +191,9 @@ func (u *kiroFailbackUpstream) Do(req *http.Request, proxyURL string, accountID 
 
 func (u *kiroFailbackUpstream) DoWithTLS(_ *http.Request, _ string, accountID int64, _ int, _ *tlsfingerprint.Profile) (*http.Response, error) {
 	u.accountIDs = append(u.accountIDs, accountID)
+	if err := u.transportErrByAccount[accountID]; err != nil {
+		return nil, err
+	}
 	status := u.statusByAccount[accountID]
 	if status == 0 {
 		status = http.StatusOK
@@ -426,6 +431,20 @@ func TestGatewayHandlerKiroAccountFailback(t *testing.T) {
 
 			require.Equal(t, http.StatusBadRequest, response.Code, response.Body.String())
 			require.Equal(t, []int64{9201}, upstream.accountIDs)
+			require.Empty(t, usageRepo.logs)
+		})
+
+		t.Run(endpoint+"_does_not_retry_plain_transport_error", func(t *testing.T) {
+			handler, upstream, usageRepo, apiKey := newKiroFailbackHandler(t, nil)
+			upstream.transportErrByAccount = map[int64]error{9201: errors.New("sensitive transport detail")}
+
+			response := performKiroFailbackRequest(t, handler, apiKey, endpoint)
+
+			require.Equal(t, http.StatusBadGateway, response.Code, response.Body.String())
+			require.NotEmpty(t, upstream.accountIDs)
+			require.NotContains(t, upstream.accountIDs, int64(9202), "plain transport errors must not fail over to another account")
+			require.NotContains(t, response.Body.String(), "sensitive transport detail")
+			require.Contains(t, response.Body.String(), "Upstream request failed")
 			require.Empty(t, usageRepo.logs)
 		})
 	}
