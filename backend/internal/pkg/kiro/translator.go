@@ -4309,9 +4309,9 @@ func updateUsageFromEvent(usage *Usage, eventType string, event map[string]any) 
 	}
 	if tokenUsage, ok := meta["tokenUsage"].(map[string]any); ok {
 		if raw, reported := tokenUsage["uncachedInputTokens"]; reported {
-			usage.InputTokensReported = true
-			if value, ok := toInt(raw); ok {
+			if value, ok := toInt(raw); ok && value >= 0 {
 				usage.InputTokens = value
+				usage.InputTokensReported = true
 			}
 		}
 		if value, ok := toInt(tokenUsage["outputTokens"]); ok {
@@ -4321,15 +4321,15 @@ func updateUsageFromEvent(usage *Usage, eventType string, event map[string]any) 
 			usage.TotalTokens = value
 		}
 		if raw, reported := tokenUsage["cacheReadInputTokens"]; reported {
-			usage.realCacheUsageReported = true
-			if value, ok := toInt(raw); ok {
+			if value, ok := toInt(raw); ok && value >= 0 {
 				usage.CacheReadInputTokens = value
+				usage.realCacheUsageReported = true
 			}
 		}
 		if raw, reported := tokenUsage["cacheWriteInputTokens"]; reported {
-			usage.realCacheUsageReported = true
-			if value, ok := toInt(raw); ok {
+			if value, ok := toInt(raw); ok && value >= 0 {
 				usage.CacheCreationInputTokens = value
+				usage.realCacheUsageReported = true
 			}
 		}
 		updateKiroCreditsFromMap(usage, tokenUsage)
