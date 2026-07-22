@@ -8,7 +8,9 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"sync"
 	"testing"
+	"time"
 
 	kiropkg "github.com/Wei-Shaw/sub2api/internal/pkg/kiro"
 	"github.com/stretchr/testify/require"
@@ -91,8 +93,23 @@ func TestOpenKiroAnthropicStreamResponsePropagatesWebSearchFailoverBeforeSynthet
 	require.Len(t, upstream.requests, 2)
 }
 
-func TestOpenKiroAnthropicStreamResponsePropagatesLaterWebSearchFailoverBeforeSynthetic200(t *testing.T) {
-	body := kiroCacheRequestBody("later stream failover", false)
+type kiroWebSearchBlockingBody struct {
+	release chan struct{}
+	once    sync.Once
+}
+
+func (b *kiroWebSearchBlockingBody) Read([]byte) (int, error) {
+	<-b.release
+	return 0, io.EOF
+}
+
+func (b *kiroWebSearchBlockingBody) Close() error {
+	b.once.Do(func() { close(b.release) })
+	return nil
+}
+
+func TestOpenKiroAnthropicStreamResponseReturnsAfterFirstAcceptedWebSearchIteration(t *testing.T) {
+	body := kiroCacheRequestBody("stream readiness", false)
 	var payload map[string]any
 	require.NoError(t, json.Unmarshal(body, &payload))
 	payload["tools"] = []any{map[string]any{
@@ -107,20 +124,10 @@ func TestOpenKiroAnthropicStreamResponsePropagatesLaterWebSearchFailoverBeforeSy
 	kiroWebSearchDescCache.Store(endpoint, "Search the web")
 	t.Cleanup(func() { kiroWebSearchDescCache.Delete(endpoint) })
 
-	firstModelBody := bytes.NewBuffer(nil)
-	_, _ = firstModelBody.Write(buildKiroEventStreamFrame(t, "toolUseEvent", map[string]any{
-		"toolUseEvent": map[string]any{
-			"toolUseId": "srvtoolu_next",
-			"name":      "remote_web_search",
-			"input":     `{"query":"refined query"}`,
-			"stop":      true,
-		},
-	}))
+	blockingBody := &kiroWebSearchBlockingBody{release: make(chan struct{})}
 	upstream := &queuedHTTPUpstream{responses: []*http.Response{
 		newJSONResponse(http.StatusOK, `{"jsonrpc":"2.0","result":{"content":[{"type":"text","text":"{\"results\":[]}"}]}}`),
-		{StatusCode: http.StatusOK, Header: make(http.Header), Body: io.NopCloser(firstModelBody)},
-		newJSONResponse(http.StatusOK, `{"jsonrpc":"2.0","result":{"content":[{"type":"text","text":"{\"results\":[]}"}]}}`),
-		newJSONResponse(http.StatusPaymentRequired, `{"message":"payment required"}`),
+		{StatusCode: http.StatusOK, Header: make(http.Header), Body: blockingBody},
 	}}
 	svc := &GatewayService{
 		httpUpstream:        upstream,
@@ -135,14 +142,32 @@ func TestOpenKiroAnthropicStreamResponsePropagatesLaterWebSearchFailoverBeforeSy
 		Credentials: map[string]any{"api_key": "ksk_test", "api_region": "us-east-1"},
 	}
 
-	resp, _, openErr := svc.openKiroAnthropicStreamResponse(context.Background(), account, nil, body, "claude-sonnet-4-6", "claude-sonnet-4-6", nil, kiroCacheGroup(1))
-	if resp != nil {
-		_, _ = io.ReadAll(resp.Body)
-		_ = resp.Body.Close()
+	type openResult struct {
+		resp *http.Response
+		err  error
 	}
-	var failoverErr *UpstreamFailoverError
-	require.ErrorAs(t, openErr, &failoverErr)
-	require.Equal(t, http.StatusPaymentRequired, failoverErr.StatusCode)
-	require.Nil(t, resp, "later-iteration failover must surface before a synthetic HTTP 200 is returned")
-	require.Len(t, upstream.requests, 4)
+	resultCh := make(chan openResult, 1)
+	go func() {
+		resp, _, openErr := svc.openKiroAnthropicStreamResponse(context.Background(), account, nil, body, "claude-sonnet-4-6", "claude-sonnet-4-6", nil, kiroCacheGroup(1))
+		resultCh <- openResult{resp: resp, err: openErr}
+	}()
+
+	select {
+	case result := <-resultCh:
+		require.NoError(t, result.err)
+		require.NotNil(t, result.resp)
+		require.Equal(t, http.StatusOK, result.resp.StatusCode)
+		require.NoError(t, result.resp.Body.Close())
+	case <-time.After(time.Second):
+		_ = blockingBody.Close()
+		t.Fatal("stream response waited for the upstream body instead of returning after the accepted response")
+	}
+	require.Eventually(t, func() bool {
+		select {
+		case <-blockingBody.release:
+			return true
+		default:
+			return false
+		}
+	}, time.Second, 10*time.Millisecond)
 }
