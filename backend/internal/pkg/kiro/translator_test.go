@@ -683,6 +683,85 @@ func TestKiroToolInputStringSnapshotAfterFragmentsRoundTrip(t *testing.T) {
 	})
 }
 
+func TestKiroTerminalToolInputSnapshotReplacesIncompleteFragment(t *testing.T) {
+	const (
+		toolUseID = "toolu_terminal_snapshot"
+		arguments = `{"location":"Taipei"}`
+	)
+	buildStream := func(t *testing.T) *bytes.Buffer {
+		t.Helper()
+		stream := bytes.NewBuffer(nil)
+		_, _ = stream.Write(buildEventStreamFrame(t, "toolUseEvent", map[string]any{
+			"toolUseEvent": map[string]any{
+				"toolUseId": toolUseID,
+				"name":      "get_weather",
+				"input":     `{"location":"Tai`,
+			},
+		}))
+		_, _ = stream.Write(buildEventStreamFrame(t, "toolUseEvent", map[string]any{
+			"toolUseEvent": map[string]any{
+				"toolUseId": toolUseID,
+				"input":     arguments,
+				"stop":      true,
+			},
+		}))
+		return stream
+	}
+
+	t.Run("non-streaming", func(t *testing.T) {
+		result, err := ParseNonStreamingEventStreamWithContext(buildStream(t), "claude-sonnet-4-5", KiroRequestContext{})
+		require.NoError(t, err)
+		require.Equal(t, "tool_use", result.StopReason)
+		require.JSONEq(t, arguments, gjson.GetBytes(result.ResponseBody, "content.0.input").Raw)
+	})
+
+	t.Run("streaming", func(t *testing.T) {
+		var out bytes.Buffer
+		result, err := StreamEventStreamAsAnthropicWithContext(context.Background(), buildStream(t), &out, "claude-sonnet-4-5", 9, KiroRequestContext{})
+		require.NoError(t, err)
+		require.Equal(t, "tool_use", result.StopReason)
+		require.JSONEq(t, arguments, extractStreamedToolInputJSON(t, out.String(), toolUseID))
+	})
+}
+
+func TestKiroTerminalCompleteDeltaDoesNotReplaceIncompleteOuterObject(t *testing.T) {
+	const toolUseID = "toolu_terminal_delta"
+	buildStream := func(t *testing.T) *bytes.Buffer {
+		t.Helper()
+		stream := bytes.NewBuffer(nil)
+		_, _ = stream.Write(buildEventStreamFrame(t, "toolUseEvent", map[string]any{
+			"toolUseEvent": map[string]any{
+				"toolUseId": toolUseID,
+				"name":      "custom_tool",
+				"input":     `{"wrapper":`,
+			},
+		}))
+		_, _ = stream.Write(buildEventStreamFrame(t, "toolUseEvent", map[string]any{
+			"toolUseEvent": map[string]any{
+				"toolUseId": toolUseID,
+				"input":     `{"value":1}`,
+				"stop":      true,
+			},
+		}))
+		return stream
+	}
+
+	t.Run("non-streaming", func(t *testing.T) {
+		result, err := ParseNonStreamingEventStreamWithContext(buildStream(t), "claude-sonnet-4-5", KiroRequestContext{})
+		require.NoError(t, err)
+		require.Equal(t, "end_turn", result.StopReason)
+		require.NotContains(t, string(result.ResponseBody), toolUseID)
+	})
+
+	t.Run("streaming", func(t *testing.T) {
+		var out bytes.Buffer
+		result, err := StreamEventStreamAsAnthropicWithContext(context.Background(), buildStream(t), &out, "claude-sonnet-4-5", 9, KiroRequestContext{})
+		require.NoError(t, err)
+		require.Equal(t, "end_turn", result.StopReason)
+		require.NotContains(t, out.String(), toolUseID)
+	})
+}
+
 func TestStreamEventStreamAsAnthropicPreservesCompleteNestedObjectFragment(t *testing.T) {
 	const toolUseID = "toolu_nested_object_fragment"
 	stream := bytes.NewBuffer(nil)

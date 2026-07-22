@@ -704,7 +704,7 @@ func StreamEventStreamAsAnthropicWithContext(ctx context.Context, body io.Reader
 	closeOpenStreamingTool := func() error {
 		return closeStreamingTool(currentStreamingToolID)
 	}
-	bufferStreamingToolInput := func(toolUseID, name, fragment string, snapshot bool) error {
+	bufferStreamingToolInput := func(toolUseID, name, fragment string, snapshot, terminal bool) error {
 		if toolUseID == "" || processedIDs[toolUseID] || streamingToolStopped[toolUseID] {
 			return nil
 		}
@@ -727,7 +727,8 @@ func StreamEventStreamAsAnthropicWithContext(ctx context.Context, body io.Reader
 			buf = &strings.Builder{}
 			streamingToolInputBuf[toolUseID] = buf
 		}
-		if snapshot || shouldReplaceCompleteToolInput(buf.String(), fragment) {
+		if snapshot || shouldReplaceCompleteToolInput(buf.String(), fragment) ||
+			(terminal && shouldReplaceTerminalToolInput(buf.String(), fragment)) {
 			buf.Reset()
 		}
 		if len(fragment) > maxEventMsgSize-buf.Len() {
@@ -738,7 +739,7 @@ func StreamEventStreamAsAnthropicWithContext(ctx context.Context, body io.Reader
 		_, _ = buf.WriteString(fragment)
 		return nil
 	}
-	processStreamingToolInput := func(toolUseID, name, fragment string, inputMap map[string]any) error {
+	processStreamingToolInput := func(toolUseID, name, fragment string, inputMap map[string]any, terminal bool) error {
 		if toolUseID == "" {
 			return nil
 		}
@@ -751,7 +752,7 @@ func StreamEventStreamAsAnthropicWithContext(ctx context.Context, body io.Reader
 			fragment = string(encoded)
 			snapshot = true
 		}
-		return bufferStreamingToolInput(toolUseID, name, fragment, snapshot)
+		return bufferStreamingToolInput(toolUseID, name, fragment, snapshot, terminal)
 	}
 	processStreamingToolStop := func(toolUseID string) error {
 		if toolUseID == "" {
@@ -1144,12 +1145,12 @@ func StreamEventStreamAsAnthropicWithContext(ctx context.Context, body io.Reader
 			if err := flushThinkingAtBoundary(); err != nil {
 				return err
 			}
-			return processStreamingToolInput(evt.ToolUseID, evt.ToolName, evt.ToolInput, evt.ToolInputMap)
+			return processStreamingToolInput(evt.ToolUseID, evt.ToolName, evt.ToolInput, evt.ToolInputMap, evt.ToolStop)
 		case kiroSemanticToolInput:
 			if err := flushThinkingAtBoundary(); err != nil {
 				return err
 			}
-			return processStreamingToolInput(evt.ToolUseID, evt.ToolName, evt.ToolInput, evt.ToolInputMap)
+			return processStreamingToolInput(evt.ToolUseID, evt.ToolName, evt.ToolInput, evt.ToolInputMap, evt.ToolStop)
 		case kiroSemanticToolStop:
 			if err := flushThinkingAtBoundary(); err != nil {
 				return err
@@ -3603,7 +3604,8 @@ func processToolUseEvent(event map[string]any, currentTool *toolUseState, proces
 		}
 	}
 	if currentTool != nil && inputFragment != "" {
-		if shouldReplaceCompleteToolInput(currentTool.InputBuffer.String(), inputFragment) {
+		if shouldReplaceCompleteToolInput(currentTool.InputBuffer.String(), inputFragment) ||
+			(isStop && shouldReplaceTerminalToolInput(currentTool.InputBuffer.String(), inputFragment)) {
 			currentTool.InputBuffer.Reset()
 		}
 		_, _ = currentTool.InputBuffer.WriteString(inputFragment)
@@ -3696,6 +3698,7 @@ func extractSemanticEvents(eventType string, event map[string]any, lastContentFr
 						ToolUseID:        toolUseID,
 						ToolName:         name,
 						ToolInput:        v,
+						ToolStop:         isStop,
 						SourceStopReason: sourceStopReason,
 					})
 				}
@@ -3716,6 +3719,7 @@ func extractSemanticEvents(eventType string, event map[string]any, lastContentFr
 						ToolUseID:        toolUseID,
 						ToolName:         name,
 						ToolInputMap:     v,
+						ToolStop:         isStop,
 						SourceStopReason: sourceStopReason,
 					})
 				}
@@ -3788,12 +3792,21 @@ func shouldReplaceCompleteToolInput(existing, fragment string) bool {
 	if strings.TrimSpace(existing) == "" || strings.TrimSpace(fragment) == "" {
 		return false
 	}
-	_, _, fragmentComplete := normalizeStreamingToolInput("", fragment)
-	if !fragmentComplete {
+	if !isCompleteToolInput(fragment) {
 		return false
 	}
-	_, _, existingComplete := normalizeStreamingToolInput("", existing)
-	return existingComplete
+	return isCompleteToolInput(existing)
+}
+
+func isCompleteToolInput(input string) bool {
+	_, _, complete := normalizeStreamingToolInput("", input)
+	return complete
+}
+
+func shouldReplaceTerminalToolInput(existing, fragment string) bool {
+	existing = strings.TrimSpace(existing)
+	fragment = strings.TrimSpace(fragment)
+	return existing != "" && isCompleteToolInput(fragment) && strings.HasPrefix(fragment, existing)
 }
 
 func repairJSON(input string) string {
