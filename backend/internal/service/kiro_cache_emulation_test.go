@@ -163,6 +163,106 @@ func TestKiroCacheEmulationTTLExpiry(t *testing.T) {
 	}
 }
 
+func TestKiroCacheEmulationPlanKeepsRequestTimeClassification(t *testing.T) {
+	resetKiroCacheTracker()
+	svc := &GatewayService{}
+	account := kiroCacheAccount(41, "refresh-request-time", "access-request-time")
+	group := kiroCacheGroup(1)
+	body := kiroCacheRequestBody("request time", false)
+	_ = svc.buildKiroCacheEmulationUsage(context.Background(), account, group, body, "claude-sonnet-4-6", 2000)
+
+	plan := svc.prepareKiroCacheEmulationUsage(context.Background(), account, group, body, "claude-sonnet-4-6", 2000)
+	if plan == nil || plan.result() == nil || plan.result().CacheReadInputTokens != 2000 {
+		t.Fatalf("request-time classification should be a cache read: %+v", plan)
+	}
+
+	globalKiroCacheTracker.mu.Lock()
+	for cacheKey, entries := range globalKiroCacheTracker.entries {
+		for fingerprint, entry := range entries {
+			entry.expiresAt = time.Now().Add(-time.Second)
+			globalKiroCacheTracker.entries[cacheKey][fingerprint] = entry
+		}
+	}
+	globalKiroCacheTracker.mu.Unlock()
+
+	plan.commit()
+	if plan.result().CacheReadInputTokens != 2000 || plan.result().CacheCreationInputTokens != 0 {
+		t.Fatalf("response-time expiry must not change request-time classification: %+v", plan.result())
+	}
+}
+
+func TestKiroCacheEmulationConcurrentPlansUseRequestOrder(t *testing.T) {
+	resetKiroCacheTracker()
+	svc := &GatewayService{}
+	account := kiroCacheAccount(42, "refresh-concurrent", "access-concurrent")
+	group := kiroCacheGroup(1)
+	body := kiroCacheRequestBody("concurrent", false)
+
+	first := svc.prepareKiroCacheEmulationUsage(context.Background(), account, group, body, "claude-sonnet-4-6", 2000)
+	second := svc.prepareKiroCacheEmulationUsage(context.Background(), account, group, body, "claude-sonnet-4-6", 2000)
+	for name, plan := range map[string]*kiroCacheEmulationPlan{"first": first, "second": second} {
+		if plan == nil || plan.result() == nil || plan.result().CacheCreationInputTokens != 2000 || plan.result().CacheReadInputTokens != 0 {
+			t.Fatalf("%s request should classify before either response commits: %+v", name, plan)
+		}
+	}
+
+	second.commit()
+	first.commit()
+	if first.result().CacheCreationInputTokens != 2000 || second.result().CacheCreationInputTokens != 2000 {
+		t.Fatalf("response order must not rewrite request-time classifications: first=%+v second=%+v", first.result(), second.result())
+	}
+}
+
+func TestKiroCacheEmulationPlanDefersHitRefreshUntilCommit(t *testing.T) {
+	resetKiroCacheTracker()
+	svc := &GatewayService{}
+	account := kiroCacheAccount(43, "refresh-deferred", "access-deferred")
+	group := kiroCacheGroup(1)
+	body := kiroCacheRequestBody("deferred refresh", false)
+	_ = svc.buildKiroCacheEmulationUsage(context.Background(), account, group, body, "claude-sonnet-4-6", 2000)
+
+	var originalExpiry time.Time
+	globalKiroCacheTracker.mu.Lock()
+	for cacheKey, entries := range globalKiroCacheTracker.entries {
+		for fingerprint, entry := range entries {
+			entry.expiresAt = time.Now().Add(time.Minute)
+			originalExpiry = entry.expiresAt
+			globalKiroCacheTracker.entries[cacheKey][fingerprint] = entry
+		}
+	}
+	globalKiroCacheTracker.mu.Unlock()
+	if originalExpiry.IsZero() {
+		t.Fatal("expected a cache entry")
+	}
+
+	plan := svc.prepareKiroCacheEmulationUsage(context.Background(), account, group, body, "claude-sonnet-4-6", 2000)
+	if plan == nil || plan.result() == nil || plan.result().CacheReadInputTokens != 2000 {
+		t.Fatalf("expected a prepared cache hit: %+v", plan)
+	}
+
+	globalKiroCacheTracker.mu.Lock()
+	for _, entries := range globalKiroCacheTracker.entries {
+		for _, entry := range entries {
+			if !entry.expiresAt.Equal(originalExpiry) {
+				globalKiroCacheTracker.mu.Unlock()
+				t.Fatalf("prepare refreshed cache entry before success: got %v want %v", entry.expiresAt, originalExpiry)
+			}
+		}
+	}
+	globalKiroCacheTracker.mu.Unlock()
+
+	plan.commit()
+	globalKiroCacheTracker.mu.Lock()
+	defer globalKiroCacheTracker.mu.Unlock()
+	for _, entries := range globalKiroCacheTracker.entries {
+		for _, entry := range entries {
+			if !entry.expiresAt.After(originalExpiry) {
+				t.Fatalf("commit did not refresh cache entry: got %v original %v", entry.expiresAt, originalExpiry)
+			}
+		}
+	}
+}
+
 func TestKiroCacheEmulationOneHourBucket(t *testing.T) {
 	resetKiroCacheTracker()
 	svc := &GatewayService{}

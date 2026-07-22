@@ -215,7 +215,7 @@ func (s *GatewayService) streamKiroWebSearchAsAnthropic(
 		}
 
 		iterationInputTokens := estimateKiroInputTokens(ctx, currentBody)
-		iterationCacheUsage := s.buildKiroCacheEmulationUsage(ctx, account, group, currentBody, mappedModel, iterationInputTokens)
+		iterationCachePlan := s.prepareKiroCacheEmulationUsage(ctx, account, group, currentBody, mappedModel, iterationInputTokens)
 		resp, requestCtx, err := s.executeKiroUpstream(ctx, account, currentBody, mappedModel, requestModel, token, headers)
 		if err != nil {
 			return err
@@ -223,6 +223,8 @@ func (s *GatewayService) streamKiroWebSearchAsAnthropic(
 		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 			return &kiroWebSearchHTTPError{Response: resp}
 		}
+		iterationCachePlan.commit()
+		iterationCacheUsage := iterationCachePlan.result()
 
 		chunks, streamResult, streamErr := func() ([][]byte, *kiropkg.StreamResult, error) {
 			defer func() { _ = resp.Body.Close() }()
@@ -309,7 +311,7 @@ func (s *GatewayService) executeKiroWebSearch(ctx context.Context, account *Acco
 
 		iterationInputTokens := estimateKiroInputTokens(ctx, currentBody)
 		aggregateFallbackInputTokens += iterationInputTokens
-		iterationCacheUsage := s.buildKiroCacheEmulationUsage(ctx, account, group, currentBody, mappedModel, iterationInputTokens)
+		iterationCachePlan := s.prepareKiroCacheEmulationUsage(ctx, account, group, currentBody, mappedModel, iterationInputTokens)
 		resp, requestCtx, err := s.executeKiroUpstream(ctx, account, currentBody, mappedModel, requestModel, token, headers)
 		if err != nil {
 			return nil, err
@@ -317,6 +319,8 @@ func (s *GatewayService) executeKiroWebSearch(ctx context.Context, account *Acco
 		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 			return nil, &kiroWebSearchHTTPError{Response: resp}
 		}
+		iterationCachePlan.commit()
+		iterationCacheUsage := iterationCachePlan.result()
 
 		parseResult, parseErr := func() (*kiropkg.ParseResult, error) {
 			defer func() { _ = resp.Body.Close() }()

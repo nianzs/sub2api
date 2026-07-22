@@ -4,7 +4,9 @@ package service
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"net/http"
 	"testing"
 
 	kiropkg "github.com/Wei-Shaw/sub2api/internal/pkg/kiro"
@@ -111,4 +113,73 @@ func TestAddKiroStreamUsageResolvesFallbackPerIteration(t *testing.T) {
 
 	require.Equal(t, 250, total.InputTokens)
 	require.True(t, total.InputTokensReported)
+}
+
+func TestKiroWebSearchFailedUpstreamDoesNotPopulateCacheTracker(t *testing.T) {
+	body := kiroCacheRequestBody("failed web search", false)
+	var payload map[string]any
+	require.NoError(t, json.Unmarshal(body, &payload))
+	payload["tools"] = []any{map[string]any{
+		"name":         "web_search",
+		"description":  "Search the web",
+		"input_schema": map[string]any{"type": "object"},
+	}}
+	body, err := json.Marshal(payload)
+	require.NoError(t, err)
+
+	for _, tc := range []struct {
+		name string
+		run  func(*GatewayService, *Account, *Group) error
+	}{
+		{
+			name: "streaming",
+			run: func(svc *GatewayService, account *Account, group *Group) error {
+				var out bytes.Buffer
+				return svc.streamKiroWebSearchAsAnthropic(context.Background(), account, group, body, "claude-sonnet-4-6", "claude-sonnet-4-6", "ksk_test", nil, &out)
+			},
+		},
+		{
+			name: "non-streaming",
+			run: func(svc *GatewayService, account *Account, group *Group) error {
+				_, err := svc.executeKiroWebSearch(context.Background(), account, group, body, "claude-sonnet-4-6", "claude-sonnet-4-6", "ksk_test", nil)
+				return err
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			resetKiroCacheTracker()
+			t.Cleanup(resetKiroCacheTracker)
+			endpoint := kiropkg.BuildMcpEndpoint("us-east-1")
+			kiroWebSearchDescCache.Store(endpoint, "Search the web")
+			t.Cleanup(func() { kiroWebSearchDescCache.Delete(endpoint) })
+
+			upstream := &queuedHTTPUpstream{responses: []*http.Response{
+				newJSONResponse(http.StatusOK, `{"jsonrpc":"2.0","result":{"content":[{"type":"text","text":"{\"results\":[]}"}]}}`),
+				newJSONResponse(http.StatusPaymentRequired, `{"message":"payment required"}`),
+			}}
+			svc := &GatewayService{
+				httpUpstream:        upstream,
+				kiroCooldownStore:   &stubKiroCooldownStore{},
+				tlsFPProfileService: &TLSFingerprintProfileService{},
+			}
+			account := &Account{
+				ID:          991,
+				Platform:    PlatformKiro,
+				Type:        AccountTypeAPIKey,
+				Concurrency: 1,
+				Credentials: map[string]any{"api_key": "ksk_test", "api_region": "us-east-1"},
+			}
+
+			err := tc.run(svc, account, kiroCacheGroup(1))
+			require.Error(t, err)
+			var failoverErr *UpstreamFailoverError
+			require.ErrorAs(t, err, &failoverErr)
+			require.Equal(t, http.StatusPaymentRequired, failoverErr.StatusCode)
+			require.Len(t, upstream.requests, 2)
+
+			globalKiroCacheTracker.mu.Lock()
+			defer globalKiroCacheTracker.mu.Unlock()
+			require.Empty(t, globalKiroCacheTracker.entries)
+		})
+	}
 }
