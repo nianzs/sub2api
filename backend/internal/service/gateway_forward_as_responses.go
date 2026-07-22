@@ -566,8 +566,11 @@ func (s *GatewayService) handleResponsesStreamingResponse(
 }
 
 // appendRawJSON appends a JSON fragment string to existing raw JSON.
+// Anthropic announces tool_use blocks with input={} before streaming the real
+// input_json_delta payload. Treat that empty object as a placeholder rather
+// than a fragment, otherwise buffered Responses requests produce {}{"key":...}.
 func appendRawJSON(existing json.RawMessage, fragment string) json.RawMessage {
-	if len(existing) == 0 {
+	if len(existing) == 0 || strings.TrimSpace(string(existing)) == "{}" {
 		return json.RawMessage(fragment)
 	}
 	return json.RawMessage(string(existing) + fragment)
