@@ -148,6 +148,49 @@ func TestGatewayServiceRecordUsage_NormalizesKiroBillingModel(t *testing.T) {
 	require.InDelta(t, expectedCost.TotalCost, usageRepo.lastLog.TotalCost, 1e-12)
 }
 
+func TestGatewayServiceRecordUsage_KiroAliasUsesUpstreamBillingModel(t *testing.T) {
+	usageRepo := &openAIRecordUsageLogRepoStub{inserted: true}
+	userRepo := &openAIRecordUsageUserRepoStub{}
+	subRepo := &openAIRecordUsageSubRepoStub{}
+	svc := newGatewayRecordUsageServiceForTest(usageRepo, userRepo, subRepo)
+	svc.billingService = NewBillingService(svc.cfg, &PricingService{
+		pricingData: map[string]*LiteLLMModelPricing{
+			"gpt-5.6-sol": {
+				InputCostPerToken:  9e-6,
+				OutputCostPerToken: 36e-6,
+			},
+		},
+	})
+
+	expectedCost, err := svc.billingService.CalculateCost("gpt-5.6-sol", UsageTokens{
+		InputTokens:  20,
+		OutputTokens: 10,
+	}, 1.1)
+	require.NoError(t, err)
+
+	err = svc.RecordUsage(context.Background(), &RecordUsageInput{
+		Result: &ForwardResult{
+			RequestID: "gateway_kiro_alias_upstream_billing",
+			Usage: ClaudeUsage{
+				InputTokens:  20,
+				OutputTokens: 10,
+			},
+			Model:         "customer-sol",
+			UpstreamModel: "gpt-5.6-sol",
+			Duration:      time.Second,
+		},
+		APIKey:  &APIKey{ID: 502, Quota: 100},
+		User:    &User{ID: 602},
+		Account: &Account{ID: 702, Platform: PlatformKiro},
+	})
+
+	require.NoError(t, err)
+	require.NotNil(t, usageRepo.lastLog)
+	require.Equal(t, "customer-sol", usageRepo.lastLog.Model)
+	require.InDelta(t, expectedCost.ActualCost, usageRepo.lastLog.ActualCost, 1e-12)
+	require.InDelta(t, expectedCost.TotalCost, usageRepo.lastLog.TotalCost, 1e-12)
+}
+
 func TestGatewayServiceRecordUsage_KiroUnknownPricingFallsBackToConservativeCost(t *testing.T) {
 	usageRepo := &openAIRecordUsageLogRepoStub{}
 	userRepo := &openAIRecordUsageUserRepoStub{}
