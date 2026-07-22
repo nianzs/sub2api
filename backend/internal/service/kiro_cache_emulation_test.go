@@ -107,6 +107,41 @@ func TestKiroCacheEmulationContentChangeMisses(t *testing.T) {
 	}
 }
 
+func TestKiroCacheEmulationNormalizesMappedGPT56ModelAliases(t *testing.T) {
+	resetKiroCacheTracker()
+	svc := &GatewayService{}
+	account := kiroCacheAccount(8, "refresh-gpt-alias", "access-gpt-alias")
+	group := kiroCacheGroup(1)
+	aliasBody := bytes.Replace(kiroCacheRequestBody("gpt alias", false), []byte(`"claude-sonnet-4-6"`), []byte(`"customer-sol"`), 1)
+	officialBody := bytes.Replace(kiroCacheRequestBody("gpt alias", false), []byte(`"claude-sonnet-4-6"`), []byte(`"gpt-5.6-sol"`), 1)
+
+	first := svc.buildKiroCacheEmulationUsage(context.Background(), account, group, aliasBody, "gpt-5.6-sol", 2000)
+	if first == nil || first.CacheCreationInputTokens != 2000 || first.CacheReadInputTokens != 0 {
+		t.Fatalf("unexpected first usage: %+v", first)
+	}
+	second := svc.buildKiroCacheEmulationUsage(context.Background(), account, group, officialBody, "gpt-5.6-sol", 2000)
+	if second == nil || second.CacheReadInputTokens != 2000 || second.CacheCreationInputTokens != 0 {
+		t.Fatalf("aliases routed to the same Kiro model should share cache identity: %+v", second)
+	}
+}
+
+func TestKiroCacheEmulationIsolatesGPT56Tiers(t *testing.T) {
+	resetKiroCacheTracker()
+	svc := &GatewayService{}
+	account := kiroCacheAccount(9, "refresh-gpt-tiers", "access-gpt-tiers")
+	group := kiroCacheGroup(1)
+	body := kiroCacheRequestBody("gpt tiers", false)
+
+	first := svc.buildKiroCacheEmulationUsage(context.Background(), account, group, body, "gpt-5.6-sol", 2000)
+	if first == nil || first.CacheCreationInputTokens != 2000 {
+		t.Fatalf("unexpected Sol usage: %+v", first)
+	}
+	second := svc.buildKiroCacheEmulationUsage(context.Background(), account, group, body, "gpt-5.6-terra", 2000)
+	if second == nil || second.CacheReadInputTokens != 0 || second.CacheCreationInputTokens != 2000 {
+		t.Fatalf("different GPT-5.6 tiers must not share cache entries: %+v", second)
+	}
+}
+
 func TestKiroCacheEmulationTTLExpiry(t *testing.T) {
 	resetKiroCacheTracker()
 	svc := &GatewayService{}
@@ -264,7 +299,7 @@ func TestKiroCacheEmulationIncludesImageTokensAndKeepsImageFingerprint(t *testin
 }
 
 func resetKiroCacheTracker() {
-	globalKiroCacheTracker = &kiroCacheTracker{entries: make(map[uint64]map[[32]byte]kiroCacheEntry)}
+	globalKiroCacheTracker = &kiroCacheTracker{entries: make(map[[32]byte]map[[32]byte]kiroCacheEntry)}
 }
 
 func kiroPNGDataURL(t *testing.T, width, height int, fill color.RGBA) string {

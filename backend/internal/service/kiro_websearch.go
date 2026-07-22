@@ -48,9 +48,9 @@ func (w *kiroStreamChunkCollector) Write(p []byte) (int, error) {
 	return len(p), nil
 }
 
-func bufferKiroAnthropicStream(ctx context.Context, body io.Reader, responseModel string, inputTokens int) ([][]byte, *kiropkg.StreamResult, error) {
+func bufferKiroAnthropicStream(ctx context.Context, body io.Reader, responseModel string, inputTokens int, requestCtx kiropkg.KiroRequestContext) ([][]byte, *kiropkg.StreamResult, error) {
 	collector := &kiroStreamChunkCollector{}
-	result, err := kiropkg.StreamEventStreamAsAnthropicWithContext(ctx, body, collector, responseModel, inputTokens, kiropkg.KiroRequestContext{})
+	result, err := kiropkg.StreamEventStreamAsAnthropicWithContext(ctx, body, collector, responseModel, inputTokens, requestCtx)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -105,8 +105,72 @@ func writeAnthropicMessageStart(w io.Writer, msgID, model string, inputTokens in
 	return err
 }
 
+func writeAnthropicMessageCompletion(w io.Writer, result *kiropkg.StreamResult) error {
+	if result == nil {
+		return errors.New("kiro web search missing stream result")
+	}
+	usage := result.Usage
+	usagePayload := map[string]any{
+		"input_tokens":                usage.InputTokens,
+		"output_tokens":               usage.OutputTokens,
+		"cache_read_input_tokens":     usage.CacheReadInputTokens,
+		"cache_creation_input_tokens": usage.CacheCreationInputTokens,
+	}
+	if usage.CacheCreation5mInputTokens > 0 || usage.CacheCreation1hInputTokens > 0 {
+		usagePayload["cache_creation"] = map[string]any{
+			"ephemeral_5m_input_tokens": usage.CacheCreation5mInputTokens,
+			"ephemeral_1h_input_tokens": usage.CacheCreation1hInputTokens,
+		}
+	}
+	if usage.KiroCredits > 0 {
+		usagePayload["_sub2api_kiro_credits"] = usage.KiroCredits
+	}
+	stopReason := strings.TrimSpace(result.StopReason)
+	if stopReason == "" {
+		stopReason = "end_turn"
+	}
+	payload, err := json.Marshal(map[string]any{
+		"type": "message_delta",
+		"delta": map[string]any{
+			"stop_reason":   stopReason,
+			"stop_sequence": nullableKiroStopSequence(result.StopSequence),
+		},
+		"usage": usagePayload,
+	})
+	if err != nil {
+		return err
+	}
+	if _, err := io.WriteString(w, "event: message_delta\ndata: "+string(payload)+"\n\n"); err != nil {
+		return err
+	}
+	_, err = io.WriteString(w, "event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n")
+	return err
+}
+
+func nullableKiroStopSequence(stopSequence string) any {
+	if strings.TrimSpace(stopSequence) == "" {
+		return nil
+	}
+	return stopSequence
+}
+
+func addKiroStreamUsage(total *kiropkg.Usage, usage kiropkg.Usage) {
+	if total == nil {
+		return
+	}
+	total.InputTokens += usage.InputTokens
+	total.InputTokensReported = total.InputTokensReported || usage.InputTokensReported
+	total.OutputTokens += usage.OutputTokens
+	total.TotalTokens += usage.TotalTokens
+	total.CacheReadInputTokens += usage.CacheReadInputTokens
+	total.CacheCreationInputTokens += usage.CacheCreationInputTokens
+	total.CacheCreation5mInputTokens += usage.CacheCreation5mInputTokens
+	total.CacheCreation1hInputTokens += usage.CacheCreation1hInputTokens
+	total.KiroCredits += usage.KiroCredits
+}
+
 func (s *GatewayService) streamKiroWebSearchAsAnthropic(
-	ctx context.Context, account *Account, anthropicBody []byte, mappedModel, requestModel, token string, inputTokens int, headers http.Header, w io.Writer, cacheUsage *kiroCacheEmulationUsage,
+	ctx context.Context, account *Account, group *Group, anthropicBody []byte, mappedModel, requestModel, token string, headers http.Header, w io.Writer,
 ) error {
 	query := kiropkg.ExtractSearchQuery(anthropicBody)
 	if strings.TrimSpace(query) == "" {
@@ -119,8 +183,13 @@ func (s *GatewayService) streamKiroWebSearchAsAnthropic(
 	}
 	currentToolUseID := "srvtoolu_" + kiropkg.GenerateToolUseID()
 	nextContentBlockIndex := 0
+	var aggregateUsage kiropkg.Usage
+	upstreamModel := resolveKiroUpstreamModel(mappedModel)
 
-	if err := writeAnthropicMessageStart(w, "", requestModel, inputTokens, cacheUsage); err != nil {
+	// The actual first model request is built only after MCP results are injected.
+	// Defer all usage to the terminal delta so a speculative estimate cannot win
+	// over an authoritative zero-token cache hit in downstream SSE accounting.
+	if err := writeAnthropicMessageStart(w, "", requestModel, 0, nil); err != nil {
 		return err
 	}
 
@@ -145,7 +214,9 @@ func (s *GatewayService) streamKiroWebSearchAsAnthropic(
 			return errKiroWebSearchFallback
 		}
 
-		resp, _, err := s.executeKiroUpstream(ctx, account, currentBody, mappedModel, requestModel, token, headers)
+		iterationInputTokens := estimateKiroInputTokens(ctx, currentBody)
+		iterationCacheUsage := s.buildKiroCacheEmulationUsage(ctx, account, group, currentBody, mappedModel, iterationInputTokens)
+		resp, requestCtx, err := s.executeKiroUpstream(ctx, account, currentBody, mappedModel, requestModel, token, headers)
 		if err != nil {
 			return err
 		}
@@ -153,13 +224,16 @@ func (s *GatewayService) streamKiroWebSearchAsAnthropic(
 			return &kiroWebSearchHTTPError{Response: resp}
 		}
 
-		chunks, _, streamErr := func() ([][]byte, *kiropkg.StreamResult, error) {
+		chunks, streamResult, streamErr := func() ([][]byte, *kiropkg.StreamResult, error) {
 			defer func() { _ = resp.Body.Close() }()
-			return bufferKiroAnthropicStream(ctx, resp.Body, requestModel, inputTokens)
+			requestCtx.UpstreamModel = upstreamModel
+			requestCtx.CacheEmulationUsage = iterationCacheUsage.toKiroUsage()
+			return bufferKiroAnthropicStream(ctx, resp.Body, requestModel, iterationInputTokens, requestCtx)
 		}()
 		if streamErr != nil {
 			return streamErr
 		}
+		addKiroStreamUsage(&aggregateUsage, streamResult.Usage)
 
 		analysis := kiropkg.AnalyzeBufferedStream(chunks)
 		if analysis.HasWebSearchToolUse && strings.TrimSpace(analysis.WebSearchQuery) != "" && iteration+1 < kiroMaxWebSearchIterations {
@@ -188,7 +262,8 @@ func (s *GatewayService) streamKiroWebSearchAsAnthropic(
 				return err
 			}
 		}
-		return nil
+		streamResult.Usage = aggregateUsage
+		return writeAnthropicMessageCompletion(w, streamResult)
 	}
 
 	return fmt.Errorf("kiro web search exceeded max iterations")
@@ -205,12 +280,11 @@ func (s *GatewayService) executeKiroWebSearch(ctx context.Context, account *Acco
 		currentBody = anthropicBody
 	}
 
-	inputTokens := estimateKiroInputTokens(ctx, anthropicBody)
 	currentToolUseID := "srvtoolu_" + kiropkg.GenerateToolUseID()
 	searches := make([]kiropkg.SearchIndicator, 0, 2)
 	requestID := ""
-	var cacheUsage *kiroCacheEmulationUsage
-	cacheUsageResolved := false
+	var aggregateUsage kiropkg.Usage
+	aggregateFallbackInputTokens := 0
 
 	for iteration := 0; iteration < kiroMaxWebSearchIterations; iteration++ {
 		s.prefetchKiroWebSearchDescription(ctx, account, token)
@@ -233,7 +307,10 @@ func (s *GatewayService) executeKiroWebSearch(ctx context.Context, account *Acco
 			return nil, errKiroWebSearchFallback
 		}
 
-		resp, _, err := s.executeKiroUpstream(ctx, account, currentBody, mappedModel, requestModel, token, headers)
+		iterationInputTokens := estimateKiroInputTokens(ctx, currentBody)
+		aggregateFallbackInputTokens += iterationInputTokens
+		iterationCacheUsage := s.buildKiroCacheEmulationUsage(ctx, account, group, currentBody, mappedModel, iterationInputTokens)
+		resp, requestCtx, err := s.executeKiroUpstream(ctx, account, currentBody, mappedModel, requestModel, token, headers)
 		if err != nil {
 			return nil, err
 		}
@@ -243,11 +320,9 @@ func (s *GatewayService) executeKiroWebSearch(ctx context.Context, account *Acco
 
 		parseResult, parseErr := func() (*kiropkg.ParseResult, error) {
 			defer func() { _ = resp.Body.Close() }()
-			if !cacheUsageResolved {
-				cacheUsage = s.buildKiroCacheEmulationUsage(ctx, account, group, anthropicBody, mappedModel, inputTokens)
-				cacheUsageResolved = true
-			}
-			return kiropkg.ParseNonStreamingEventStreamWithContext(resp.Body, requestModel, kiropkg.KiroRequestContext{CacheEmulationUsage: cacheUsage.toKiroUsage()})
+			requestCtx.UpstreamModel = resolveKiroUpstreamModel(mappedModel)
+			requestCtx.CacheEmulationUsage = iterationCacheUsage.toKiroUsage()
+			return kiropkg.ParseNonStreamingEventStreamWithContext(resp.Body, requestModel, requestCtx)
 		}()
 		if parseErr != nil {
 			return nil, parseErr
@@ -255,16 +330,23 @@ func (s *GatewayService) executeKiroWebSearch(ctx context.Context, account *Acco
 		if requestID == "" {
 			requestID = buildKiroRequestID(resp)
 		}
+		parseResult.Usage = resolveKiroInputUsage(parseResult.Usage, iterationInputTokens)
+		addKiroStreamUsage(&aggregateUsage, parseResult.Usage)
 
 		nextToolUseID, nextQuery, hasNext := kiropkg.ExtractWebSearchToolUseFromResponse(parseResult.ResponseBody)
 		if !hasNext || strings.TrimSpace(nextQuery) == "" || iteration+1 >= kiroMaxWebSearchIterations {
+			parseResult.Usage = aggregateUsage
+			parseResult.ResponseBody, err = kiropkg.RewriteClaudeResponseUsage(parseResult.ResponseBody, aggregateUsage)
+			if err != nil {
+				return nil, err
+			}
 			finalBody, injectErr := kiropkg.InjectSearchIndicatorsInResponse(parseResult.ResponseBody, searches)
 			if injectErr == nil {
 				parseResult.ResponseBody = finalBody
 			}
 			return &kiroWebSearchExecution{
 				ResponseBody: parseResult.ResponseBody,
-				Usage:        kiroUsageToClaude(parseResult.Usage, inputTokens),
+				Usage:        kiroUsageToClaude(parseResult.Usage, aggregateFallbackInputTokens),
 				RequestID:    requestID,
 			}, nil
 		}

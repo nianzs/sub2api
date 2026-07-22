@@ -667,6 +667,41 @@ func TestGatewayModels_KiroCustomModelsListRespectsAccountMappingWhitelist(t *te
 	require.NotContains(t, modelIDsForTest(got.Data), "claude-haiku-4-5-20251001")
 }
 
+func TestGatewayModels_KiroDefaultFallbackUsesKiroRegistry(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	groupID := int64(30)
+	h := newGatewayModelsHandlerForTest(&gatewayModelsAccountRepoStub{})
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodGet, "/v1/models", nil)
+	c.Set(string(middleware2.ContextKeyAPIKey), &service.APIKey{Group: &service.Group{
+		ID:       groupID,
+		Platform: service.PlatformKiro,
+	}})
+
+	h.Models(c)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	var got gatewayModelsResponseForTest
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &got))
+	ids := modelIDsForTest(got.Data)
+	require.Contains(t, ids, "gpt-5.6-sol")
+	require.Contains(t, ids, "gpt-5.6-terra")
+	require.Contains(t, ids, "gpt-5.6-luna")
+	require.NotContains(t, ids, "claude-3-5-sonnet-20241022")
+	require.NotEmpty(t, got.Data[0].CreatedAt)
+}
+
+func TestDefaultModelIDsForPlatformKiroUsesKiroRegistry(t *testing.T) {
+	ids := defaultModelIDsForPlatform(service.PlatformKiro)
+
+	require.Contains(t, ids, "gpt-5.6-sol")
+	require.Contains(t, ids, "gpt-5.6-terra")
+	require.Contains(t, ids, "gpt-5.6-luna")
+	require.NotContains(t, ids, "claude-3-5-sonnet-20241022")
+}
+
 func modelIDsForTest(models []gatewayModelItemForTest) []string {
 	ids := make([]string, 0, len(models))
 	for _, model := range models {

@@ -45,6 +45,7 @@ The official upstream project currently has limited maintenance focus on the Kir
 Additional Kiro-focused features in this fork:
 
 - Kiro channel support, including OAuth / AWS Builder ID / token import and API-key-compatible upstream access.
+- Kiro GPT-5.6 Sol, Terra, and Luna model routing and billing support.
 - Anthropic Prompt Cache usage emulation for Kiro traffic.
 - Per-group Kiro cache emulation controls, including an adjustable emulation ratio.
 

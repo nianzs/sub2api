@@ -286,12 +286,11 @@ func (s *GatewayService) openKiroAnthropicStreamResponse(ctx context.Context, ac
 
 	inputTokens := estimateKiroInputTokens(ctx, anthropicBody)
 	if isOnlyWebSearchToolInBody(anthropicBody) {
-		cacheUsage := s.buildKiroCacheEmulationUsage(ctx, account, group, anthropicBody, mappedModel, inputTokens)
 		pr, pw := io.Pipe()
 		headers := make(http.Header)
 		headers.Set("Content-Type", "text/event-stream")
 		go func() {
-			streamErr := s.streamKiroWebSearchAsAnthropic(ctx, account, anthropicBody, mappedModel, requestModel, token, inputTokens, headers, pw, cacheUsage)
+			streamErr := s.streamKiroWebSearchAsAnthropic(ctx, account, group, anthropicBody, mappedModel, requestModel, token, headers, pw)
 			if streamErr != nil {
 				_ = pw.CloseWithError(streamErr)
 				return
@@ -366,7 +365,7 @@ func (s *GatewayService) executeKiroUpstreamWithParsed(ctx context.Context, acco
 	modelID := kiropkg.MapModel(mappedModel)
 	currentToken := token
 
-	endpoints := buildKiroEndpoints(account, mode)
+	endpoints := buildKiroEndpointsForModel(account, mode, modelID)
 	proxyURL := kiroProxyURL(account)
 	tlsProfile := s.tlsFPProfileService.ResolveTLSProfile(account)
 	maxRetries := 2
@@ -537,6 +536,10 @@ func (s *GatewayService) executeKiroUpstreamWithParsed(ctx context.Context, acco
 const kiroKRSEndpointURL = "https://runtime.us-east-1.kiro.dev/generateAssistantResponse"
 
 func buildKiroEndpoints(account *Account, mode string) []kiroEndpointConfig {
+	return buildKiroEndpointsForModel(account, mode, "")
+}
+
+func buildKiroEndpointsForModel(account *Account, mode, model string) []kiroEndpointConfig {
 	if mode == KiroEndpointModeKRS {
 		return []kiroEndpointConfig{
 			{
@@ -545,7 +548,7 @@ func buildKiroEndpoints(account *Account, mode string) []kiroEndpointConfig {
 			},
 		}
 	}
-	region := kiroAPIRegion(account)
+	region := kiroInferenceRegion(account, model)
 	qEndpoint := kiroEndpointConfig{
 		URL:  fmt.Sprintf("https://q.%s.amazonaws.com/generateAssistantResponse", region),
 		Name: "AmazonQ",
@@ -561,6 +564,15 @@ func buildKiroEndpoints(account *Account, mode string) []kiroEndpointConfig {
 		}
 	}
 	return []kiroEndpointConfig{qEndpoint}
+}
+
+func kiroInferenceRegion(account *Account, model string) string {
+	switch kiropkg.MapModel(model) {
+	case "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna":
+		return kiroDefaultRegion
+	default:
+		return kiroAPIRegion(account)
+	}
 }
 
 // kiroEndpointModeForRequest 从 ParsedRequest 取 group 配置的 Kiro endpoint 模式；
@@ -784,12 +796,9 @@ func estimateKiroInputTokens(ctx context.Context, body []byte) int {
 }
 
 func kiroUsageToClaude(usage kiropkg.Usage, fallbackInput int) ClaudeUsage {
-	inputTokens := usage.InputTokens
-	if inputTokens == 0 {
-		inputTokens = fallbackInput
-	}
+	usage = resolveKiroInputUsage(usage, fallbackInput)
 	return ClaudeUsage{
-		InputTokens:              inputTokens,
+		InputTokens:              usage.InputTokens,
 		OutputTokens:             usage.OutputTokens,
 		CacheReadInputTokens:     usage.CacheReadInputTokens,
 		CacheCreationInputTokens: usage.CacheCreationInputTokens,
@@ -797,6 +806,18 @@ func kiroUsageToClaude(usage kiropkg.Usage, fallbackInput int) ClaudeUsage {
 		CacheCreation1hTokens:    usage.CacheCreation1hInputTokens,
 		KiroCredits:              usage.KiroCredits,
 	}
+}
+
+func resolveKiroInputUsage(usage kiropkg.Usage, fallbackInput int) kiropkg.Usage {
+	if usage.InputTokens != 0 || usage.InputTokensReported {
+		return usage
+	}
+	usage.InputTokens = fallbackInput
+	usage.InputTokensReported = true
+	if usage.TotalTokens == 0 {
+		usage.TotalTokens = usage.InputTokens + usage.OutputTokens + usage.CacheReadInputTokens + usage.CacheCreationInputTokens
+	}
+	return usage
 }
 
 func (s *GatewayService) markKiroInvalidModelRateLimited(ctx context.Context, account *Account, mappedModel string) {

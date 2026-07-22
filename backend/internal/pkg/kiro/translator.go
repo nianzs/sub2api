@@ -76,6 +76,7 @@ var (
 
 type Usage struct {
 	InputTokens                int
+	InputTokensReported        bool
 	OutputTokens               int
 	TotalTokens                int
 	CacheReadInputTokens       int
@@ -83,11 +84,13 @@ type Usage struct {
 	CacheCreation5mInputTokens int
 	CacheCreation1hInputTokens int
 	KiroCredits                float64
+	realCacheUsageReported     bool
 }
 
 type StreamResult struct {
 	Usage         Usage
 	StopReason    string
+	StopSequence  string
 	FirstDeltaDur *time.Duration
 }
 
@@ -99,6 +102,7 @@ type ParseResult struct {
 
 type KiroRequestContext struct {
 	ToolNameMap              map[string]string
+	UpstreamModel            string
 	ThinkingEnabled          bool
 	CacheEmulationUsage      *Usage
 	StructuredOutputToolName string
@@ -250,6 +254,12 @@ type kiroSemanticEvent struct {
 
 func MapModel(model string) string {
 	switch strings.TrimSpace(strings.ToLower(model)) {
+	case "gpt-5.6-sol":
+		return "gpt-5.6-sol"
+	case "gpt-5.6-terra":
+		return "gpt-5.6-terra"
+	case "gpt-5.6-luna":
+		return "gpt-5.6-luna"
 	case "claude-opus-4-8", "claude-opus-4-8-thinking", "claude-opus-4.8":
 		return "claude-opus-4.8"
 	case "claude-opus-4-7", "claude-opus-4-7-thinking", "claude-opus-4.7":
@@ -338,8 +348,9 @@ func normalizeModelAlias(model string) string {
 func kiroMaxOutputTokensForModel(model string) int {
 	normalized := normalizeModelAlias(model)
 	switch normalized {
-	// 仅 Opus 4.7 / 4.8 上限 128000（对齐 Kiro 官方规格）。
-	case "claude-opus-4-8", "claude-opus-4.8", "claude-opus-4-7", "claude-opus-4.7":
+	// Opus 4.7 / 4.8 与 GPT-5.6 系列上限 128000。
+	case "claude-opus-4-8", "claude-opus-4.8", "claude-opus-4-7", "claude-opus-4.7",
+		"gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna":
 		return 128000
 	default:
 		// 其余 Kiro 模型（opus-4.6 / sonnet-5 / sonnet-4.6 / 各 4.5 及未知兜底）统一 64000。
@@ -358,8 +369,8 @@ func clampFloat(value, minValue, maxValue float64) float64 {
 }
 
 func BuildKiroPayloadWithContext(claudeBody []byte, modelID, profileArn, origin string, headers http.Header) (*KiroBuildResult, error) {
-	requestCtx := KiroRequestContext{ToolNameMap: map[string]string{}}
-	outputCap := kiroMaxOutputTokensForModel(firstNonEmptyString(gjson.GetBytes(claudeBody, "model").String(), modelID))
+	requestCtx := KiroRequestContext{ToolNameMap: map[string]string{}, UpstreamModel: modelID}
+	outputCap := kiroMaxOutputTokensForModel(firstNonEmptyString(modelID, gjson.GetBytes(claudeBody, "model").String()))
 	var maxTokens int64
 	if mt := gjson.GetBytes(claudeBody, "max_tokens"); mt.Exists() {
 		maxTokens = mt.Int()
@@ -391,6 +402,11 @@ func BuildKiroPayloadWithContext(claudeBody []byte, modelID, profileArn, origin 
 	messages := gjson.GetBytes(claudeBody, "messages")
 	inlineSystem, filteredMessages := extractInlineSystemPrompts(messages)
 	thinking := deriveThinkingDirective(claudeBody, headers)
+	// Kiro manages GPT-5.6 reasoning internally. Anthropic thinking controls and
+	// their system-prompt tags are Claude-specific and must not cross families.
+	if isKiroGPT56Model(modelID) {
+		thinking = nil
+	}
 	if hasForcedClaudeToolChoice(claudeBody) {
 		thinking = nil
 	}
@@ -417,7 +433,7 @@ func BuildKiroPayloadWithContext(claudeBody []byte, modelID, profileArn, origin 
 			baseSystem = inlineSystem
 		}
 	}
-	systemPrompt := buildInjectedSystemPrompt(baseSystem, thinking, toolChoiceHint)
+	systemPrompt := buildInjectedSystemPrompt(baseSystem, modelID, thinking, toolChoiceHint)
 
 	history, currentUserMsg, currentToolResults := processMessages(filteredMessages, modelID, normalizeOrigin(origin), &requestCtx)
 	history = prependSystemHistory(history, systemPrompt, modelID, normalizeOrigin(origin))
@@ -556,7 +572,13 @@ func StreamEventStreamAsAnthropicWithContext(ctx context.Context, body io.Reader
 		}
 		useMsgID := newClaudeMessageID()
 		startUsage := usage
-		if requestCtx.CacheEmulationUsage != nil {
+		isGPT56 := isKiroGPT56Model(firstNonEmptyString(requestCtx.UpstreamModel, model))
+		if isGPT56 {
+			// GPT-5.6 reports authoritative uncached/cache buckets in terminal
+			// metadata. Do not seed downstream accounting with an estimate that
+			// cannot later be overwritten by an explicit zero on a full cache hit.
+			startUsage.InputTokens = 0
+		} else if requestCtx.CacheEmulationUsage != nil {
 			startUsage = mergeKiroCacheEmulationUsage(startUsage, requestCtx.CacheEmulationUsage)
 		}
 		usageMap := map[string]any{
@@ -1280,6 +1302,7 @@ func StreamEventStreamAsAnthropicWithContext(ctx context.Context, body io.Reader
 	return &StreamResult{
 		Usage:         usage,
 		StopReason:    stopReason,
+		StopSequence:  stopSequenceMatched,
 		FirstDeltaDur: firstDelta,
 	}, nil
 }
@@ -1401,19 +1424,48 @@ func thinkingDirectiveFromModel(model string) *thinkingDirective {
 // 这是个字面量;若不替换,模型会直接复读 "I am {{identity}}",对 Opus 4.7/4.8 这类
 // 对格式更敏感的版本尤其明显。
 //
-// identity 为空时回退到 "Claude",对齐 prompt 中 <CRITICAL_OVERRIDE> 的兜底语义:
-// "If no identity is provided, say that you are Claude."
+// identity 为空时回退到 "Claude",对齐 prompt 中 <CRITICAL_OVERRIDE> 的兜底语义。
 func renderKiroBuiltinIdentityPrompt(identity string) string {
 	identity = strings.TrimSpace(identity)
 	if identity == "" {
 		identity = "Claude"
 	}
-	return strings.ReplaceAll(kiroBuiltinIdentityPrompt, "{{identity}}", identity)
+	prompt := kiroBuiltinIdentityPrompt
+	if identity != "Claude" {
+		prompt = strings.ReplaceAll(
+			prompt,
+			"If no identity is provided, say that you are Claude.",
+			"If no identity is provided, say that you are "+identity+".",
+		)
+	}
+	return strings.ReplaceAll(prompt, "{{identity}}", identity)
 }
 
-func buildInjectedSystemPrompt(systemPrompt string, thinking *thinkingDirective, toolChoiceHint string) string {
+func kiroDefaultIdentityForModel(modelID string) string {
+	switch MapModel(modelID) {
+	case "gpt-5.6-sol":
+		return "GPT-5.6 Sol"
+	case "gpt-5.6-terra":
+		return "GPT-5.6 Terra"
+	case "gpt-5.6-luna":
+		return "GPT-5.6 Luna"
+	default:
+		return "Claude"
+	}
+}
+
+func isKiroGPT56Model(modelID string) bool {
+	switch MapModel(modelID) {
+	case "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna":
+		return true
+	default:
+		return false
+	}
+}
+
+func buildInjectedSystemPrompt(systemPrompt, modelID string, thinking *thinkingDirective, toolChoiceHint string) string {
 	systemPrompt = strings.TrimSpace(systemPrompt)
-	promptParts := []string{renderKiroBuiltinIdentityPrompt("")}
+	promptParts := []string{renderKiroBuiltinIdentityPrompt(kiroDefaultIdentityForModel(modelID))}
 	if temporalContext := buildKiroTemporalContext(); temporalContext != "" {
 		promptParts = append(promptParts, temporalContext)
 	}
@@ -3222,6 +3274,15 @@ func buildKiroClaudeUsageMap(usage Usage) map[string]any {
 	return usageMap
 }
 
+func RewriteClaudeResponseUsage(responseBody []byte, usage Usage) ([]byte, error) {
+	var response map[string]any
+	if err := json.Unmarshal(responseBody, &response); err != nil {
+		return nil, err
+	}
+	response["usage"] = buildKiroClaudeUsageMap(usage)
+	return json.Marshal(response)
+}
+
 func extractStructuredOutputToolText(toolUses []KiroToolUse, requestCtx KiroRequestContext) (string, []KiroToolUse, bool) {
 	if requestCtx.StructuredOutputToolName == "" || len(toolUses) == 0 {
 		return "", toolUses, false
@@ -4228,8 +4289,11 @@ func updateUsageFromEvent(usage *Usage, eventType string, event map[string]any) 
 		meta = event
 	}
 	if tokenUsage, ok := meta["tokenUsage"].(map[string]any); ok {
-		if value, ok := toInt(tokenUsage["uncachedInputTokens"]); ok {
-			usage.InputTokens = value
+		if raw, reported := tokenUsage["uncachedInputTokens"]; reported {
+			usage.InputTokensReported = true
+			if value, ok := toInt(raw); ok {
+				usage.InputTokens = value
+			}
 		}
 		if value, ok := toInt(tokenUsage["outputTokens"]); ok {
 			usage.OutputTokens = value
@@ -4237,8 +4301,17 @@ func updateUsageFromEvent(usage *Usage, eventType string, event map[string]any) 
 		if value, ok := toInt(tokenUsage["totalTokens"]); ok {
 			usage.TotalTokens = value
 		}
-		if value, ok := toInt(tokenUsage["cacheReadInputTokens"]); ok {
-			usage.CacheReadInputTokens = value
+		if raw, reported := tokenUsage["cacheReadInputTokens"]; reported {
+			usage.realCacheUsageReported = true
+			if value, ok := toInt(raw); ok {
+				usage.CacheReadInputTokens = value
+			}
+		}
+		if raw, reported := tokenUsage["cacheWriteInputTokens"]; reported {
+			usage.realCacheUsageReported = true
+			if value, ok := toInt(raw); ok {
+				usage.CacheCreationInputTokens = value
+			}
 		}
 		updateKiroCreditsFromMap(usage, tokenUsage)
 	}
@@ -4391,10 +4464,11 @@ func mergeKiroCacheEmulationUsage(base Usage, simulated *Usage) Usage {
 	if simulated == nil {
 		return base
 	}
-	if base.CacheReadInputTokens > 0 || base.CacheCreationInputTokens > 0 || base.CacheCreation5mInputTokens > 0 || base.CacheCreation1hInputTokens > 0 {
+	if base.realCacheUsageReported || base.CacheReadInputTokens > 0 || base.CacheCreationInputTokens > 0 || base.CacheCreation5mInputTokens > 0 || base.CacheCreation1hInputTokens > 0 {
 		return base
 	}
 	base.InputTokens = simulated.InputTokens
+	base.InputTokensReported = true
 	base.CacheReadInputTokens = simulated.CacheReadInputTokens
 	base.CacheCreationInputTokens = simulated.CacheCreationInputTokens
 	base.CacheCreation5mInputTokens = simulated.CacheCreation5mInputTokens

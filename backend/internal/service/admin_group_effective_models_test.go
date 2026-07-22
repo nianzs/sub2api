@@ -69,3 +69,12 @@ func TestResolveGroupEffectiveModelsReturnsEmptyWithoutMatchingAccounts(t *testi
 
 	require.Empty(t, models)
 }
+
+func TestDefaultModelsListCandidateIDsUsesKiroRegistry(t *testing.T) {
+	models := defaultModelsListCandidateIDs(PlatformKiro)
+
+	require.Contains(t, models, "gpt-5.6-sol")
+	require.Contains(t, models, "gpt-5.6-terra")
+	require.Contains(t, models, "gpt-5.6-luna")
+	require.NotContains(t, models, "claude-3-5-sonnet-20241022")
+}

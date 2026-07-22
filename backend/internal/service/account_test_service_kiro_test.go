@@ -99,6 +99,37 @@ func TestAccountTestService_Kiro429DoesNotFallbackToCodeWhispererEndpoint(t *tes
 	require.Contains(t, err.Error(), "API returned 429")
 }
 
+func TestAccountTestService_KiroGPT56ForcesUSEast1(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	ctx, _ := newTestContext()
+
+	account := &Account{
+		ID:          22,
+		Name:        "kiro-gpt56-region",
+		Platform:    PlatformKiro,
+		Type:        AccountTypeOAuth,
+		Concurrency: 1,
+		Credentials: map[string]any{
+			"access_token": "kiro-access-token",
+			"api_region":   "eu-central-1",
+		},
+	}
+	upstream := &queuedHTTPUpstream{responses: []*http.Response{
+		newJSONResponse(http.StatusUnauthorized, `{"type":"error","error":{"message":"Invalid bearer token"}}`),
+	}}
+	svc := &AccountTestService{
+		accountRepo:         &mockAccountRepoForGemini{accountsByID: map[int64]*Account{22: account}},
+		kiroTokenProvider:   NewKiroTokenProvider(nil, nil, nil),
+		httpUpstream:        upstream,
+		tlsFPProfileService: &TLSFingerprintProfileService{},
+	}
+
+	err := svc.TestAccountConnection(ctx, account.ID, "gpt-5.6-sol", "", AccountTestModeDefault)
+	require.Error(t, err)
+	require.Len(t, upstream.requests, 1)
+	require.Equal(t, "q.us-east-1.amazonaws.com", upstream.requests[0].URL.Host)
+}
+
 func TestAccountTestService_KiroIDCWithoutProfileArnOmitsProfileArnAndUsesDefaultRuntimeRegion(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	ctx, _ := newTestContext()

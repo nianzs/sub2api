@@ -43,15 +43,29 @@ func TestGatewayServiceKiroStreamKeepaliveUsesKiroSpecificConfig(t *testing.T) {
 	require.Equal(t, 10*time.Second, svc.streamKeepaliveIntervalForAccount(&Account{Platform: PlatformAnthropic}))
 }
 
-func TestGetModelPricing_KiroHaiku45UsesDedicatedFallback(t *testing.T) {
+func TestGetModelPricing_KiroModelsUseDedicatedFallbacks(t *testing.T) {
 	svc := NewBillingService(&config.Config{}, nil)
 
-	pricing, err := svc.GetModelPricing("claude-haiku-4-5")
+	tests := []struct {
+		model  string
+		input  float64
+		output float64
+	}{
+		{model: "claude-haiku-4-5", input: 1e-6, output: 5e-6},
+		{model: "gpt-5.6-sol", input: 5e-6, output: 30e-6},
+		{model: "gpt-5.6-terra", input: 2.5e-6, output: 15e-6},
+		{model: "gpt-5.6-luna", input: 1e-6, output: 6e-6},
+	}
 
-	require.NoError(t, err)
-	require.NotNil(t, pricing)
-	require.InDelta(t, 1e-6, pricing.InputPricePerToken, 1e-12)
-	require.InDelta(t, 5e-6, pricing.OutputPricePerToken, 1e-12)
+	for _, tt := range tests {
+		t.Run(tt.model, func(t *testing.T) {
+			pricing, err := svc.GetModelPricing(tt.model)
+			require.NoError(t, err)
+			require.NotNil(t, pricing)
+			require.InDelta(t, tt.input, pricing.InputPricePerToken, 1e-12)
+			require.InDelta(t, tt.output, pricing.OutputPricePerToken, 1e-12)
+		})
+	}
 }
 
 func TestForwardResultBillingModel_NormalizesKiroModels(t *testing.T) {
@@ -72,6 +86,12 @@ func TestForwardResultBillingModel_NormalizesKiroModels(t *testing.T) {
 			requestedModel: "",
 			upstreamModel:  "claude-haiku-4-5",
 			want:           "claude-haiku-4-5",
+		},
+		{
+			name:           "kiro GPT-5.6 tier keeps OpenAI pricing key",
+			requestedModel: "gpt-5.6-terra",
+			upstreamModel:  "gpt-5.6-terra",
+			want:           "gpt-5.6-terra",
 		},
 	}
 
