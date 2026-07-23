@@ -107,6 +107,41 @@ func TestKiroCacheEmulationContentChangeMisses(t *testing.T) {
 	}
 }
 
+func TestKiroCacheEmulationNormalizesMappedGPT56ModelAliases(t *testing.T) {
+	resetKiroCacheTracker()
+	svc := &GatewayService{}
+	account := kiroCacheAccount(8, "refresh-gpt-alias", "access-gpt-alias")
+	group := kiroCacheGroup(1)
+	aliasBody := bytes.Replace(kiroCacheRequestBody("gpt alias", false), []byte(`"claude-sonnet-4-6"`), []byte(`"customer-sol"`), 1)
+	officialBody := bytes.Replace(kiroCacheRequestBody("gpt alias", false), []byte(`"claude-sonnet-4-6"`), []byte(`"gpt-5.6-sol"`), 1)
+
+	first := svc.buildKiroCacheEmulationUsage(context.Background(), account, group, aliasBody, "gpt-5.6-sol", 2000)
+	if first == nil || first.CacheCreationInputTokens != 2000 || first.CacheReadInputTokens != 0 {
+		t.Fatalf("unexpected first usage: %+v", first)
+	}
+	second := svc.buildKiroCacheEmulationUsage(context.Background(), account, group, officialBody, "gpt-5.6-sol", 2000)
+	if second == nil || second.CacheReadInputTokens != 2000 || second.CacheCreationInputTokens != 0 {
+		t.Fatalf("aliases routed to the same Kiro model should share cache identity: %+v", second)
+	}
+}
+
+func TestKiroCacheEmulationIsolatesGPT56Tiers(t *testing.T) {
+	resetKiroCacheTracker()
+	svc := &GatewayService{}
+	account := kiroCacheAccount(9, "refresh-gpt-tiers", "access-gpt-tiers")
+	group := kiroCacheGroup(1)
+	body := kiroCacheRequestBody("gpt tiers", false)
+
+	first := svc.buildKiroCacheEmulationUsage(context.Background(), account, group, body, "gpt-5.6-sol", 2000)
+	if first == nil || first.CacheCreationInputTokens != 2000 {
+		t.Fatalf("unexpected Sol usage: %+v", first)
+	}
+	second := svc.buildKiroCacheEmulationUsage(context.Background(), account, group, body, "gpt-5.6-terra", 2000)
+	if second == nil || second.CacheReadInputTokens != 0 || second.CacheCreationInputTokens != 2000 {
+		t.Fatalf("different GPT-5.6 tiers must not share cache entries: %+v", second)
+	}
+}
+
 func TestKiroCacheEmulationTTLExpiry(t *testing.T) {
 	resetKiroCacheTracker()
 	svc := &GatewayService{}
@@ -125,6 +160,106 @@ func TestKiroCacheEmulationTTLExpiry(t *testing.T) {
 	afterExpiry := svc.buildKiroCacheEmulationUsage(context.Background(), account, group, body, "claude-sonnet-4-6", 2000)
 	if afterExpiry == nil || afterExpiry.CacheCreationInputTokens != 2000 || afterExpiry.CacheReadInputTokens != 0 {
 		t.Fatalf("expired cache should be recreated: %+v", afterExpiry)
+	}
+}
+
+func TestKiroCacheEmulationPlanKeepsRequestTimeClassification(t *testing.T) {
+	resetKiroCacheTracker()
+	svc := &GatewayService{}
+	account := kiroCacheAccount(41, "refresh-request-time", "access-request-time")
+	group := kiroCacheGroup(1)
+	body := kiroCacheRequestBody("request time", false)
+	_ = svc.buildKiroCacheEmulationUsage(context.Background(), account, group, body, "claude-sonnet-4-6", 2000)
+
+	plan := svc.prepareKiroCacheEmulationUsage(context.Background(), account, group, body, "claude-sonnet-4-6", 2000)
+	if plan == nil || plan.result() == nil || plan.result().CacheReadInputTokens != 2000 {
+		t.Fatalf("request-time classification should be a cache read: %+v", plan)
+	}
+
+	globalKiroCacheTracker.mu.Lock()
+	for cacheKey, entries := range globalKiroCacheTracker.entries {
+		for fingerprint, entry := range entries {
+			entry.expiresAt = time.Now().Add(-time.Second)
+			globalKiroCacheTracker.entries[cacheKey][fingerprint] = entry
+		}
+	}
+	globalKiroCacheTracker.mu.Unlock()
+
+	plan.commit()
+	if plan.result().CacheReadInputTokens != 2000 || plan.result().CacheCreationInputTokens != 0 {
+		t.Fatalf("response-time expiry must not change request-time classification: %+v", plan.result())
+	}
+}
+
+func TestKiroCacheEmulationConcurrentPlansUseRequestOrder(t *testing.T) {
+	resetKiroCacheTracker()
+	svc := &GatewayService{}
+	account := kiroCacheAccount(42, "refresh-concurrent", "access-concurrent")
+	group := kiroCacheGroup(1)
+	body := kiroCacheRequestBody("concurrent", false)
+
+	first := svc.prepareKiroCacheEmulationUsage(context.Background(), account, group, body, "claude-sonnet-4-6", 2000)
+	second := svc.prepareKiroCacheEmulationUsage(context.Background(), account, group, body, "claude-sonnet-4-6", 2000)
+	for name, plan := range map[string]*kiroCacheEmulationPlan{"first": first, "second": second} {
+		if plan == nil || plan.result() == nil || plan.result().CacheCreationInputTokens != 2000 || plan.result().CacheReadInputTokens != 0 {
+			t.Fatalf("%s request should classify before either response commits: %+v", name, plan)
+		}
+	}
+
+	second.commit()
+	first.commit()
+	if first.result().CacheCreationInputTokens != 2000 || second.result().CacheCreationInputTokens != 2000 {
+		t.Fatalf("response order must not rewrite request-time classifications: first=%+v second=%+v", first.result(), second.result())
+	}
+}
+
+func TestKiroCacheEmulationPlanDefersHitRefreshUntilCommit(t *testing.T) {
+	resetKiroCacheTracker()
+	svc := &GatewayService{}
+	account := kiroCacheAccount(43, "refresh-deferred", "access-deferred")
+	group := kiroCacheGroup(1)
+	body := kiroCacheRequestBody("deferred refresh", false)
+	_ = svc.buildKiroCacheEmulationUsage(context.Background(), account, group, body, "claude-sonnet-4-6", 2000)
+
+	var originalExpiry time.Time
+	globalKiroCacheTracker.mu.Lock()
+	for cacheKey, entries := range globalKiroCacheTracker.entries {
+		for fingerprint, entry := range entries {
+			entry.expiresAt = time.Now().Add(time.Minute)
+			originalExpiry = entry.expiresAt
+			globalKiroCacheTracker.entries[cacheKey][fingerprint] = entry
+		}
+	}
+	globalKiroCacheTracker.mu.Unlock()
+	if originalExpiry.IsZero() {
+		t.Fatal("expected a cache entry")
+	}
+
+	plan := svc.prepareKiroCacheEmulationUsage(context.Background(), account, group, body, "claude-sonnet-4-6", 2000)
+	if plan == nil || plan.result() == nil || plan.result().CacheReadInputTokens != 2000 {
+		t.Fatalf("expected a prepared cache hit: %+v", plan)
+	}
+
+	globalKiroCacheTracker.mu.Lock()
+	for _, entries := range globalKiroCacheTracker.entries {
+		for _, entry := range entries {
+			if !entry.expiresAt.Equal(originalExpiry) {
+				globalKiroCacheTracker.mu.Unlock()
+				t.Fatalf("prepare refreshed cache entry before success: got %v want %v", entry.expiresAt, originalExpiry)
+			}
+		}
+	}
+	globalKiroCacheTracker.mu.Unlock()
+
+	plan.commit()
+	globalKiroCacheTracker.mu.Lock()
+	defer globalKiroCacheTracker.mu.Unlock()
+	for _, entries := range globalKiroCacheTracker.entries {
+		for _, entry := range entries {
+			if !entry.expiresAt.After(originalExpiry) {
+				t.Fatalf("commit did not refresh cache entry: got %v original %v", entry.expiresAt, originalExpiry)
+			}
+		}
 	}
 }
 
@@ -264,7 +399,7 @@ func TestKiroCacheEmulationIncludesImageTokensAndKeepsImageFingerprint(t *testin
 }
 
 func resetKiroCacheTracker() {
-	globalKiroCacheTracker = &kiroCacheTracker{entries: make(map[uint64]map[[32]byte]kiroCacheEntry)}
+	globalKiroCacheTracker = &kiroCacheTracker{entries: make(map[[32]byte]map[[32]byte]kiroCacheEntry)}
 }
 
 func kiroPNGDataURL(t *testing.T, width, height int, fill color.RGBA) string {

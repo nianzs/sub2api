@@ -111,10 +111,13 @@ describe('useModelWhitelist', () => {
     expect(models.every((model) => !model.endsWith('-agentic') && !model.endsWith('-chat'))).toBe(true)
   })
 
-  it('kiro 模型列表只保留 Claude 模型', () => {
+  it('kiro 模型列表保留当前支持模型', () => {
     const models = getModelsByPlatform('kiro')
 
     expect(models).toEqual([
+      'gpt-5.6-sol',
+      'gpt-5.6-terra',
+      'gpt-5.6-luna',
       'claude-opus-4-8',
       'claude-opus-4-8-thinking',
       'claude-opus-4-7',
@@ -132,7 +135,7 @@ describe('useModelWhitelist', () => {
       'claude-haiku-4-5-20251001',
       'claude-haiku-4-5-20251001-thinking'
     ])
-    expect(models.every(model => model.startsWith('claude-'))).toBe(true)
+    expect(models.every(model => model.startsWith('claude-') || model.startsWith('gpt-5.6-'))).toBe(true)
     expect(models.some(model => model.endsWith('-agentic'))).toBe(false)
     expect(models.some(model => model.endsWith('-chat'))).toBe(false)
     expect(models).not.toContain('kiro-auto')
@@ -189,11 +192,14 @@ describe('useModelWhitelist', () => {
     })
   })
 
-  it('kiro 预设映射只暴露 Claude 入口', () => {
+  it('kiro 预设映射只暴露当前支持入口', () => {
     const mappings = getPresetMappingsByPlatform('kiro')
     const mappingTargets = mappings.map(item => item.to)
 
     expect(mappings.map(({ from, to }) => ({ from, to }))).toEqual([
+      { from: 'gpt-5.6-sol', to: 'gpt-5.6-sol' },
+      { from: 'gpt-5.6-terra', to: 'gpt-5.6-terra' },
+      { from: 'gpt-5.6-luna', to: 'gpt-5.6-luna' },
       { from: 'claude-opus-4-8', to: 'claude-opus-4.8' },
       { from: 'claude-opus-4-8-thinking', to: 'claude-opus-4.8' },
       { from: 'claude-opus-4-7', to: 'claude-opus-4.7' },
@@ -211,8 +217,8 @@ describe('useModelWhitelist', () => {
       { from: 'claude-haiku-4-5-20251001', to: 'claude-haiku-4.5' },
       { from: 'claude-haiku-4-5-20251001-thinking', to: 'claude-haiku-4.5' }
     ])
-    expect(mappings.every(item => item.from.startsWith('claude-'))).toBe(true)
-    expect(mappingTargets.every(model => model.startsWith('claude-'))).toBe(true)
+    expect(mappings.every(item => item.from.startsWith('claude-') || item.from.startsWith('gpt-5.6-'))).toBe(true)
+    expect(mappingTargets.every(model => model.startsWith('claude-') || model.startsWith('gpt-5.6-'))).toBe(true)
     expect(mappingTargets.some(model => model.endsWith('-agentic'))).toBe(false)
     expect(mappingTargets.some(model => model.endsWith('-chat'))).toBe(false)
     expect(mappingTargets).not.toContain('kiro-auto')
@@ -236,6 +242,9 @@ describe('useModelWhitelist', () => {
     const mappings = await fetchKiroDefaultMappings()
 
     expect(mappings).toEqual(expect.arrayContaining([
+      { from: 'gpt-5.6-sol', to: 'gpt-5.6-sol' },
+      { from: 'gpt-5.6-terra', to: 'gpt-5.6-terra' },
+      { from: 'gpt-5.6-luna', to: 'gpt-5.6-luna' },
       { from: 'claude-opus-4-8', to: 'claude-opus-4.8' },
       { from: 'claude-opus-4-8-thinking', to: 'claude-opus-4.8' },
       { from: 'claude-opus-4-7', to: 'claude-opus-4.7' },
@@ -253,15 +262,15 @@ describe('useModelWhitelist', () => {
       { from: 'claude-haiku-4-5-20251001', to: 'claude-haiku-4.5' },
       { from: 'claude-haiku-4-5-20251001-thinking', to: 'claude-haiku-4.5' }
     ]))
-    expect(mappings).toHaveLength(16)
+    expect(mappings).toHaveLength(19)
     expect(mappings.every(item => !item.from.startsWith('kiro-'))).toBe(true)
     expect(mappings.every(item => !item.to.startsWith('kiro-'))).toBe(true)
     expect(mappings.every(item => !item.from.endsWith('-agentic'))).toBe(true)
     expect(mappings.every(item => !item.to.endsWith('-agentic'))).toBe(true)
     expect(mappings.every(item => !item.from.endsWith('-chat'))).toBe(true)
     expect(mappings.every(item => !item.to.endsWith('-chat'))).toBe(true)
-    expect(mappings.every(item => item.from.startsWith('claude-'))).toBe(true)
-    expect(mappings.every(item => item.to.startsWith('claude-'))).toBe(true)
+    expect(mappings.every(item => item.from.startsWith('claude-') || item.from.startsWith('gpt-5.6-'))).toBe(true)
+    expect(mappings.every(item => item.to.startsWith('claude-') || item.to.startsWith('gpt-5.6-'))).toBe(true)
     expect(mappings.some(item => item.to === 'claude-opus-4-7')).toBe(false)
   })
 

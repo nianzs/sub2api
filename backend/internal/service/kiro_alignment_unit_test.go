@@ -11,6 +11,49 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestKiroStreamReadCloserClosesPipeUpstreamAndContext(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	reader := newOpenAICompatBlockingReadCloser(nil)
+	upstream := newOpenAICompatBlockingReadCloser(nil)
+	body := &kiroStreamReadCloser{reader: reader, upstream: upstream, cancel: cancel}
+
+	require.NoError(t, body.Close())
+	select {
+	case <-ctx.Done():
+	default:
+		t.Fatal("stream context was not canceled")
+	}
+	select {
+	case <-reader.closed:
+	default:
+		t.Fatal("pipe reader was not closed")
+	}
+	select {
+	case <-upstream.closed:
+	default:
+		t.Fatal("upstream body was not closed")
+	}
+}
+
+func TestNewKiroStreamContextBoundsCanceledParent(t *testing.T) {
+	parent, cancelParent := context.WithCancel(context.Background())
+	svc := &GatewayService{cfg: &config.Config{Gateway: config.GatewayConfig{StreamDataIntervalTimeout: 1}}}
+	streamCtx, cancelStream := svc.newKiroStreamContext(parent)
+	defer cancelStream()
+
+	cancelParent()
+	select {
+	case <-streamCtx.Done():
+		t.Fatal("stream context canceled before the drain grace elapsed")
+	case <-time.After(100 * time.Millisecond):
+	}
+	select {
+	case <-streamCtx.Done():
+	case <-time.After(2 * time.Second):
+		t.Fatal("stream context was not canceled after the bounded drain grace")
+	}
+}
+
 func TestGetBaseURL_KiroAPIKeyWithoutBaseURLReturnsEmpty(t *testing.T) {
 	account := Account{
 		Type:        AccountTypeAPIKey,
@@ -43,15 +86,29 @@ func TestGatewayServiceKiroStreamKeepaliveUsesKiroSpecificConfig(t *testing.T) {
 	require.Equal(t, 10*time.Second, svc.streamKeepaliveIntervalForAccount(&Account{Platform: PlatformAnthropic}))
 }
 
-func TestGetModelPricing_KiroHaiku45UsesDedicatedFallback(t *testing.T) {
+func TestGetModelPricing_KiroModelsUseDedicatedFallbacks(t *testing.T) {
 	svc := NewBillingService(&config.Config{}, nil)
 
-	pricing, err := svc.GetModelPricing("claude-haiku-4-5")
+	tests := []struct {
+		model  string
+		input  float64
+		output float64
+	}{
+		{model: "claude-haiku-4-5", input: 1e-6, output: 5e-6},
+		{model: "gpt-5.6-sol", input: 5e-6, output: 30e-6},
+		{model: "gpt-5.6-terra", input: 2.5e-6, output: 15e-6},
+		{model: "gpt-5.6-luna", input: 1e-6, output: 6e-6},
+	}
 
-	require.NoError(t, err)
-	require.NotNil(t, pricing)
-	require.InDelta(t, 1e-6, pricing.InputPricePerToken, 1e-12)
-	require.InDelta(t, 5e-6, pricing.OutputPricePerToken, 1e-12)
+	for _, tt := range tests {
+		t.Run(tt.model, func(t *testing.T) {
+			pricing, err := svc.GetModelPricing(tt.model)
+			require.NoError(t, err)
+			require.NotNil(t, pricing)
+			require.InDelta(t, tt.input, pricing.InputPricePerToken, 1e-12)
+			require.InDelta(t, tt.output, pricing.OutputPricePerToken, 1e-12)
+		})
+	}
 }
 
 func TestForwardResultBillingModel_NormalizesKiroModels(t *testing.T) {
@@ -72,6 +129,12 @@ func TestForwardResultBillingModel_NormalizesKiroModels(t *testing.T) {
 			requestedModel: "",
 			upstreamModel:  "claude-haiku-4-5",
 			want:           "claude-haiku-4-5",
+		},
+		{
+			name:           "kiro GPT-5.6 tier keeps OpenAI pricing key",
+			requestedModel: "gpt-5.6-terra",
+			upstreamModel:  "gpt-5.6-terra",
+			want:           "gpt-5.6-terra",
 		},
 	}
 
@@ -124,6 +187,49 @@ func TestGatewayServiceRecordUsage_NormalizesKiroBillingModel(t *testing.T) {
 	require.Equal(t, "claude-sonnet-4-6", usageRepo.lastLog.RequestedModel)
 	require.NotNil(t, usageRepo.lastLog.UpstreamModel)
 	require.Equal(t, "claude-sonnet-4.6", *usageRepo.lastLog.UpstreamModel)
+	require.InDelta(t, expectedCost.ActualCost, usageRepo.lastLog.ActualCost, 1e-12)
+	require.InDelta(t, expectedCost.TotalCost, usageRepo.lastLog.TotalCost, 1e-12)
+}
+
+func TestGatewayServiceRecordUsage_KiroAliasUsesUpstreamBillingModel(t *testing.T) {
+	usageRepo := &openAIRecordUsageLogRepoStub{inserted: true}
+	userRepo := &openAIRecordUsageUserRepoStub{}
+	subRepo := &openAIRecordUsageSubRepoStub{}
+	svc := newGatewayRecordUsageServiceForTest(usageRepo, userRepo, subRepo)
+	svc.billingService = NewBillingService(svc.cfg, &PricingService{
+		pricingData: map[string]*LiteLLMModelPricing{
+			"gpt-5.6-sol": {
+				InputCostPerToken:  9e-6,
+				OutputCostPerToken: 36e-6,
+			},
+		},
+	})
+
+	expectedCost, err := svc.billingService.CalculateCost("gpt-5.6-sol", UsageTokens{
+		InputTokens:  20,
+		OutputTokens: 10,
+	}, 1.1)
+	require.NoError(t, err)
+
+	err = svc.RecordUsage(context.Background(), &RecordUsageInput{
+		Result: &ForwardResult{
+			RequestID: "gateway_kiro_alias_upstream_billing",
+			Usage: ClaudeUsage{
+				InputTokens:  20,
+				OutputTokens: 10,
+			},
+			Model:         "customer-sol",
+			UpstreamModel: "gpt-5.6-sol",
+			Duration:      time.Second,
+		},
+		APIKey:  &APIKey{ID: 502, Quota: 100},
+		User:    &User{ID: 602},
+		Account: &Account{ID: 702, Platform: PlatformKiro},
+	})
+
+	require.NoError(t, err)
+	require.NotNil(t, usageRepo.lastLog)
+	require.Equal(t, "customer-sol", usageRepo.lastLog.Model)
 	require.InDelta(t, expectedCost.ActualCost, usageRepo.lastLog.ActualCost, 1e-12)
 	require.InDelta(t, expectedCost.TotalCost, usageRepo.lastLog.TotalCost, 1e-12)
 }

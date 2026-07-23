@@ -7,7 +7,6 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
-	"hash/fnv"
 	"math"
 	"sort"
 	"strings"
@@ -44,14 +43,26 @@ type kiroCacheEntry struct {
 	expiresAt time.Time
 }
 
-type kiroCacheTracker struct {
-	mu      sync.Mutex
-	entries map[uint64]map[[32]byte]kiroCacheEntry
+type kiroCacheEmulationPlan struct {
+	usage    *kiroCacheEmulationUsage
+	cacheKey [32]byte
+	profile  *kiroCacheProfile
 }
 
-var globalKiroCacheTracker = &kiroCacheTracker{entries: make(map[uint64]map[[32]byte]kiroCacheEntry)}
+type kiroCacheTracker struct {
+	mu      sync.Mutex
+	entries map[[32]byte]map[[32]byte]kiroCacheEntry
+}
+
+var globalKiroCacheTracker = &kiroCacheTracker{entries: make(map[[32]byte]map[[32]byte]kiroCacheEntry)}
 
 func (s *GatewayService) buildKiroCacheEmulationUsage(ctx context.Context, account *Account, group *Group, body []byte, model string, inputTokens int) *kiroCacheEmulationUsage {
+	plan := s.prepareKiroCacheEmulationUsage(ctx, account, group, body, model, inputTokens)
+	plan.commit()
+	return plan.result()
+}
+
+func (s *GatewayService) prepareKiroCacheEmulationUsage(ctx context.Context, account *Account, group *Group, body []byte, model string, inputTokens int) *kiroCacheEmulationPlan {
 	NormalizeGroupRuntimeFields(group)
 	if group == nil || !group.EffectiveKiroCacheEmulationEnabled() || account == nil || account.ID <= 0 || len(body) == 0 {
 		return nil
@@ -61,11 +72,10 @@ func (s *GatewayService) buildKiroCacheEmulationUsage(ctx context.Context, accou
 		return nil
 	}
 	cacheKey := kiroCacheCredentialKey(account)
-	if cacheKey == 0 {
+	if cacheKey == ([32]byte{}) {
 		return nil
 	}
 	result := globalKiroCacheTracker.compute(cacheKey, profile)
-	globalKiroCacheTracker.update(cacheKey, profile)
 	ratio := group.EffectiveKiroCacheEmulationRatio()
 	result.CacheReadInputTokens = scaleKiroCacheTokens(result.CacheReadInputTokens, ratio)
 	result.CacheCreationInputTokens = scaleKiroCacheTokens(result.CacheCreationInputTokens, ratio)
@@ -76,9 +86,23 @@ func (s *GatewayService) buildKiroCacheEmulationUsage(ctx context.Context, accou
 		result.InputTokens = 0
 	}
 	if result.CacheReadInputTokens == 0 && result.CacheCreationInputTokens == 0 {
+		result = nil
+	}
+	return &kiroCacheEmulationPlan{usage: result, cacheKey: cacheKey, profile: profile}
+}
+
+func (p *kiroCacheEmulationPlan) commit() {
+	if p == nil || p.profile == nil || p.cacheKey == ([32]byte{}) {
+		return
+	}
+	globalKiroCacheTracker.update(p.cacheKey, p.profile)
+}
+
+func (p *kiroCacheEmulationPlan) result() *kiroCacheEmulationUsage {
+	if p == nil {
 		return nil
 	}
-	return result
+	return p.usage
 }
 
 func scaleKiroCacheTokens(tokens int, ratio float64) int {
@@ -136,7 +160,7 @@ func buildKiroCacheProfile(ctx context.Context, body []byte, model string, input
 		totalTokens = countKiroInputTokensFromPayload(ctx, payload)
 	}
 	prelude, err := canonicalJSON(map[string]any{
-		"model":       payload["model"],
+		"model":       kiroCacheModelIdentity(model),
 		"tool_choice": payload["tool_choice"],
 	})
 	if err != nil {
@@ -303,9 +327,9 @@ func (p *kiroCacheProfile) lastCacheableBreakpoint() *kiroResolvedBreakpoint {
 	return &last
 }
 
-func (t *kiroCacheTracker) compute(cacheKey uint64, profile *kiroCacheProfile) *kiroCacheEmulationUsage {
+func (t *kiroCacheTracker) compute(cacheKey [32]byte, profile *kiroCacheProfile) *kiroCacheEmulationUsage {
 	out := &kiroCacheEmulationUsage{}
-	if t == nil || profile == nil || cacheKey == 0 {
+	if t == nil || profile == nil || cacheKey == ([32]byte{}) {
 		return out
 	}
 	lastBreakpoint := profile.lastCacheableBreakpoint()
@@ -316,7 +340,6 @@ func (t *kiroCacheTracker) compute(cacheKey uint64, profile *kiroCacheProfile) *
 	now := time.Now()
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	t.pruneLocked(now)
 
 	matchedTokens := 0
 	if accountEntries := t.entries[cacheKey]; accountEntries != nil {
@@ -328,8 +351,6 @@ func (t *kiroCacheTracker) compute(cacheKey uint64, profile *kiroCacheProfile) *
 			if !ok || !entry.expiresAt.After(now) {
 				continue
 			}
-			entry.expiresAt = now.Add(entry.ttl)
-			accountEntries[candidate.prefixFingerprint] = entry
 			matchedTokens = min(breakpoint.cumulativeTokens, profile.totalInputTokens)
 			break
 		}
@@ -356,8 +377,8 @@ func (p *kiroCacheProfile) ttlBreakdown(matchedTokens int) (int, int) {
 	return newTokens, 0
 }
 
-func (t *kiroCacheTracker) update(cacheKey uint64, profile *kiroCacheProfile) {
-	if t == nil || profile == nil || cacheKey == 0 {
+func (t *kiroCacheTracker) update(cacheKey [32]byte, profile *kiroCacheProfile) {
+	if t == nil || profile == nil || cacheKey == ([32]byte{}) {
 		return
 	}
 	now := time.Now()
@@ -399,14 +420,12 @@ func (t *kiroCacheTracker) pruneLocked(now time.Time) {
 	}
 }
 
-func kiroCacheCredentialKey(account *Account) uint64 {
+func kiroCacheCredentialKey(account *Account) [32]byte {
 	stableKey := strings.TrimSpace(kiroCacheCredentialIdentity(account))
 	if stableKey == "" {
-		return 0
+		return [32]byte{}
 	}
-	h := fnv.New64a()
-	_, _ = h.Write([]byte(stableKey))
-	return h.Sum64()
+	return sha256.Sum256([]byte(stableKey))
 }
 
 func kiroCacheCredentialIdentity(account *Account) string {
@@ -435,6 +454,13 @@ func kiroMinimumCacheableTokens(model string) int {
 	default:
 		return kiroCacheMinTokensDefault
 	}
+}
+
+func kiroCacheModelIdentity(model string) string {
+	if mapped := kiropkg.MapModel(model); mapped != "" {
+		return mapped
+	}
+	return strings.ToLower(strings.TrimSpace(model))
 }
 
 func stripKiroCacheControl(v any) any {
@@ -721,6 +747,7 @@ func (u *kiroCacheEmulationUsage) toKiroUsage() *kiropkg.Usage {
 	}
 	return &kiropkg.Usage{
 		InputTokens:                u.InputTokens,
+		InputTokensReported:        true,
 		CacheReadInputTokens:       u.CacheReadInputTokens,
 		CacheCreationInputTokens:   u.CacheCreationInputTokens,
 		CacheCreation5mInputTokens: u.CacheCreation5mInputTokens,

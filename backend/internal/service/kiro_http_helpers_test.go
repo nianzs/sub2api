@@ -178,6 +178,28 @@ func TestBuildKiroEndpointsAPIKeyDirectAWS(t *testing.T) {
 	require.Equal(t, "https://q.us-west-2.amazonaws.com/generateAssistantResponse", regionEndpoints[0].URL)
 }
 
+func TestBuildKiroEndpointsForGPT56ForcesUSEast1(t *testing.T) {
+	account := &Account{
+		Platform: PlatformKiro,
+		Type:     AccountTypeAPIKey,
+		Credentials: map[string]any{
+			"kiroApiKey": "ksk_x",
+			"api_region": "eu-central-1",
+		},
+	}
+
+	for _, model := range []string{"gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"} {
+		t.Run(model, func(t *testing.T) {
+			endpoints := buildKiroEndpointsForModel(account, KiroEndpointModeQ, model)
+			require.Len(t, endpoints, 1)
+			require.Equal(t, "https://q.us-east-1.amazonaws.com/generateAssistantResponse", endpoints[0].URL)
+		})
+	}
+
+	claudeEndpoints := buildKiroEndpointsForModel(account, KiroEndpointModeQ, "claude-sonnet-4.6")
+	require.Equal(t, "https://q.eu-central-1.amazonaws.com/generateAssistantResponse", claudeEndpoints[0].URL)
+}
+
 func TestIsKiroInvalidModelIDBodyRecognizesKnownForms(t *testing.T) {
 	tests := []string{
 		`{"message":"Invalid model ID. Please select a different model to continue.","reason":"INVALID_MODEL_ID"}`,

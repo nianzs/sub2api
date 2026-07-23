@@ -449,6 +449,90 @@ func TestBuildKiroPayloadRendersBuiltinIdentityPlaceholder(t *testing.T) {
 		"default identity should fall back to 'Claude'")
 }
 
+func TestBuildKiroPayloadUsesGPT56Identity(t *testing.T) {
+	body := []byte(`{
+		"model":"gpt-5.6-sol",
+		"messages":[{"role":"user","content":"hi"}]
+	}`)
+	result, err := BuildKiroPayloadWithContext(body, "gpt-5.6-sol", "", "AI_EDITOR", nil)
+	require.NoError(t, err)
+
+	systemContent := gjson.GetBytes(result.Payload, "conversationState.history.0.userInputMessage.content").String()
+	require.Contains(t, systemContent, "You are GPT-5.6 Sol,")
+	require.Contains(t, systemContent, "say that you are GPT-5.6 Sol.")
+	require.NotContains(t, systemContent, "You are Claude,")
+	require.NotContains(t, systemContent, "say that you are Claude.")
+}
+
+func TestKiroMaxOutputTokensForGPT56Models(t *testing.T) {
+	for _, model := range []string{"gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"} {
+		t.Run(model, func(t *testing.T) {
+			require.Equal(t, 128000, kiroMaxOutputTokensForModel(model))
+		})
+	}
+}
+
+func TestBuildKiroPayloadUsesEffectiveGPT56ModelForOutputCap(t *testing.T) {
+	body := []byte(`{
+		"model":"customer-sol",
+		"max_tokens":-1,
+		"messages":[{"role":"user","content":"hi"}]
+	}`)
+
+	result, err := BuildKiroPayloadWithContext(body, "gpt-5.6-sol", "", "AI_EDITOR", nil)
+
+	require.NoError(t, err)
+	require.Equal(t, 128000, result.Context.MaxOutputTokens)
+	require.Equal(t, int64(128000), gjson.GetBytes(result.Payload, "inferenceConfig.maxTokens").Int())
+}
+
+func TestBuildKiroPayloadGPT56UsesNativeReasoningEffort(t *testing.T) {
+	tests := []struct {
+		name       string
+		model      string
+		effortJSON string
+		wantEffort string
+	}{
+		{name: "responses high", model: "gpt-5.6-sol", effortJSON: `"output_config":{"effort":"high"}`, wantEffort: "high"},
+		{name: "chat max", model: "gpt-5.6-terra", effortJSON: `"reasoning_effort":"max"`, wantEffort: "xhigh"},
+		{name: "nested low", model: "gpt-5.6-luna", effortJSON: `"reasoning":{"effort":"low"}`, wantEffort: "low"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			body := []byte(`{
+				"model":"` + tt.model + `",
+				"thinking":{"type":"adaptive"},
+				` + tt.effortJSON + `,
+				"messages":[{"role":"user","content":"hi"}]
+			}`)
+
+			result, err := BuildKiroPayloadWithContext(body, tt.model, "", "AI_EDITOR", nil)
+
+			require.NoError(t, err)
+			require.False(t, result.Context.ThinkingEnabled)
+			require.Equal(t, tt.wantEffort, gjson.GetBytes(result.Payload, "additionalModelRequestFields.reasoning.effort").String())
+			systemContent := gjson.GetBytes(result.Payload, "conversationState.history.0.userInputMessage.content").String()
+			require.NotContains(t, systemContent, "<thinking_mode>")
+			require.NotContains(t, systemContent, "<thinking_effort>")
+			require.NotContains(t, systemContent, "<max_thinking_length>")
+		})
+	}
+}
+
+func TestBuildKiroPayloadGPT56OmitsUnsupportedReasoningEffort(t *testing.T) {
+	body := []byte(`{
+		"model":"gpt-5.6-sol",
+		"output_config":{"effort":"none"},
+		"messages":[{"role":"user","content":"hi"}]
+	}`)
+
+	result, err := BuildKiroPayloadWithContext(body, "gpt-5.6-sol", "", "AI_EDITOR", nil)
+
+	require.NoError(t, err)
+	require.False(t, gjson.GetBytes(result.Payload, "additionalModelRequestFields").Exists())
+}
+
 func TestBuildKiroPayloadInjectsThinkingForThinkingAliasModel(t *testing.T) {
 	body := []byte(`{
 		"model":"claude-sonnet-4-5-20250929-thinking",
@@ -924,6 +1008,42 @@ func TestParseNonStreamingEventStreamThinkingOnlyResponse(t *testing.T) {
 	require.Equal(t, "", gjson.GetBytes(result.ResponseBody, "content.1.text").String())
 }
 
+func TestParseNonStreamingEventStreamSuppressesGPT56Reasoning(t *testing.T) {
+	stream := bytes.NewBuffer(nil)
+	_, _ = stream.Write(buildEventStreamFrame(t, "reasoningContentEvent", map[string]any{
+		"reasoningContentEvent": map[string]any{
+			"text": "internal reasoning",
+		},
+	}))
+	_, _ = stream.Write(buildEventStreamFrame(t, "assistantResponseEvent", map[string]any{
+		"assistantResponseEvent": map[string]any{
+			"content": "answer",
+		},
+	}))
+
+	result, err := ParseNonStreamingEventStreamWithContext(stream, "client-alias", KiroRequestContext{
+		UpstreamModel: "gpt-5.6-sol",
+	})
+	require.NoError(t, err)
+	require.Equal(t, "answer", gjson.GetBytes(result.ResponseBody, "content.0.text").String())
+	require.NotContains(t, string(result.ResponseBody), "internal reasoning")
+	require.NotContains(t, string(result.ResponseBody), `"type":"thinking"`)
+}
+
+func TestParseNonStreamingEventStreamCountsSuppressedGPT56Reasoning(t *testing.T) {
+	stream := bytes.NewBuffer(nil)
+	_, _ = stream.Write(buildEventStreamFrame(t, "reasoningContentEvent", map[string]any{
+		"reasoningContentEvent": map[string]any{
+			"text": "internal reasoning without terminal usage",
+		},
+	}))
+
+	result, err := ParseNonStreamingEventStreamWithContext(stream, "gpt-5.6-sol", KiroRequestContext{})
+	require.NoError(t, err)
+	require.Greater(t, result.Usage.OutputTokens, 0)
+	require.NotContains(t, string(result.ResponseBody), "internal reasoning")
+}
+
 func TestParseNonStreamingEventStreamMergesManyReasoningFragments(t *testing.T) {
 	stream := bytes.NewBuffer(nil)
 	for _, frag := range []string{"I ", "need ", "to ", "think"} {
@@ -1238,6 +1358,7 @@ func TestStreamEventStreamAsAnthropicPreservesStopSequenceWhenValidToolWasEmitte
 	})
 	require.NoError(t, err)
 	require.Equal(t, "stop_sequence", result.StopReason)
+	require.Equal(t, "<STOP>", result.StopSequence)
 	require.Contains(t, out.String(), `"id":"toolu_valid_stop_sequence"`)
 	require.Contains(t, out.String(), `"stop_reason":"stop_sequence"`)
 	messageDelta := extractSSEEventData(t, out.String(), "message_delta")
@@ -1903,6 +2024,7 @@ func TestStreamEventStreamAsAnthropicIgnoresReasoningContentWhenThinkingDisabled
 	result, err := StreamEventStreamAsAnthropicWithContext(context.Background(), stream, &out, "claude-sonnet-4-5", 9, KiroRequestContext{})
 	require.NoError(t, err)
 	require.Equal(t, "end_turn", result.StopReason)
+	require.Greater(t, result.Usage.OutputTokens, 0)
 	require.NotContains(t, out.String(), "hidden reasoning")
 	require.NotContains(t, out.String(), `"type":"thinking"`)
 }
@@ -2405,6 +2527,248 @@ func TestKiroCacheEmulationUsageInjectedIntoStreamAndResult(t *testing.T) {
 	require.Contains(t, output, `"ephemeral_1h_input_tokens":30`)
 }
 
+func TestKiroRealCacheUsageTakesPrecedenceOverEmulation(t *testing.T) {
+	tests := []struct {
+		name         string
+		cacheField   string
+		cacheTokens  int
+		wantRead     int
+		wantCreation int
+	}{
+		{name: "cache read", cacheField: "cacheReadInputTokens", cacheTokens: 30, wantRead: 30},
+		{name: "cache write", cacheField: "cacheWriteInputTokens", cacheTokens: 30, wantCreation: 30},
+		{name: "explicit cache miss", cacheField: "cacheReadInputTokens", cacheTokens: 0},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			stream := bytes.NewBuffer(nil)
+			_, _ = stream.Write(buildEventStreamFrame(t, "messageMetadataEvent", map[string]any{
+				"messageMetadataEvent": map[string]any{
+					"tokenUsage": map[string]any{
+						"uncachedInputTokens": 90,
+						tt.cacheField:         tt.cacheTokens,
+						"outputTokens":        7,
+						"totalTokens":         127,
+					},
+				},
+			}))
+
+			result, err := ParseNonStreamingEventStreamWithContext(stream, "gpt-5.6-sol", KiroRequestContext{
+				CacheEmulationUsage: &Usage{
+					InputTokens:                20,
+					CacheReadInputTokens:       70,
+					CacheCreationInputTokens:   30,
+					CacheCreation5mInputTokens: 30,
+				},
+			})
+
+			require.NoError(t, err)
+			require.Equal(t, 90, result.Usage.InputTokens)
+			require.Equal(t, tt.wantRead, result.Usage.CacheReadInputTokens)
+			require.Equal(t, tt.wantCreation, result.Usage.CacheCreationInputTokens)
+			require.Equal(t, 127, result.Usage.TotalTokens)
+			require.Equal(t, 90, int(gjson.GetBytes(result.ResponseBody, "usage.input_tokens").Int()))
+		})
+	}
+}
+
+func TestKiroRealCacheUsagePreservesReportedZeroUncachedTokens(t *testing.T) {
+	stream := bytes.NewBuffer(nil)
+	_, _ = stream.Write(buildEventStreamFrame(t, "messageMetadataEvent", map[string]any{
+		"messageMetadataEvent": map[string]any{
+			"tokenUsage": map[string]any{
+				"uncachedInputTokens":  0,
+				"cacheReadInputTokens": 120,
+				"outputTokens":         7,
+				"totalTokens":          127,
+			},
+		},
+	}))
+
+	result, err := ParseNonStreamingEventStreamWithContext(stream, "gpt-5.6-sol", KiroRequestContext{
+		CacheEmulationUsage: &Usage{
+			InputTokens:          20,
+			InputTokensReported:  true,
+			CacheReadInputTokens: 100,
+		},
+	})
+
+	require.NoError(t, err)
+	require.True(t, result.Usage.InputTokensReported)
+	require.Zero(t, result.Usage.InputTokens)
+	require.Equal(t, 120, result.Usage.CacheReadInputTokens)
+	require.Zero(t, int(gjson.GetBytes(result.ResponseBody, "usage.input_tokens").Int()))
+}
+
+func TestKiroGPT56ReportedInputTakesPrecedenceWhenCacheFieldsAreOmitted(t *testing.T) {
+	buildStream := func(t *testing.T) *bytes.Buffer {
+		t.Helper()
+		stream := bytes.NewBuffer(nil)
+		_, _ = stream.Write(buildEventStreamFrame(t, "messageMetadataEvent", map[string]any{
+			"messageMetadataEvent": map[string]any{
+				"tokenUsage": map[string]any{
+					"uncachedInputTokens": 90,
+					"outputTokens":        7,
+				},
+			},
+		}))
+		return stream
+	}
+	requestCtx := KiroRequestContext{
+		UpstreamModel: "gpt-5.6-sol",
+		CacheEmulationUsage: &Usage{
+			InputTokens:              20,
+			CacheReadInputTokens:     70,
+			CacheCreationInputTokens: 30,
+		},
+	}
+
+	t.Run("non-streaming", func(t *testing.T) {
+		result, err := ParseNonStreamingEventStreamWithContext(buildStream(t), "client-alias", requestCtx)
+		require.NoError(t, err)
+		require.Equal(t, 90, result.Usage.InputTokens)
+		require.Zero(t, result.Usage.CacheReadInputTokens)
+		require.Zero(t, result.Usage.CacheCreationInputTokens)
+	})
+
+	t.Run("streaming", func(t *testing.T) {
+		var out bytes.Buffer
+		result, err := StreamEventStreamAsAnthropicWithContext(context.Background(), buildStream(t), &out, "client-alias", 120, requestCtx)
+		require.NoError(t, err)
+		require.Equal(t, 90, result.Usage.InputTokens)
+		require.Zero(t, result.Usage.CacheReadInputTokens)
+		require.Zero(t, result.Usage.CacheCreationInputTokens)
+		require.NotContains(t, out.String(), `"cache_read_input_tokens":70`)
+		require.NotContains(t, out.String(), `"cache_creation_input_tokens":30`)
+	})
+}
+
+func TestKiroGPT56LegacyInputTokensTakePrecedenceOverCacheEmulation(t *testing.T) {
+	stream := bytes.NewBuffer(nil)
+	_, _ = stream.Write(buildEventStreamFrame(t, "messageMetadataEvent", map[string]any{
+		"messageMetadataEvent": map[string]any{
+			"inputTokens":  90,
+			"outputTokens": 7,
+		},
+	}))
+
+	result, err := ParseNonStreamingEventStreamWithContext(stream, "client-alias", KiroRequestContext{
+		UpstreamModel: "gpt-5.6-sol",
+		CacheEmulationUsage: &Usage{
+			InputTokens:              20,
+			CacheReadInputTokens:     70,
+			CacheCreationInputTokens: 30,
+		},
+	})
+	require.NoError(t, err)
+	require.True(t, result.Usage.InputTokensReported)
+	require.Equal(t, 90, result.Usage.InputTokens)
+	require.Zero(t, result.Usage.CacheReadInputTokens)
+	require.Zero(t, result.Usage.CacheCreationInputTokens)
+}
+
+func TestKiroGPT56NegativeLegacyInputTokensFallBackToCacheEmulation(t *testing.T) {
+	stream := bytes.NewBuffer(nil)
+	_, _ = stream.Write(buildEventStreamFrame(t, "messageMetadataEvent", map[string]any{
+		"messageMetadataEvent": map[string]any{
+			"inputTokens":  -1,
+			"outputTokens": 7,
+		},
+	}))
+
+	result, err := ParseNonStreamingEventStreamWithContext(stream, "gpt-5.6-sol", KiroRequestContext{
+		CacheEmulationUsage: &Usage{
+			InputTokens:              20,
+			CacheReadInputTokens:     70,
+			CacheCreationInputTokens: 30,
+		},
+	})
+	require.NoError(t, err)
+	require.Equal(t, 20, result.Usage.InputTokens)
+	require.Equal(t, 70, result.Usage.CacheReadInputTokens)
+	require.Equal(t, 30, result.Usage.CacheCreationInputTokens)
+}
+
+func TestKiroGPT56InvalidTokenUsageFallsBackToCacheEmulation(t *testing.T) {
+	stream := bytes.NewBuffer(nil)
+	_, _ = stream.Write(buildEventStreamFrame(t, "messageMetadataEvent", map[string]any{
+		"messageMetadataEvent": map[string]any{
+			"tokenUsage": map[string]any{
+				"uncachedInputTokens":   -1,
+				"cacheReadInputTokens":  "invalid",
+				"cacheWriteInputTokens": -2,
+				"outputTokens":          7,
+			},
+		},
+	}))
+
+	result, err := ParseNonStreamingEventStreamWithContext(stream, "gpt-5.6-sol", KiroRequestContext{
+		CacheEmulationUsage: &Usage{
+			InputTokens:              20,
+			CacheReadInputTokens:     70,
+			CacheCreationInputTokens: 30,
+		},
+	})
+	require.NoError(t, err)
+	require.Equal(t, 20, result.Usage.InputTokens)
+	require.Equal(t, 70, result.Usage.CacheReadInputTokens)
+	require.Equal(t, 30, result.Usage.CacheCreationInputTokens)
+}
+
+func TestRewriteClaudeResponseUsage(t *testing.T) {
+	body, err := RewriteClaudeResponseUsage([]byte(`{"type":"message","usage":{"input_tokens":1}}`), Usage{
+		InputTokens:              14,
+		OutputTokens:             5,
+		CacheReadInputTokens:     13,
+		CacheCreationInputTokens: 3,
+	})
+
+	require.NoError(t, err)
+	require.Equal(t, int64(14), gjson.GetBytes(body, "usage.input_tokens").Int())
+	require.Equal(t, int64(5), gjson.GetBytes(body, "usage.output_tokens").Int())
+	require.Equal(t, int64(13), gjson.GetBytes(body, "usage.cache_read_input_tokens").Int())
+	require.Equal(t, int64(3), gjson.GetBytes(body, "usage.cache_creation_input_tokens").Int())
+}
+
+func TestKiroGPT56StreamDefersEmulationUntilRealCacheUsageIsKnown(t *testing.T) {
+	stream := bytes.NewBuffer(nil)
+	_, _ = stream.Write(buildEventStreamFrame(t, "assistantResponseEvent", map[string]any{
+		"assistantResponseEvent": map[string]any{"content": "hello"},
+	}))
+	_, _ = stream.Write(buildEventStreamFrame(t, "messageMetadataEvent", map[string]any{
+		"messageMetadataEvent": map[string]any{
+			"tokenUsage": map[string]any{
+				"uncachedInputTokens":   90,
+				"cacheReadInputTokens":  3,
+				"cacheWriteInputTokens": 2,
+				"outputTokens":          7,
+				"totalTokens":           102,
+			},
+		},
+	}))
+
+	var out bytes.Buffer
+	result, err := StreamEventStreamAsAnthropicWithContext(context.Background(), stream, &out, "customer-sol", 120, KiroRequestContext{
+		UpstreamModel: "gpt-5.6-sol",
+		CacheEmulationUsage: &Usage{
+			InputTokens:              20,
+			CacheReadInputTokens:     70,
+			CacheCreationInputTokens: 30,
+		},
+	})
+
+	require.NoError(t, err)
+	require.Equal(t, 3, result.Usage.CacheReadInputTokens)
+	require.Equal(t, 2, result.Usage.CacheCreationInputTokens)
+	messageStart := extractSSEEventData(t, out.String(), "message_start")
+	require.Zero(t, int(gjson.GetBytes(messageStart, "message.usage.input_tokens").Int()))
+	require.NotContains(t, out.String(), `"cache_read_input_tokens":70`)
+	require.NotContains(t, out.String(), `"cache_creation_input_tokens":30`)
+	require.Contains(t, out.String(), `"cache_read_input_tokens":3`)
+	require.Contains(t, out.String(), `"cache_creation_input_tokens":2`)
+}
+
 func TestNormalizeStreamingToolInput(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -2533,6 +2897,9 @@ func TestMapModel_MatchesKiroReferenceMapping(t *testing.T) {
 	t.Parallel()
 
 	cases := map[string]string{
+		"gpt-5.6-sol":                         "gpt-5.6-sol",
+		"gpt-5.6-terra":                       "gpt-5.6-terra",
+		"gpt-5.6-luna":                        "gpt-5.6-luna",
 		"claude-opus-4-8":                     "claude-opus-4.8",
 		"claude-opus-4-8-thinking":            "claude-opus-4.8",
 		"claude-opus-4.8":                     "claude-opus-4.8",

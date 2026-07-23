@@ -30,6 +30,25 @@ func TestBuildKiroPayloadForAccountUsesStableConversationIDs(t *testing.T) {
 	require.False(t, gjson.GetBytes(second.Payload, "conversationState.agentContinuationId").Exists())
 }
 
+func TestBuildKiroPayloadForAccountNormalizesGPT56SessionAffinity(t *testing.T) {
+	svc := &GatewayService{}
+	account := &Account{ID: 41, Credentials: map[string]any{"profile_arn": "profile-gpt"}}
+	body := []byte(`{"model":"customer-gpt","messages":[{"role":"user","content":"hello"}]}`)
+
+	alias, err := svc.buildKiroPayloadForAccount(context.Background(), account, nil, body, "gpt-5.6-sol", "token", "customer-gpt", nil)
+	require.NoError(t, err)
+	official, err := svc.buildKiroPayloadForAccount(context.Background(), account, nil, body, "gpt-5.6-sol", "token", "gpt-5.6-sol", nil)
+	require.NoError(t, err)
+	terra, err := svc.buildKiroPayloadForAccount(context.Background(), account, nil, body, "gpt-5.6-terra", "token", "gpt-5.6-terra", nil)
+	require.NoError(t, err)
+
+	conversationID := func(payload []byte) string {
+		return gjson.GetBytes(payload, "conversationState.conversationId").String()
+	}
+	require.Equal(t, conversationID(alias.Payload), conversationID(official.Payload))
+	require.NotEqual(t, conversationID(alias.Payload), conversationID(terra.Payload))
+}
+
 func TestBuildKiroPayloadForAccountReplaysFullMessagesIntoHistory(t *testing.T) {
 	svc := &GatewayService{}
 	account := &Account{ID: 40, Credentials: map[string]any{"profile_arn": "profile-a"}}

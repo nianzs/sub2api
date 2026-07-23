@@ -51,7 +51,7 @@ func TestHandleResponsesBufferedStreamingResponse_PreservesMessageStartCacheUsag
 	}
 
 	svc := &GatewayService{}
-	result, err := svc.handleResponsesBufferedStreamingResponse(resp, c, "claude-sonnet-4.5", "claude-sonnet-4.5", nil, time.Now())
+	result, err := svc.handleResponsesBufferedStreamingResponse(resp, c, "claude-sonnet-4.5", "claude-sonnet-4.5", nil, time.Now(), 0)
 	require.NoError(t, err)
 	require.NotNil(t, result)
 	require.Equal(t, 12, result.Usage.InputTokens)
@@ -61,6 +61,32 @@ func TestHandleResponsesBufferedStreamingResponse_PreservesMessageStartCacheUsag
 	require.InDelta(t, 0.17, result.Usage.KiroCredits, 0.000001)
 	require.Contains(t, rec.Body.String(), `"cached_tokens":9`)
 	require.NotContains(t, rec.Body.String(), "_sub2api_kiro_credits")
+}
+
+func TestHandleResponsesBufferedStreamingResponse_PreservesCacheOnlyUsage(t *testing.T) {
+	t.Parallel()
+	gin.SetMode(gin.TestMode)
+
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	resp := &http.Response{
+		Header: http.Header{"x-request-id": []string{"rid_responses_cache_only"}},
+		Body: io.NopCloser(strings.NewReader(strings.Join([]string{
+			`event: message_start`,
+			`data: {"type":"message_start","message":{"id":"msg_cache","type":"message","role":"assistant","content":[],"model":"gpt-5.6-sol","stop_reason":"","usage":{"input_tokens":0,"output_tokens":0}}}`,
+			``,
+			`event: message_delta`,
+			`data: {"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"input_tokens":0,"output_tokens":0,"cache_read_input_tokens":120,"cache_creation_input_tokens":0}}`,
+			``,
+		}, "\n"))),
+	}
+
+	result, err := (&GatewayService{}).handleResponsesBufferedStreamingResponse(resp, c, "gpt-5.6-sol", "gpt-5.6-sol", nil, time.Now(), 0)
+	require.NoError(t, err)
+	require.Zero(t, result.Usage.InputTokens)
+	require.Zero(t, result.Usage.OutputTokens)
+	require.Equal(t, 120, result.Usage.CacheReadInputTokens)
+	require.Contains(t, rec.Body.String(), `"cached_tokens":120`)
 }
 
 func TestHandleResponsesStreamingResponse_PreservesMessageStartCacheUsage(t *testing.T) {
@@ -89,7 +115,7 @@ func TestHandleResponsesStreamingResponse_PreservesMessageStartCacheUsage(t *tes
 	}
 
 	svc := &GatewayService{}
-	result, err := svc.handleResponsesStreamingResponse(resp, c, "claude-sonnet-4.5", "claude-sonnet-4.5", nil, time.Now())
+	result, err := svc.handleResponsesStreamingResponse(resp, c, "claude-sonnet-4.5", "claude-sonnet-4.5", nil, time.Now(), 0)
 	require.NoError(t, err)
 	require.NotNil(t, result)
 	require.Equal(t, 20, result.Usage.InputTokens)
@@ -99,6 +125,44 @@ func TestHandleResponsesStreamingResponse_PreservesMessageStartCacheUsage(t *tes
 	require.InDelta(t, 0.23, result.Usage.KiroCredits, 0.000001)
 	require.Contains(t, rec.Body.String(), `response.completed`)
 	require.NotContains(t, rec.Body.String(), "_sub2api_kiro_credits")
+}
+
+func TestHandleResponsesStreamingResponse_DrainsTerminalUsageAfterClientDisconnect(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Writer = &openAICompatFailingWriter{ResponseWriter: c.Writer, failAfter: 0}
+	stream := strings.Join([]string{
+		`event: message_start`,
+		`data: {"type":"message_start","message":{"id":"msg_kiro","type":"message","role":"assistant","content":[],"model":"gpt-5.6-sol","usage":{"input_tokens":0,"output_tokens":0}}}`,
+		``,
+		`event: content_block_delta`,
+		`data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"answer"}}`,
+		``,
+		`event: message_delta`,
+		`data: {"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"input_tokens":90,"output_tokens":7,"cache_read_input_tokens":0,"cache_creation_input_tokens":0}}`,
+		``,
+		`event: message_stop`,
+		`data: {"type":"message_stop"}`,
+		``,
+	}, "\n")
+	resp := &http.Response{StatusCode: http.StatusOK, Header: http.Header{}, Body: io.NopCloser(strings.NewReader(stream))}
+
+	result, err := (&GatewayService{}).handleResponsesStreamingResponse(resp, c, "customer-sol", "gpt-5.6-sol", nil, time.Now(), 120)
+	require.NoError(t, err)
+	require.True(t, result.ClientDisconnect)
+	require.Equal(t, 90, result.Usage.InputTokens)
+	require.Equal(t, 7, result.Usage.OutputTokens)
+}
+
+func TestKiroInputUsageFallbackPreservesAuthoritativeZero(t *testing.T) {
+	usage := ClaudeUsage{InputTokens: 120, CacheReadInputTokens: 30, CacheCreationInputTokens: 20}
+	reported := mergeAuthoritativeKiroInputUsageFromAnthropicPayload(&usage, `{"type":"message_delta","usage":{"input_tokens":0,"cache_read_input_tokens":0,"cache_creation_input_tokens":0}}`)
+	require.True(t, reported)
+	applyKiroInputUsageFallback(&usage, 120, reported)
+	require.Zero(t, usage.InputTokens)
+	require.Zero(t, usage.CacheReadInputTokens)
+	require.Zero(t, usage.CacheCreationInputTokens)
 }
 
 func TestParseAnthropicSSEField(t *testing.T) {
@@ -202,7 +266,7 @@ func TestHandleResponsesBufferedStreamingResponse_CompactSSEFormat(t *testing.T)
 	}
 
 	svc := &GatewayService{}
-	result, err := svc.handleResponsesBufferedStreamingResponse(resp, c, "claude-sonnet-4.5", "claude-sonnet-4.5", nil, time.Now())
+	result, err := svc.handleResponsesBufferedStreamingResponse(resp, c, "claude-sonnet-4.5", "claude-sonnet-4.5", nil, time.Now(), 0)
 	require.NoError(t, err)
 	require.NotNil(t, result)
 	require.Equal(t, 10, result.Usage.InputTokens)
@@ -236,7 +300,7 @@ func TestHandleResponsesStreamingResponse_CompactSSEFormat(t *testing.T) {
 	}
 
 	svc := &GatewayService{}
-	result, err := svc.handleResponsesStreamingResponse(resp, c, "claude-sonnet-4.5", "claude-sonnet-4.5", nil, time.Now())
+	result, err := svc.handleResponsesStreamingResponse(resp, c, "claude-sonnet-4.5", "claude-sonnet-4.5", nil, time.Now(), 0)
 	require.NoError(t, err)
 	require.NotNil(t, result)
 	require.Equal(t, 15, result.Usage.InputTokens)

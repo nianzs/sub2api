@@ -12,6 +12,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	kiropkg "github.com/Wei-Shaw/sub2api/internal/pkg/kiro"
@@ -27,6 +28,57 @@ type kiroEndpointConfig struct {
 	URL       string
 	AmzTarget string
 	Name      string
+}
+
+type kiroStreamReadCloser struct {
+	reader   io.ReadCloser
+	upstream io.Closer
+	cancel   context.CancelFunc
+	once     sync.Once
+}
+
+func (s *GatewayService) newKiroStreamContext(parent context.Context) (context.Context, context.CancelFunc) {
+	if parent == nil {
+		return context.WithCancel(context.Background())
+	}
+	if parent.Err() != nil {
+		return context.WithCancel(parent)
+	}
+	streamCtx, cancel := context.WithCancel(context.WithoutCancel(parent))
+	go func() {
+		select {
+		case <-parent.Done():
+			timer := time.NewTimer(s.kiroDisconnectDrainTimeout())
+			defer timer.Stop()
+			select {
+			case <-timer.C:
+				cancel()
+			case <-streamCtx.Done():
+			}
+		case <-streamCtx.Done():
+		}
+	}()
+	return streamCtx, cancel
+}
+
+func (r *kiroStreamReadCloser) Read(p []byte) (int, error) {
+	return r.reader.Read(p)
+}
+
+func (r *kiroStreamReadCloser) Close() error {
+	var closeErr error
+	r.once.Do(func() {
+		if r.cancel != nil {
+			r.cancel()
+		}
+		if r.upstream != nil {
+			closeErr = r.upstream.Close()
+		}
+		if err := r.reader.Close(); closeErr == nil {
+			closeErr = err
+		}
+	})
+	return closeErr
 }
 
 const kiroInvalidModelTempUnschedDuration = time.Minute
@@ -284,14 +336,15 @@ func (s *GatewayService) openKiroAnthropicStreamResponse(ctx context.Context, ac
 		return nil, 0, fmt.Errorf("kiro requires oauth or apikey token, got %s", tokenType)
 	}
 
-	inputTokens := estimateKiroInputTokens(ctx, anthropicBody)
+	streamCtx, cancelStream := s.newKiroStreamContext(ctx)
+	inputTokens := estimateKiroInputTokens(streamCtx, anthropicBody)
 	if isOnlyWebSearchToolInBody(anthropicBody) {
-		cacheUsage := s.buildKiroCacheEmulationUsage(ctx, account, group, anthropicBody, mappedModel, inputTokens)
 		pr, pw := io.Pipe()
 		headers := make(http.Header)
 		headers.Set("Content-Type", "text/event-stream")
 		go func() {
-			streamErr := s.streamKiroWebSearchAsAnthropic(ctx, account, anthropicBody, mappedModel, requestModel, token, inputTokens, headers, pw, cacheUsage)
+			defer cancelStream()
+			streamErr := s.streamKiroWebSearchAsAnthropic(streamCtx, account, group, anthropicBody, mappedModel, requestModel, token, headers, pw)
 			if streamErr != nil {
 				_ = pw.CloseWithError(streamErr)
 				return
@@ -301,12 +354,13 @@ func (s *GatewayService) openKiroAnthropicStreamResponse(ctx context.Context, ac
 		return &http.Response{
 			StatusCode: http.StatusOK,
 			Header:     headers,
-			Body:       pr,
+			Body:       &kiroStreamReadCloser{reader: pr, cancel: cancelStream},
 		}, inputTokens, nil
 	}
 
-	resp, requestCtx, err := s.executeKiroUpstreamWithParsed(ctx, account, parsed, anthropicBody, mappedModel, requestModel, token, headers)
+	resp, requestCtx, err := s.executeKiroUpstreamWithParsed(streamCtx, account, parsed, anthropicBody, mappedModel, requestModel, token, headers)
 	if err != nil {
+		cancelStream()
 		var failoverErr *UpstreamFailoverError
 		if errors.As(err, &failoverErr) {
 			return nil, inputTokens, err
@@ -314,9 +368,10 @@ func (s *GatewayService) openKiroAnthropicStreamResponse(ctx context.Context, ac
 		return nil, inputTokens, err
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		resp.Body = &kiroStreamReadCloser{reader: resp.Body, cancel: cancelStream}
 		return resp, inputTokens, nil
 	}
-	cacheUsage := s.buildKiroCacheEmulationUsage(ctx, account, group, anthropicBody, mappedModel, inputTokens)
+	cacheUsage := s.buildKiroCacheEmulationUsage(streamCtx, account, group, anthropicBody, mappedModel, inputTokens)
 	requestCtx.CacheEmulationUsage = cacheUsage.toKiroUsage()
 
 	pr, pw := io.Pipe()
@@ -327,8 +382,9 @@ func (s *GatewayService) openKiroAnthropicStreamResponse(ctx context.Context, ac
 	wrappedHeaders.Set("request-id", claudeReqID)
 
 	go func() {
+		defer cancelStream()
 		defer func() { _ = resp.Body.Close() }()
-		_, streamErr := kiropkg.StreamEventStreamAsAnthropicWithContext(ctx, resp.Body, pw, requestModel, inputTokens, requestCtx)
+		_, streamErr := kiropkg.StreamEventStreamAsAnthropicWithContext(streamCtx, resp.Body, pw, requestModel, inputTokens, requestCtx)
 		if streamErr != nil {
 			_, _ = io.WriteString(pw, "event: error\ndata: {\"type\":\"error\",\"error\":{\"type\":\"api_error\",\"message\":\"stream interrupted\"}}\n\n")
 			_ = pw.CloseWithError(streamErr)
@@ -340,7 +396,11 @@ func (s *GatewayService) openKiroAnthropicStreamResponse(ctx context.Context, ac
 	return &http.Response{
 		StatusCode: resp.StatusCode,
 		Header:     wrappedHeaders,
-		Body:       pr,
+		Body: &kiroStreamReadCloser{
+			reader:   pr,
+			upstream: resp.Body,
+			cancel:   cancelStream,
+		},
 	}, inputTokens, nil
 }
 
@@ -366,7 +426,7 @@ func (s *GatewayService) executeKiroUpstreamWithParsed(ctx context.Context, acco
 	modelID := kiropkg.MapModel(mappedModel)
 	currentToken := token
 
-	endpoints := buildKiroEndpoints(account, mode)
+	endpoints := buildKiroEndpointsForModel(account, mode, modelID)
 	proxyURL := kiroProxyURL(account)
 	tlsProfile := s.tlsFPProfileService.ResolveTLSProfile(account)
 	maxRetries := 2
@@ -537,6 +597,10 @@ func (s *GatewayService) executeKiroUpstreamWithParsed(ctx context.Context, acco
 const kiroKRSEndpointURL = "https://runtime.us-east-1.kiro.dev/generateAssistantResponse"
 
 func buildKiroEndpoints(account *Account, mode string) []kiroEndpointConfig {
+	return buildKiroEndpointsForModel(account, mode, "")
+}
+
+func buildKiroEndpointsForModel(account *Account, mode, model string) []kiroEndpointConfig {
 	if mode == KiroEndpointModeKRS {
 		return []kiroEndpointConfig{
 			{
@@ -545,7 +609,7 @@ func buildKiroEndpoints(account *Account, mode string) []kiroEndpointConfig {
 			},
 		}
 	}
-	region := kiroAPIRegion(account)
+	region := kiroInferenceRegion(account, model)
 	qEndpoint := kiroEndpointConfig{
 		URL:  fmt.Sprintf("https://q.%s.amazonaws.com/generateAssistantResponse", region),
 		Name: "AmazonQ",
@@ -561,6 +625,15 @@ func buildKiroEndpoints(account *Account, mode string) []kiroEndpointConfig {
 		}
 	}
 	return []kiroEndpointConfig{qEndpoint}
+}
+
+func kiroInferenceRegion(account *Account, model string) string {
+	switch kiropkg.MapModel(model) {
+	case "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna":
+		return kiroDefaultRegion
+	default:
+		return kiroAPIRegion(account)
+	}
 }
 
 // kiroEndpointModeForRequest 从 ParsedRequest 取 group 配置的 Kiro endpoint 模式；
@@ -784,12 +857,9 @@ func estimateKiroInputTokens(ctx context.Context, body []byte) int {
 }
 
 func kiroUsageToClaude(usage kiropkg.Usage, fallbackInput int) ClaudeUsage {
-	inputTokens := usage.InputTokens
-	if inputTokens == 0 {
-		inputTokens = fallbackInput
-	}
+	usage = resolveKiroInputUsage(usage, fallbackInput)
 	return ClaudeUsage{
-		InputTokens:              inputTokens,
+		InputTokens:              usage.InputTokens,
 		OutputTokens:             usage.OutputTokens,
 		CacheReadInputTokens:     usage.CacheReadInputTokens,
 		CacheCreationInputTokens: usage.CacheCreationInputTokens,
@@ -797,6 +867,18 @@ func kiroUsageToClaude(usage kiropkg.Usage, fallbackInput int) ClaudeUsage {
 		CacheCreation1hTokens:    usage.CacheCreation1hInputTokens,
 		KiroCredits:              usage.KiroCredits,
 	}
+}
+
+func resolveKiroInputUsage(usage kiropkg.Usage, fallbackInput int) kiropkg.Usage {
+	if usage.InputTokens != 0 || usage.InputTokensReported {
+		return usage
+	}
+	usage.InputTokens = fallbackInput
+	usage.InputTokensReported = true
+	if usage.TotalTokens == 0 {
+		usage.TotalTokens = usage.InputTokens + usage.OutputTokens + usage.CacheReadInputTokens + usage.CacheCreationInputTokens
+	}
+	return usage
 }
 
 func (s *GatewayService) markKiroInvalidModelRateLimited(ctx context.Context, account *Account, mappedModel string) {

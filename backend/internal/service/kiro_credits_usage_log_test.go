@@ -23,6 +23,17 @@ func TestKiroUsageToClaudeMapsKiroCredits(t *testing.T) {
 	require.InDelta(t, 0.17, usage.KiroCredits, 0.000001)
 }
 
+func TestKiroUsageToClaudePreservesAuthoritativeZeroInputTokens(t *testing.T) {
+	usage := kiroUsageToClaude(kiropkg.Usage{
+		InputTokens:          0,
+		InputTokensReported:  true,
+		CacheReadInputTokens: 120,
+	}, 120)
+
+	require.Zero(t, usage.InputTokens)
+	require.Equal(t, 120, usage.CacheReadInputTokens)
+}
+
 func TestBuildRecordUsageLogPersistsPositiveKiroCredits(t *testing.T) {
 	svc := &GatewayService{}
 	log := svc.buildRecordUsageLog(
