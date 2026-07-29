@@ -52,7 +52,36 @@ type kiroCacheTracker struct {
 
 var globalKiroCacheTracker = &kiroCacheTracker{entries: make(map[uint64]map[[32]byte]kiroCacheEntry)}
 
+// kiroCacheEmulationPlan 把缓存估算拆成"计算"与"落盘"两步：compute() 只读,
+// commit() 才会把本次前缀写入 tracker。调用方应在确认上游请求成功后再 commit(),
+// 避免请求失败/未发出时就把内容错误标记为已缓存。
+type kiroCacheEmulationPlan struct {
+	usage    *kiroCacheEmulationUsage
+	cacheKey uint64
+	profile  *kiroCacheProfile
+}
+
+func (p *kiroCacheEmulationPlan) result() *kiroCacheEmulationUsage {
+	if p == nil {
+		return nil
+	}
+	return p.usage
+}
+
+func (p *kiroCacheEmulationPlan) commit() {
+	if p == nil || p.profile == nil || p.cacheKey == 0 {
+		return
+	}
+	globalKiroCacheTracker.update(p.cacheKey, p.profile)
+}
+
 func (s *GatewayService) buildKiroCacheEmulationUsage(ctx context.Context, account *Account, group *Group, body []byte, model string, inputTokens int) *kiroCacheEmulationUsage {
+	plan := s.prepareKiroCacheEmulationUsage(ctx, account, group, body, model, inputTokens)
+	plan.commit()
+	return plan.result()
+}
+
+func (s *GatewayService) prepareKiroCacheEmulationUsage(ctx context.Context, account *Account, group *Group, body []byte, model string, inputTokens int) *kiroCacheEmulationPlan {
 	NormalizeGroupRuntimeFields(group)
 	if group == nil || !group.EffectiveKiroCacheEmulationEnabled() || account == nil || account.ID <= 0 || len(body) == 0 {
 		return nil
@@ -61,10 +90,16 @@ func (s *GatewayService) buildKiroCacheEmulationUsage(ctx context.Context, accou
 	if !ok {
 		return nil
 	}
-	return s.buildKiroCacheEmulationUsageFromProfile(account, group, profile, inputTokens)
+	return s.prepareKiroCacheEmulationPlanFromProfile(account, group, profile, inputTokens)
 }
 
 func (s *GatewayService) buildKiroResponsesCacheEmulationUsage(ctx context.Context, account *Account, group *Group, body []byte, model string, inputTokens int) *kiroCacheEmulationUsage {
+	plan := s.prepareKiroResponsesCacheEmulationUsage(ctx, account, group, body, model, inputTokens)
+	plan.commit()
+	return plan.result()
+}
+
+func (s *GatewayService) prepareKiroResponsesCacheEmulationUsage(ctx context.Context, account *Account, group *Group, body []byte, model string, inputTokens int) *kiroCacheEmulationPlan {
 	NormalizeGroupRuntimeFields(group)
 	if group == nil || !group.EffectiveKiroCacheEmulationEnabled() || account == nil || account.ID <= 0 || len(body) == 0 {
 		return nil
@@ -73,10 +108,16 @@ func (s *GatewayService) buildKiroResponsesCacheEmulationUsage(ctx context.Conte
 	if !ok {
 		return nil
 	}
-	return s.buildKiroCacheEmulationUsageFromProfile(account, group, profile, inputTokens)
+	return s.prepareKiroCacheEmulationPlanFromProfile(account, group, profile, inputTokens)
 }
 
 func (s *GatewayService) buildKiroChatCompletionsCacheEmulationUsage(ctx context.Context, account *Account, group *Group, body []byte, model string, inputTokens int) *kiroCacheEmulationUsage {
+	plan := s.prepareKiroChatCompletionsCacheEmulationUsage(ctx, account, group, body, model, inputTokens)
+	plan.commit()
+	return plan.result()
+}
+
+func (s *GatewayService) prepareKiroChatCompletionsCacheEmulationUsage(ctx context.Context, account *Account, group *Group, body []byte, model string, inputTokens int) *kiroCacheEmulationPlan {
 	NormalizeGroupRuntimeFields(group)
 	if group == nil || !group.EffectiveKiroCacheEmulationEnabled() || account == nil || account.ID <= 0 || len(body) == 0 {
 		return nil
@@ -89,10 +130,10 @@ func (s *GatewayService) buildKiroChatCompletionsCacheEmulationUsage(ctx context
 	if effectiveInputTokens <= 0 {
 		effectiveInputTokens = profile.totalInputTokens
 	}
-	return s.buildKiroCacheEmulationUsageFromProfile(account, group, profile, effectiveInputTokens)
+	return s.prepareKiroCacheEmulationPlanFromProfile(account, group, profile, effectiveInputTokens)
 }
 
-func (s *GatewayService) buildKiroCacheEmulationUsageFromProfile(account *Account, group *Group, profile *kiroCacheProfile, inputTokens int) *kiroCacheEmulationUsage {
+func (s *GatewayService) prepareKiroCacheEmulationPlanFromProfile(account *Account, group *Group, profile *kiroCacheProfile, inputTokens int) *kiroCacheEmulationPlan {
 	if group == nil || account == nil || account.ID <= 0 || profile == nil {
 		return nil
 	}
@@ -101,7 +142,6 @@ func (s *GatewayService) buildKiroCacheEmulationUsageFromProfile(account *Accoun
 		return nil
 	}
 	result := globalKiroCacheTracker.compute(cacheKey, profile)
-	globalKiroCacheTracker.update(cacheKey, profile)
 	ratio := group.EffectiveKiroCacheEmulationRatio()
 	result.CacheReadInputTokens = scaleKiroCacheTokens(result.CacheReadInputTokens, ratio)
 	result.CacheCreationInputTokens = scaleKiroCacheTokens(result.CacheCreationInputTokens, ratio)
@@ -112,9 +152,9 @@ func (s *GatewayService) buildKiroCacheEmulationUsageFromProfile(account *Accoun
 		result.InputTokens = 0
 	}
 	if result.CacheReadInputTokens == 0 && result.CacheCreationInputTokens == 0 {
-		return nil
+		result = nil
 	}
-	return result
+	return &kiroCacheEmulationPlan{usage: result, cacheKey: cacheKey, profile: profile}
 }
 
 func scaleKiroCacheTokens(tokens int, ratio float64) int {

@@ -47,6 +47,42 @@ func TestKiroCacheEmulationUsesSnapshotGroupWithoutRepo(t *testing.T) {
 	}
 }
 
+// prepareKiroCacheEmulationUsage must not mutate the tracker until commit() is
+// called: computing a plan twice without committing should observe the exact
+// same (miss) state both times, since neither call ever wrote a cache entry.
+func TestKiroCacheEmulationPrepareDoesNotMutateUntilCommit(t *testing.T) {
+	resetKiroCacheTracker()
+	svc := &GatewayService{}
+	account := &Account{ID: 55, Platform: PlatformKiro}
+	group := kiroCacheGroup(1)
+	body := kiroCacheRequestBody("deferred commit", false)
+
+	planA := svc.prepareKiroCacheEmulationUsage(context.Background(), account, group, body, "claude-sonnet-4-6", 2000)
+	require.NotNil(t, planA)
+	usageA := planA.result()
+	require.NotNil(t, usageA)
+	require.Equal(t, 2000, usageA.CacheCreationInputTokens)
+	require.Equal(t, 0, usageA.CacheReadInputTokens)
+
+	// Not committed: a second prepare for the same content must still observe
+	// a miss, proving the first prepare() never wrote to the tracker.
+	planB := svc.prepareKiroCacheEmulationUsage(context.Background(), account, group, body, "claude-sonnet-4-6", 2000)
+	require.NotNil(t, planB)
+	usageB := planB.result()
+	require.NotNil(t, usageB)
+	require.Equal(t, 2000, usageB.CacheCreationInputTokens)
+	require.Equal(t, 0, usageB.CacheReadInputTokens)
+
+	// Now commit; a subsequent prepare should observe a cache hit.
+	planB.commit()
+	planC := svc.prepareKiroCacheEmulationUsage(context.Background(), account, group, body, "claude-sonnet-4-6", 2000)
+	require.NotNil(t, planC)
+	usageC := planC.result()
+	require.NotNil(t, usageC)
+	require.Equal(t, 2000, usageC.CacheReadInputTokens)
+	require.Equal(t, 0, usageC.CacheCreationInputTokens)
+}
+
 func TestKiroCacheEmulationRatioScalesTokens(t *testing.T) {
 	resetKiroCacheTracker()
 	svc := &GatewayService{}
