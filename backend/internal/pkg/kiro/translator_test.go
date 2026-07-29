@@ -348,12 +348,70 @@ func TestBuildKiroPayloadDoesNotInjectClaudeThinkingTagsForGPTModels(t *testing.
 	require.NoError(t, err)
 
 	systemContent := gjson.GetBytes(kiroBuildResult.Payload, "conversationState.history.0.userInputMessage.content").String()
-	require.Contains(t, systemContent, "You are Claude, a senior software engineer")
+	// GPT-5.6 is not a Claude re-skin: the builtin identity prompt must not tell
+	// the model to claim a Claude identity.
+	require.Contains(t, systemContent, "You are GPT-5.6 Terra, a senior software engineer")
+	require.NotContains(t, systemContent, "You are Claude,")
 	require.NotContains(t, systemContent, "<thinking_mode>")
 	require.NotContains(t, systemContent, "<max_thinking_length>")
 	require.NotContains(t, systemContent, "<thinking_effort>")
 	require.False(t, kiroBuildResult.Context.ThinkingEnabled)
 	require.False(t, gjson.GetBytes(kiroBuildResult.Payload, "additionalModelRequestFields").Exists())
+}
+
+// GPT-5.6 does not use Claude's thinking/output_config directive path, but a
+// client-requested reasoning effort must still reach Kiro via the model's own
+// native additionalModelRequestFields.reasoning.effort field.
+func TestBuildKiroPayloadForwardsGPTReasoningEffort(t *testing.T) {
+	cases := []struct {
+		name       string
+		body       string
+		wantEffort string
+	}{
+		{
+			name:       "reasoning_effort field",
+			body:       `{"model":"gpt-5.6-sol","reasoning_effort":"high","messages":[{"role":"user","content":"hi"}]}`,
+			wantEffort: "high",
+		},
+		{
+			name:       "nested reasoning.effort field",
+			body:       `{"model":"gpt-5.6-sol","reasoning":{"effort":"low"},"messages":[{"role":"user","content":"hi"}]}`,
+			wantEffort: "low",
+		},
+		{
+			name:       "responses-style output_config.effort field",
+			body:       `{"model":"gpt-5.6-sol","output_config":{"effort":"medium"},"messages":[{"role":"user","content":"hi"}]}`,
+			wantEffort: "medium",
+		},
+		{
+			name:       "max normalizes to xhigh",
+			body:       `{"model":"gpt-5.6-sol","reasoning_effort":"max","messages":[{"role":"user","content":"hi"}]}`,
+			wantEffort: "xhigh",
+		},
+		{
+			name:       "unrecognized effort is dropped",
+			body:       `{"model":"gpt-5.6-sol","reasoning_effort":"ultra","messages":[{"role":"user","content":"hi"}]}`,
+			wantEffort: "",
+		},
+		{
+			name:       "no effort requested",
+			body:       `{"model":"gpt-5.6-sol","messages":[{"role":"user","content":"hi"}]}`,
+			wantEffort: "",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			result, err := BuildKiroPayloadWithContext([]byte(tc.body), "gpt-5.6-sol", "", "AI_EDITOR", nil)
+			require.NoError(t, err)
+			if tc.wantEffort == "" {
+				require.False(t, gjson.GetBytes(result.Payload, "additionalModelRequestFields").Exists())
+				return
+			}
+			require.Equal(t, tc.wantEffort, gjson.GetBytes(result.Payload, "additionalModelRequestFields.reasoning.effort").String())
+			require.False(t, gjson.GetBytes(result.Payload, "additionalModelRequestFields.thinking").Exists())
+		})
+	}
 }
 
 func TestBuildKiroPayloadInjectsAdaptiveThinkingForOpus46ThinkingModel(t *testing.T) {
@@ -682,6 +740,24 @@ func TestParseNonStreamingEventStreamCapturesKiroCredits(t *testing.T) {
 	require.False(t, gjson.GetBytes(result.ResponseBody, "usage._sub2api_kiro_credits").Exists())
 }
 
+// A legacy (non-tokenUsage) inputTokens event reporting an explicit 0 must win
+// over a stale nonzero value from an earlier event in the same stream, instead
+// of being treated as absent and silently ignored.
+func TestUpdateUsageFromEventPreservesReportedZeroLegacyInputTokens(t *testing.T) {
+	var usage Usage
+	updateUsageFromEvent(&usage, "messageMetadataEvent", map[string]any{
+		"inputTokens": 42,
+	})
+	require.Equal(t, 42, usage.InputTokens)
+	require.True(t, usage.InputTokensReported)
+
+	updateUsageFromEvent(&usage, "messageMetadataEvent", map[string]any{
+		"inputTokens": 0,
+	})
+	require.Equal(t, 0, usage.InputTokens)
+	require.True(t, usage.InputTokensReported)
+}
+
 func TestUpdateUsageFromEventCapturesKiroCreditsAliases(t *testing.T) {
 	cases := []struct {
 		name  string
@@ -984,6 +1060,40 @@ func TestParseNonStreamingEventStreamMergesManyReasoningFragments(t *testing.T) 
 	require.Equal(t, "text", gjson.GetBytes(result.ResponseBody, "content.1.type").String())
 	require.Equal(t, "answer", gjson.GetBytes(result.ResponseBody, "content.1.text").String())
 	require.False(t, gjson.GetBytes(result.ResponseBody, "content.2").Exists())
+}
+
+// GPT-5.6 reasoning must never surface as a Claude "thinking" content block
+// (that's a Claude-specific response shape), but the suppressed reasoning text
+// must still count toward the output-token fallback estimate instead of being
+// silently discarded when Kiro doesn't report an authoritative output count.
+func TestParseNonStreamingEventStreamSuppressesGPTReasoningIntoOutputEstimate(t *testing.T) {
+	stream := bytes.NewBuffer(nil)
+	for _, frag := range []string{"I ", "need ", "to ", "think"} {
+		_, _ = stream.Write(buildEventStreamFrame(t, "reasoningContentEvent", map[string]any{
+			"reasoningContentEvent": map[string]any{"text": frag},
+		}))
+	}
+	_, _ = stream.Write(buildEventStreamFrame(t, "assistantResponseEvent", map[string]any{
+		"assistantResponseEvent": map[string]any{"content": "answer"},
+	}))
+
+	result, err := ParseNonStreamingEventStreamWithContext(stream, "gpt-5.6-terra", KiroRequestContext{})
+	require.NoError(t, err)
+	require.Equal(t, "text", gjson.GetBytes(result.ResponseBody, "content.0.type").String())
+	require.Equal(t, "answer", gjson.GetBytes(result.ResponseBody, "content.0.text").String())
+	require.False(t, gjson.GetBytes(result.ResponseBody, "content.1").Exists())
+	require.NotContains(t, string(result.ResponseBody), "thinking")
+	require.Greater(t, result.Usage.OutputTokens, 0)
+
+	// Compare against a run with the reasoning stripped entirely: the estimate
+	// with reasoning present must be larger, proving it wasn't dropped.
+	baseline := bytes.NewBuffer(nil)
+	_, _ = baseline.Write(buildEventStreamFrame(t, "assistantResponseEvent", map[string]any{
+		"assistantResponseEvent": map[string]any{"content": "answer"},
+	}))
+	baselineResult, err := ParseNonStreamingEventStreamWithContext(baseline, "gpt-5.6-terra", KiroRequestContext{})
+	require.NoError(t, err)
+	require.Greater(t, result.Usage.OutputTokens, baselineResult.Usage.OutputTokens)
 }
 
 func TestStreamEventStreamAsAnthropicExtractsEmbeddedToolCall(t *testing.T) {
@@ -1948,6 +2058,24 @@ func TestStreamEventStreamAsAnthropicIgnoresReasoningContentWhenThinkingDisabled
 	require.NotContains(t, out.String(), `"type":"thinking"`)
 }
 
+// Streaming must not silently drop GPT-5.6 reasoning content: it stays out of
+// the visible SSE output (never a "thinking" block, matching the non-streaming
+// suppression behavior) but must still count toward the output-token fallback
+// estimate used when Kiro doesn't report an authoritative output count.
+func TestStreamEventStreamAsAnthropicCountsSuppressedGPTReasoningTowardOutputEstimate(t *testing.T) {
+	stream := bytes.NewBuffer(nil)
+	_, _ = stream.Write(buildEventStreamFrame(t, "reasoningContentEvent", map[string]any{
+		"reasoningContentEvent": map[string]any{"text": "a very long hidden chain of thought"},
+	}))
+
+	var out bytes.Buffer
+	result, err := StreamEventStreamAsAnthropicWithContext(context.Background(), stream, &out, "gpt-5.6-terra", 9, KiroRequestContext{})
+	require.NoError(t, err)
+	require.NotContains(t, out.String(), "hidden chain of thought")
+	require.NotContains(t, out.String(), `"type":"thinking"`)
+	require.Greater(t, result.Usage.OutputTokens, 0)
+}
+
 func TestBuildAssistantMessageStructUsesSpacePlaceholderForToolOnly(t *testing.T) {
 	msg := gjson.Parse(`{
 		"role":"assistant",
@@ -2444,6 +2572,75 @@ func TestKiroCacheEmulationUsageInjectedIntoStreamAndResult(t *testing.T) {
 	require.Contains(t, output, `"cache_read_input_tokens":70`)
 	require.Contains(t, output, `"cache_creation_input_tokens":30`)
 	require.Contains(t, output, `"ephemeral_1h_input_tokens":30`)
+}
+
+// An authoritative cacheReadInputTokens/cacheWriteInputTokens of 0 means Kiro
+// confirmed no real cache activity happened; that must not be indistinguishable
+// from the field being absent, and must suppress the client-side cache-emulation
+// overlay instead of letting it silently paper over the authoritative zero.
+func TestKiroCacheEmulationUsageDoesNotOverrideAuthoritativeZeroCacheUsage(t *testing.T) {
+	stream := bytes.NewBuffer(nil)
+	_, _ = stream.Write(buildEventStreamFrame(t, "messageMetadataEvent", map[string]any{
+		"messageMetadataEvent": map[string]any{
+			"tokenUsage": map[string]any{
+				"uncachedInputTokens":  120,
+				"outputTokens":         7,
+				"cacheReadInputTokens": 0,
+			},
+		},
+	}))
+	result, err := ParseNonStreamingEventStreamWithContext(stream, "claude-sonnet-4-5", KiroRequestContext{
+		CacheEmulationUsage: &Usage{
+			InputTokens:              20,
+			CacheReadInputTokens:     70,
+			CacheCreationInputTokens: 30,
+		},
+	})
+	require.NoError(t, err)
+	// Authoritative zero must win over the simulated nonzero cache guess.
+	require.Equal(t, 0, result.Usage.CacheReadInputTokens)
+	require.Equal(t, 0, result.Usage.CacheCreationInputTokens)
+	require.Equal(t, 120, result.Usage.InputTokens)
+}
+
+// cacheWriteInputTokens was previously never read at all; a real cache-creation
+// report from Kiro must populate CacheCreationInputTokens.
+func TestUpdateUsageFromEventCapturesCacheWriteInputTokens(t *testing.T) {
+	var usage Usage
+	updateUsageFromEvent(&usage, "messageMetadataEvent", map[string]any{
+		"messageMetadataEvent": map[string]any{
+			"tokenUsage": map[string]any{
+				"cacheWriteInputTokens": 45,
+			},
+		},
+	})
+	require.Equal(t, 45, usage.CacheCreationInputTokens)
+}
+
+// Once GPT-5.6 authoritatively reports its input token count, that snapshot is
+// treated as complete: client-side cache emulation must not be layered on top,
+// even though it would otherwise apply to Claude models via the same code path.
+func TestKiroCacheEmulationUsagePreservesReportedInputForGPTModel(t *testing.T) {
+	stream := bytes.NewBuffer(nil)
+	_, _ = stream.Write(buildEventStreamFrame(t, "messageMetadataEvent", map[string]any{
+		"messageMetadataEvent": map[string]any{
+			"tokenUsage": map[string]any{
+				"uncachedInputTokens": 500,
+				"outputTokens":        7,
+			},
+		},
+	}))
+	result, err := ParseNonStreamingEventStreamWithContext(stream, "gpt-5.6-terra", KiroRequestContext{
+		CacheEmulationUsage: &Usage{
+			InputTokens:              20,
+			CacheReadInputTokens:     70,
+			CacheCreationInputTokens: 30,
+		},
+	})
+	require.NoError(t, err)
+	require.Equal(t, 500, result.Usage.InputTokens)
+	require.Equal(t, 0, result.Usage.CacheReadInputTokens)
+	require.Equal(t, 0, result.Usage.CacheCreationInputTokens)
 }
 
 func TestNormalizeStreamingToolInput(t *testing.T) {

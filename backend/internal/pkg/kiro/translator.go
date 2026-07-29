@@ -76,6 +76,7 @@ var (
 
 type Usage struct {
 	InputTokens                int
+	InputTokensReported        bool
 	OutputTokens               int
 	TotalTokens                int
 	CacheReadInputTokens       int
@@ -83,6 +84,7 @@ type Usage struct {
 	CacheCreation5mInputTokens int
 	CacheCreation1hInputTokens int
 	KiroCredits                float64
+	realCacheUsageReported     bool
 }
 
 type StreamResult struct {
@@ -99,6 +101,7 @@ type ParseResult struct {
 
 type KiroRequestContext struct {
 	ToolNameMap              map[string]string
+	UpstreamModel            string
 	ThinkingEnabled          bool
 	CacheEmulationUsage      *Usage
 	StructuredOutputToolName string
@@ -349,6 +352,26 @@ func isKiroGPTModel(modelID string) bool {
 	}
 }
 
+// extractKiroGPTReasoningEffort 从客户端请求体中解析 GPT-5.6 的 reasoning effort。
+// 依次尝试 Responses 风格的 output_config.effort、OpenAI 风格的 reasoning_effort/
+// reasoning.effort;"max" 归一化为 Kiro 支持的最高档 "xhigh"。
+func extractKiroGPTReasoningEffort(body []byte) string {
+	effort := ""
+	for _, path := range []string{"output_config.effort", "reasoning_effort", "reasoning.effort"} {
+		if effort = strings.ToLower(strings.TrimSpace(gjson.GetBytes(body, path).String())); effort != "" {
+			break
+		}
+	}
+	switch effort {
+	case "max":
+		return "xhigh"
+	case "low", "medium", "high", "xhigh":
+		return effort
+	default:
+		return ""
+	}
+}
+
 func kiroMaxOutputTokensForModel(model string) int {
 	normalized := normalizeModelAlias(model)
 	switch normalized {
@@ -374,7 +397,7 @@ func clampFloat(value, minValue, maxValue float64) float64 {
 }
 
 func BuildKiroPayloadWithContext(claudeBody []byte, modelID, profileArn, origin string, headers http.Header) (*KiroBuildResult, error) {
-	requestCtx := KiroRequestContext{ToolNameMap: map[string]string{}}
+	requestCtx := KiroRequestContext{ToolNameMap: map[string]string{}, UpstreamModel: modelID}
 	outputCap := kiroMaxOutputTokensForModel(firstNonEmptyString(gjson.GetBytes(claudeBody, "model").String(), modelID))
 	var maxTokens int64
 	if mt := gjson.GetBytes(claudeBody, "max_tokens"); mt.Exists() {
@@ -433,11 +456,13 @@ func BuildKiroPayloadWithContext(claudeBody []byte, modelID, profileArn, origin 
 			baseSystem = inlineSystem
 		}
 	}
+	gptReasoningEffort := ""
 	if isKiroGPTModel(modelID) {
+		gptReasoningEffort = extractKiroGPTReasoningEffort(claudeBody)
 		thinking = nil
 		requestCtx.ThinkingEnabled = false
 	}
-	systemPrompt := buildInjectedSystemPrompt(baseSystem, thinking, toolChoiceHint)
+	systemPrompt := buildInjectedSystemPrompt(baseSystem, modelID, thinking, toolChoiceHint)
 
 	history, currentUserMsg, currentToolResults := processMessages(filteredMessages, modelID, normalizeOrigin(origin), &requestCtx)
 	history = prependSystemHistory(history, systemPrompt, modelID, normalizeOrigin(origin))
@@ -507,7 +532,7 @@ func BuildKiroPayloadWithContext(claudeBody []byte, modelID, profileArn, origin 
 		},
 		ProfileArn:                   profileArn,
 		InferenceConfig:              inferenceConfig,
-		AdditionalModelRequestFields: buildAdditionalModelRequestFields(thinking, modelID),
+		AdditionalModelRequestFields: buildAdditionalModelRequestFields(thinking, modelID, gptReasoningEffort),
 	}
 	payloadBytes, err := json.Marshal(payload)
 	if err != nil {
@@ -517,12 +542,13 @@ func BuildKiroPayloadWithContext(claudeBody []byte, modelID, profileArn, origin 
 }
 
 func ParseNonStreamingEventStreamWithContext(body io.Reader, model string, requestCtx KiroRequestContext) (*ParseResult, error) {
-	content, toolUses, usage, stopReason, err := parseEventStream(body)
+	isGPT := isKiroGPTModel(firstNonEmptyString(requestCtx.UpstreamModel, model))
+	content, toolUses, usage, stopReason, err := parseEventStream(body, !isGPT)
 	if err != nil {
 		return nil, err
 	}
 	if requestCtx.CacheEmulationUsage != nil {
-		usage = mergeKiroCacheEmulationUsage(usage, requestCtx.CacheEmulationUsage)
+		usage = mergeKiroCacheEmulationUsage(usage, requestCtx.CacheEmulationUsage, isGPT)
 	}
 	return &ParseResult{
 		ResponseBody: buildClaudeResponse(content, toolUses, model, usage, stopReason, requestCtx),
@@ -535,6 +561,7 @@ func StreamEventStreamAsAnthropicWithContext(ctx context.Context, body io.Reader
 	reader := bufio.NewReader(body)
 	start := time.Now()
 	var firstDelta *time.Duration
+	isGPT := isKiroGPTModel(firstNonEmptyString(requestCtx.UpstreamModel, model))
 	usage := Usage{InputTokens: inputTokens}
 	contentBlockIndex := -1
 	thinkingBlockIndex := -1
@@ -576,8 +603,13 @@ func StreamEventStreamAsAnthropicWithContext(ctx context.Context, body io.Reader
 		}
 		useMsgID := newClaudeMessageID()
 		startUsage := usage
-		if requestCtx.CacheEmulationUsage != nil {
-			startUsage = mergeKiroCacheEmulationUsage(startUsage, requestCtx.CacheEmulationUsage)
+		if isGPT {
+			// GPT-5.6 reports authoritative uncached/cache buckets in terminal
+			// metadata. Do not seed downstream accounting with an estimate that
+			// cannot later be overwritten by an explicit zero on a full cache hit.
+			startUsage.InputTokens = 0
+		} else if requestCtx.CacheEmulationUsage != nil {
+			startUsage = mergeKiroCacheEmulationUsage(startUsage, requestCtx.CacheEmulationUsage, false)
 		}
 		usageMap := map[string]any{
 			"input_tokens":  startUsage.InputTokens,
@@ -1153,7 +1185,17 @@ func StreamEventStreamAsAnthropicWithContext(ctx context.Context, body io.Reader
 			pendingAssistantText += evt.Content
 			return flushPendingAssistantText()
 		case kiroSemanticReasoning:
-			if evt.Reasoning == "" || !requestCtx.ThinkingEnabled {
+			if evt.Reasoning == "" {
+				return nil
+			}
+			if !requestCtx.ThinkingEnabled {
+				if isGPT {
+					// GPT-5.6 reasoning is never surfaced as a Claude "thinking"
+					// block, but must still count toward output-token estimation
+					// (mirrors the non-streaming suppression path) instead of
+					// being silently dropped.
+					_, _ = outputTextBuf.WriteString(evt.Reasoning)
+				}
 				return nil
 			}
 			// 连续的 reasoningContentEvent 片段累积进同一个 thinking 块。
@@ -1266,7 +1308,7 @@ func StreamEventStreamAsAnthropicWithContext(ctx context.Context, body io.Reader
 		usage.TotalTokens = usage.InputTokens + usage.OutputTokens
 	}
 	if requestCtx.CacheEmulationUsage != nil {
-		usage = mergeKiroCacheEmulationUsage(usage, requestCtx.CacheEmulationUsage)
+		usage = mergeKiroCacheEmulationUsage(usage, requestCtx.CacheEmulationUsage, isGPT)
 	}
 	switch stopReason {
 	case "max_tokens", "stop_sequence":
@@ -1436,19 +1478,41 @@ func thinkingDirectiveFromModel(model string) *thinkingDirective {
 // 这是个字面量;若不替换,模型会直接复读 "I am {{identity}}",对 Opus 4.7/4.8 这类
 // 对格式更敏感的版本尤其明显。
 //
-// identity 为空时回退到 "Claude",对齐 prompt 中 <CRITICAL_OVERRIDE> 的兜底语义:
-// "If no identity is provided, say that you are Claude."
+// identity 为空时回退到 "Claude",对齐 prompt 中 <CRITICAL_OVERRIDE> 的兜底语义。
 func renderKiroBuiltinIdentityPrompt(identity string) string {
 	identity = strings.TrimSpace(identity)
 	if identity == "" {
 		identity = "Claude"
 	}
-	return strings.ReplaceAll(kiroBuiltinIdentityPrompt, "{{identity}}", identity)
+	prompt := kiroBuiltinIdentityPrompt
+	if identity != "Claude" {
+		prompt = strings.ReplaceAll(
+			prompt,
+			"If no identity is provided, say that you are Claude.",
+			"If no identity is provided, say that you are "+identity+".",
+		)
+	}
+	return strings.ReplaceAll(prompt, "{{identity}}", identity)
 }
 
-func buildInjectedSystemPrompt(systemPrompt string, thinking *thinkingDirective, toolChoiceHint string) string {
+// kiroDefaultIdentityForModel 返回 Kiro 内置身份提示的默认身份。GPT-5.6 系列不是 Claude
+// 的重皮肤,继续用 "You are Claude" 兜底会让模型收到自相矛盾的身份指令。
+func kiroDefaultIdentityForModel(modelID string) string {
+	switch MapModel(modelID) {
+	case "gpt-5.6-sol":
+		return "GPT-5.6 Sol"
+	case "gpt-5.6-terra":
+		return "GPT-5.6 Terra"
+	case "gpt-5.6-luna":
+		return "GPT-5.6 Luna"
+	default:
+		return "Claude"
+	}
+}
+
+func buildInjectedSystemPrompt(systemPrompt, modelID string, thinking *thinkingDirective, toolChoiceHint string) string {
 	systemPrompt = strings.TrimSpace(systemPrompt)
-	promptParts := []string{renderKiroBuiltinIdentityPrompt("")}
+	promptParts := []string{renderKiroBuiltinIdentityPrompt(kiroDefaultIdentityForModel(modelID))}
 	if temporalContext := buildKiroTemporalContext(); temporalContext != "" {
 		promptParts = append(promptParts, temporalContext)
 	}
@@ -1498,14 +1562,20 @@ func buildKiroTemporalContext() string {
 }
 
 // buildAdditionalModelRequestFields 构建 Kiro payload 的 additionalModelRequestFields。
-// 对 Claude 4.6+ 模型，使用 output_config.effort 路径（官方 Kiro IDE 的 kr() 逻辑）：
+// GPT-5.6 使用 Kiro 原生 reasoning.effort；Claude 4.6+ 使用 output_config.effort：
 //
+//	GPT-5.6 → { reasoning: {effort} }
 //	output_config 路径 → { thinking: {type:'adaptive',display:'summarized'}, output_config: {effort} }
 //
 // 对于旧模型或 enabled 模式，不注入（依赖 system prompt 标签兜底）。
 //
 // 这实现了管理器的 P1 功能：确保 Claude 4.6+ 新模型的 thinking 使用 effort-based 控制。
-func buildAdditionalModelRequestFields(thinking *thinkingDirective, modelID string) map[string]any {
+func buildAdditionalModelRequestFields(thinking *thinkingDirective, modelID string, gptReasoningEffort string) map[string]any {
+	if gptReasoningEffort != "" {
+		return map[string]any{
+			"reasoning": map[string]any{"effort": gptReasoningEffort},
+		}
+	}
 	if thinking == nil {
 		return nil
 	}
@@ -2915,7 +2985,7 @@ func blockToMap(block gjson.Result) map[string]any {
 	return result
 }
 
-func parseEventStream(body io.Reader) (string, []KiroToolUse, Usage, string, error) {
+func parseEventStream(body io.Reader, includeReasoning bool) (string, []KiroToolUse, Usage, string, error) {
 	reader := bufio.NewReader(body)
 	var content strings.Builder
 	var toolUses []KiroToolUse
@@ -2923,6 +2993,7 @@ func parseEventStream(body io.Reader) (string, []KiroToolUse, Usage, string, err
 	stopReason := ""
 	processedIDs := make(map[string]bool)
 	var currentTool *toolUseState
+	var suppressedReasoning strings.Builder
 	reasoningOpen := false
 	closeReasoning := func() {
 		if reasoningOpen {
@@ -2987,6 +3058,10 @@ func parseEventStream(body io.Reader) (string, []KiroToolUse, Usage, string, err
 			if text == "" {
 				text = getString(event, "text")
 			}
+			if !includeReasoning {
+				_, _ = suppressedReasoning.WriteString(text)
+				continue
+			}
 			if text != "" {
 				// 连续 reasoning 片段累积进同一对 <thinking></thinking>，
 				// 仅在首片写开始标签，结束标签在边界（content/tool/EOF）由 closeReasoning 补上。
@@ -3019,6 +3094,7 @@ func parseEventStream(body io.Reader) (string, []KiroToolUse, Usage, string, err
 
 	if usage.OutputTokens == 0 {
 		var outputBuf strings.Builder
+		_, _ = outputBuf.WriteString(suppressedReasoning.String())
 		_, _ = outputBuf.WriteString(cleanText)
 		for _, tu := range toolUses {
 			if b, err := json.Marshal(tu.Input); err == nil {
@@ -4267,8 +4343,11 @@ func updateUsageFromEvent(usage *Usage, eventType string, event map[string]any) 
 		meta = event
 	}
 	if tokenUsage, ok := meta["tokenUsage"].(map[string]any); ok {
-		if value, ok := toInt(tokenUsage["uncachedInputTokens"]); ok {
-			usage.InputTokens = value
+		if raw, reported := tokenUsage["uncachedInputTokens"]; reported {
+			if value, ok := toInt(raw); ok && value >= 0 {
+				usage.InputTokens = value
+				usage.InputTokensReported = true
+			}
 		}
 		if value, ok := toInt(tokenUsage["outputTokens"]); ok {
 			usage.OutputTokens = value
@@ -4276,15 +4355,27 @@ func updateUsageFromEvent(usage *Usage, eventType string, event map[string]any) 
 		if value, ok := toInt(tokenUsage["totalTokens"]); ok {
 			usage.TotalTokens = value
 		}
-		if value, ok := toInt(tokenUsage["cacheReadInputTokens"]); ok {
-			usage.CacheReadInputTokens = value
+		if raw, reported := tokenUsage["cacheReadInputTokens"]; reported {
+			if value, ok := toInt(raw); ok && value >= 0 {
+				usage.CacheReadInputTokens = value
+				usage.realCacheUsageReported = true
+			}
+		}
+		if raw, reported := tokenUsage["cacheWriteInputTokens"]; reported {
+			if value, ok := toInt(raw); ok && value >= 0 {
+				usage.CacheCreationInputTokens = value
+				usage.realCacheUsageReported = true
+			}
 		}
 		updateKiroCreditsFromMap(usage, tokenUsage)
 	}
 	updateKiroCreditsFromMap(usage, event)
 	updateKiroCreditsFromMap(usage, meta)
-	if value, ok := toInt(event["inputTokens"]); ok && value > 0 {
-		usage.InputTokens = value
+	if raw, reported := event["inputTokens"]; reported {
+		if value, ok := toInt(raw); ok && value >= 0 {
+			usage.InputTokens = value
+			usage.InputTokensReported = true
+		}
 	}
 	if value, ok := toInt(event["outputTokens"]); ok && value > 0 {
 		usage.OutputTokens = value
@@ -4292,8 +4383,11 @@ func updateUsageFromEvent(usage *Usage, eventType string, event map[string]any) 
 	if value, ok := toInt(event["totalTokens"]); ok && value > 0 {
 		usage.TotalTokens = value
 	}
-	if value, ok := toInt(meta["inputTokens"]); ok && value > 0 {
-		usage.InputTokens = value
+	if raw, reported := meta["inputTokens"]; reported {
+		if value, ok := toInt(raw); ok && value >= 0 {
+			usage.InputTokens = value
+			usage.InputTokensReported = true
+		}
 	}
 	if value, ok := toInt(meta["outputTokens"]); ok && value > 0 {
 		usage.OutputTokens = value
@@ -4426,14 +4520,18 @@ func toPositiveFiniteFloat(value any) (float64, bool) {
 	return out, true
 }
 
-func mergeKiroCacheEmulationUsage(base Usage, simulated *Usage) Usage {
+func mergeKiroCacheEmulationUsage(base Usage, simulated *Usage, preserveReportedInput bool) Usage {
 	if simulated == nil {
 		return base
 	}
-	if base.CacheReadInputTokens > 0 || base.CacheCreationInputTokens > 0 || base.CacheCreation5mInputTokens > 0 || base.CacheCreation1hInputTokens > 0 {
+	if preserveReportedInput && base.InputTokensReported {
+		return base
+	}
+	if base.realCacheUsageReported || base.CacheReadInputTokens > 0 || base.CacheCreationInputTokens > 0 || base.CacheCreation5mInputTokens > 0 || base.CacheCreation1hInputTokens > 0 {
 		return base
 	}
 	base.InputTokens = simulated.InputTokens
+	base.InputTokensReported = true
 	base.CacheReadInputTokens = simulated.CacheReadInputTokens
 	base.CacheCreationInputTokens = simulated.CacheCreationInputTokens
 	base.CacheCreation5mInputTokens = simulated.CacheCreation5mInputTokens
