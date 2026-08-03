@@ -1122,9 +1122,20 @@ func (r *accountRepository) ListOAuthRefreshCandidatePage(ctx context.Context, o
 			AND type = 'oauth'`
 	}
 	if options.RequireRefreshToken {
-		query += `
+		if len(options.RefreshTokenExemptPlatforms) > 0 {
+			exemptList := "'" + options.RefreshTokenExemptPlatforms[0] + "'"
+			for _, p := range options.RefreshTokenExemptPlatforms[1:] {
+				exemptList += ",'" + p + "'"
+			}
+			query += `
+			AND (platform IN (` + exemptList + `)
+				OR (credentials ? 'refresh_token'
+					AND btrim(credentials->>'refresh_token') <> ''))`
+		} else {
+			query += `
 			AND credentials ? 'refresh_token'
 			AND btrim(credentials->>'refresh_token') <> ''`
+		}
 	}
 	if options.ExcludeRetryCooldown {
 		query += `

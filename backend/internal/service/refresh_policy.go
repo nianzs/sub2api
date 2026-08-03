@@ -69,6 +69,17 @@ func GrokProviderRefreshPolicy() ProviderRefreshPolicy {
 	}
 }
 
+// ZedProviderRefreshPolicy: 铸造失败直接返回错误而不降级旧 token —— Zed 的 JWT
+// 短命，且 401 路径上账号里的 llm_token 可能正是刚被拒的那个。锁被占用时重读缓存
+// 等持锁者的结果，绝不复用当前 token。
+func ZedProviderRefreshPolicy() ProviderRefreshPolicy {
+	return ProviderRefreshPolicy{
+		OnRefreshError: ProviderRefreshErrorReturn,
+		OnLockHeld:     ProviderLockHeldWaitForCache,
+		FailureTTL:     0,
+	}
+}
+
 // BackgroundSkipAction 定义后台刷新服务在“未实际刷新”场景的计数方式。
 type BackgroundSkipAction int
 

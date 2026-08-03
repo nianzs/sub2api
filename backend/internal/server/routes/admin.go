@@ -56,6 +56,7 @@ func RegisterAdminRoutes(
 
 		// Kiro OAuth / IDC
 		registerKiroOAuthRoutes(admin, h)
+		registerZedOAuthRoutes(admin, h)
 		// Grok OAuth
 		registerGrokOAuthRoutes(admin, h)
 
@@ -486,6 +487,15 @@ func registerKiroOAuthRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 		kiro.POST("/oauth/exchange-code", h.Admin.KiroOAuth.ExchangeCode)
 		kiro.POST("/oauth/refresh-token", h.Admin.KiroOAuth.RefreshToken)
 		kiro.POST("/oauth/import-token", h.Admin.KiroOAuth.ImportToken)
+	}
+}
+
+func registerZedOAuthRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
+	zed := admin.Group("/zed")
+	{
+		zed.POST("/oauth/auth-url", h.Admin.ZedOAuth.GenerateAuthURL)
+		zed.POST("/oauth/exchange-code", h.Admin.ZedOAuth.ExchangeCode)
+		zed.POST("/oauth/import-token", h.Admin.ZedOAuth.ImportToken)
 	}
 }
 

@@ -146,6 +146,29 @@ func NewTokenRefreshService(
 	return s
 }
 
+// SetZedOAuthService registers the Zed refresher.
+//
+// Zed is registered through a setter rather than a constructor parameter because
+// the constructor already ends in a variadic argument, so a new positional
+// parameter could not be appended. Must be called before the service starts for
+// Zed tokens to be refreshed in the background.
+func (s *TokenRefreshService) SetZedOAuthService(zedOAuthService *ZedOAuthService) {
+	if zedOAuthService == nil {
+		return
+	}
+	for _, registration := range s.registrations {
+		if registration.platform == PlatformZed {
+			return
+		}
+	}
+	zedRefresher := NewZedTokenRefresher(zedOAuthService)
+	s.registrations = append(s.registrations, tokenRefreshRegistration{
+		platform:  PlatformZed,
+		refresher: zedRefresher,
+		executor:  zedRefresher,
+	})
+}
+
 func (s *TokenRefreshService) eligiblePlatforms() []string {
 	platforms := make([]string, 0, len(s.registrations))
 	for _, registration := range s.registrations {
@@ -530,13 +553,14 @@ func (s *TokenRefreshService) processRefreshContext(parent context.Context) {
 			break
 		}
 		page, err := pager.ListOAuthRefreshCandidatePage(ctx, OAuthRefreshPageOptions{
-			Platforms:            platforms,
-			AfterID:              afterID,
-			Limit:                pageSize,
-			ActiveOnly:           true,
-			IncludeSetupToken:    true,
-			RequireRefreshToken:  true,
-			ExcludeRetryCooldown: true,
+			Platforms:                   platforms,
+			AfterID:                     afterID,
+			Limit:                       pageSize,
+			ActiveOnly:                  true,
+			IncludeSetupToken:           true,
+			RequireRefreshToken:         true,
+			RefreshTokenExemptPlatforms: []string{PlatformZed},
+			ExcludeRetryCooldown:        true,
 		})
 		if err != nil {
 			slog.Error("token_refresh.list_accounts_failed", "error", err, "after_id", afterID)

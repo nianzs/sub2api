@@ -85,6 +85,7 @@ func ProvideTokenRefreshService(
 	proxyRepo ProxyRepository,
 	refreshAPI *OAuthRefreshAPI,
 	runtimeBlocker AccountRuntimeBlocker,
+	zedOAuthService *ZedOAuthService,
 ) *TokenRefreshService {
 	svc := NewTokenRefreshService(accountRepo, oauthService, openaiOAuthService, geminiOAuthService, antigravityOAuthService, kiroOAuthService, cacheInvalidator, schedulerCache, cfg, tempUnschedCache, grokOAuthService)
 	// 注入 OpenAI privacy opt-out 依赖
@@ -94,6 +95,9 @@ func ProvideTokenRefreshService(
 	// 调用侧显式注入后台刷新策略，避免策略漂移
 	svc.SetRefreshPolicy(DefaultBackgroundRefreshPolicy())
 	svc.SetAccountRuntimeBlocker(runtimeBlocker)
+	// Zed 通过 setter 注册：构造函数已以可变参数结尾，无法再追加位置参数。
+	// 必须在 Start() 之前调用，否则后台刷新不会覆盖 zed。
+	svc.SetZedOAuthService(zedOAuthService)
 	svc.Start()
 	return svc
 }
@@ -184,6 +188,7 @@ func ProvideAccountTestService(
 	cfg *config.Config,
 	tlsFPProfileService *TLSFingerprintProfileService,
 	openAIGatewayService *OpenAIGatewayService,
+	zedOAuthService *ZedOAuthService,
 ) *AccountTestService {
 	service := NewAccountTestService(
 		accountRepo,
@@ -197,6 +202,7 @@ func ProvideAccountTestService(
 		tlsFPProfileService,
 	)
 	service.agentIdentityWS = openAIGatewayService
+	service.SetZedOAuthService(zedOAuthService)
 	return service
 }
 
@@ -256,6 +262,21 @@ func ProvideKiroTokenProvider(
 
 func ProvideKiroCooldownStore(redisClient *redis.Client) KiroCooldownStore {
 	return kirocooldown.NewStore(redisClient)
+}
+
+func ProvideZedTokenProvider(
+	accountRepo AccountRepository,
+	tokenCache GeminiTokenCache,
+	zedOAuthService *ZedOAuthService,
+	refreshAPI *OAuthRefreshAPI,
+) *ZedTokenProvider {
+	p := NewZedTokenProvider(accountRepo, tokenCache, zedOAuthService)
+	executor := NewZedTokenRefresher(zedOAuthService)
+	p.SetRefreshAPI(refreshAPI, executor)
+	// Must stay ZedProviderRefreshPolicy: Antigravity's OnLockHeld=UseExistingToken
+	// would reuse a stale (or already-401'd) JWT while another worker mints.
+	p.SetRefreshPolicy(ZedProviderRefreshPolicy())
+	return p
 }
 
 // ProvideGrokTokenProvider creates GrokTokenProvider with OAuthRefreshAPI injection.
@@ -740,6 +761,8 @@ var ProviderSet = wire.NewSet(
 	ProvideGeminiTokenProvider,
 	ProvideKiroTokenProvider,
 	ProvideKiroCooldownStore,
+	NewZedOAuthService,
+	ProvideZedTokenProvider,
 	NewGeminiMessagesCompatService,
 	ProvideAntigravityTokenProvider,
 	ProvideGrokTokenProvider,

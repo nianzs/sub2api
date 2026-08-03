@@ -28,6 +28,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/pkg/response"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/timezone"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/xai"
+	zedpkg "github.com/Wei-Shaw/sub2api/internal/pkg/zed"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 
 	"github.com/gin-gonic/gin"
@@ -54,6 +55,7 @@ type AccountHandler struct {
 	geminiOAuthService      *service.GeminiOAuthService
 	antigravityOAuthService *service.AntigravityOAuthService
 	kiroOAuthService        *service.KiroOAuthService
+	zedOAuthService         *service.ZedOAuthService
 	grokOAuthService        service.GrokOAuthTokenService
 	rateLimitService        *service.RateLimitService
 	accountUsageService     *service.AccountUsageService
@@ -85,6 +87,7 @@ func NewAccountHandler(
 	geminiOAuthService *service.GeminiOAuthService,
 	antigravityOAuthService *service.AntigravityOAuthService,
 	kiroOAuthService *service.KiroOAuthService,
+	zedOAuthService *service.ZedOAuthService,
 	grokOAuthService service.GrokOAuthTokenService,
 	rateLimitService *service.RateLimitService,
 	accountUsageService *service.AccountUsageService,
@@ -102,6 +105,7 @@ func NewAccountHandler(
 		geminiOAuthService:      geminiOAuthService,
 		antigravityOAuthService: antigravityOAuthService,
 		kiroOAuthService:        kiroOAuthService,
+		zedOAuthService:         zedOAuthService,
 		grokOAuthService:        grokOAuthService,
 		rateLimitService:        rateLimitService,
 		accountUsageService:     accountUsageService,
@@ -1021,6 +1025,15 @@ func (h *AccountHandler) Update(c *gin.Context) {
 		h.scheduleOpenAIResponsesProbe(account)
 	}
 
+	// 凭据被改过就清掉缓存的短期 token：它是用旧凭据换来的。
+	// 典型场景是运维更正 Zed 账号填错的 system_id —— 旧 JWT 里绑的是旧 system_id，
+	// 不清掉的话要等它自然过期才生效，看起来就像改了没用。
+	if len(req.Credentials) > 0 && h.tokenCacheInvalidator != nil && account.IsOAuth() {
+		if invalidateErr := h.tokenCacheInvalidator.InvalidateToken(c.Request.Context(), account); invalidateErr != nil {
+			log.Printf("[WARN] Failed to invalidate token cache for account %d: %v", account.ID, invalidateErr)
+		}
+	}
+
 	response.Success(c, h.buildAccountResponseWithRuntime(c.Request.Context(), account))
 }
 
@@ -1287,6 +1300,23 @@ func (h *AccountHandler) refreshSingleAccount(ctx context.Context, account *serv
 		}
 
 		newCredentials = h.kiroOAuthService.BuildAccountCredentials(tokenInfo)
+		for k, v := range account.Credentials {
+			if _, exists := newCredentials[k]; !exists {
+				newCredentials[k] = v
+			}
+		}
+	} else if account.Platform == service.PlatformZed {
+		if h.zedOAuthService == nil {
+			return nil, "", fmt.Errorf("zed oauth service is not configured")
+		}
+		// Zed 没有 refresh_token：这里重新铸造短期 LLM token，
+		// 长期凭据（user_id / access_token / system_id）由下面的保留逻辑带过来。
+		tokenInfo, err := h.zedOAuthService.MintToken(ctx, account)
+		if err != nil {
+			return nil, "", err
+		}
+
+		newCredentials = h.zedOAuthService.BuildAccountCredentials(tokenInfo)
 		for k, v := range account.Credentials {
 			if _, exists := newCredentials[k]; !exists {
 				newCredentials[k] = v
@@ -2677,6 +2707,12 @@ func (h *AccountHandler) GetAvailableModels(c *gin.Context) {
 			})
 		}
 		response.Success(c, models)
+		return
+	}
+
+	// Handle Zed accounts
+	if account.Platform == service.PlatformZed {
+		response.Success(c, zedpkg.DefaultModels)
 		return
 	}
 
