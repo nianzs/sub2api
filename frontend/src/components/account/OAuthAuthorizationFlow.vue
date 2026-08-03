@@ -925,7 +925,7 @@ const emit = defineEmits<{
 
 const { t } = useI18n()
 
-const showLocalCallbackNotice = computed(() => props.platform === 'openai' || props.platform === 'grok')
+const showLocalCallbackNotice = computed(() => props.platform === 'openai' || props.platform === 'grok' || props.platform === 'zed')
 
 // Get translation key based on platform
 const getOAuthKey = (key: string) => {
@@ -934,6 +934,7 @@ const getOAuthKey = (key: string) => {
   if (props.platform === 'antigravity') return `admin.accounts.oauth.antigravity.${key}`
   if (props.platform === 'kiro') return `admin.accounts.oauth.kiro.${key}`
   if (props.platform === 'grok') return `admin.accounts.oauth.grok.${key}`
+  if (props.platform === 'zed') return `admin.accounts.oauth.zed.${key}`
   return `admin.accounts.oauth.${key}`
 }
 
@@ -953,6 +954,7 @@ const oauthImportantNotice = computed(() => {
   if (props.platform === 'openai') return t('admin.accounts.oauth.openai.importantNotice')
   if (props.platform === 'antigravity') return t('admin.accounts.oauth.antigravity.importantNotice')
   if (props.platform === 'grok') return t('admin.accounts.oauth.grok.importantNotice')
+  if (props.platform === 'zed') return t('admin.accounts.oauth.zed.importantNotice')
   return ''
 })
 
@@ -1048,8 +1050,12 @@ watch(inputMethod, (newVal) => {
 
 // Auto-extract code from callback URL (OpenAI/Gemini/Antigravity/Kiro/Grok)
 // e.g., http://localhost:8085/callback?code=xxx...&state=...
+// Zed: the entire callback URL is the credential — do NOT extract code from it.
 watch(authCodeInput, (newVal) => {
-  if (props.platform !== 'openai' && props.platform !== 'gemini' && props.platform !== 'antigravity' && props.platform !== 'kiro' && props.platform !== 'grok') return
+  if (props.platform !== 'openai' && props.platform !== 'gemini' && props.platform !== 'antigravity' && props.platform !== 'kiro' && props.platform !== 'grok' && props.platform !== 'zed') return
+
+  // Zed passes the raw URL through without extraction
+  if (props.platform === 'zed') return
 
   const trimmed = newVal.trim()
   // Check if it looks like a URL with code parameter

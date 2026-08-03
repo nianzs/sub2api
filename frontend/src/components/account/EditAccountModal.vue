@@ -1291,6 +1291,37 @@
         <p class="input-hint">{{ t('admin.accounts.antigravityProjectIdHint') }}</p>
       </div>
 
+      <!--
+        Zed system_id：必填且可事后更正。填错时上游对铸造毫无怨言，却让每个
+        /completions 返回 trial_blocked (403)，所以这里是唯一能救回账号的入口。
+      -->
+      <div
+        v-if="account.platform === 'zed' && account.type === 'oauth'"
+        class="border-t border-gray-200 pt-4 dark:border-dark-600"
+      >
+        <label class="input-label">
+          {{ t('admin.accounts.oauth.zed.systemIdLabel') }}
+          <span class="text-red-500">*</span>
+        </label>
+        <input
+          v-model="zedSystemId"
+          data-testid="zed-system-id-input"
+          type="text"
+          class="input font-mono"
+          :placeholder="t('admin.accounts.oauth.zed.systemIdPlaceholder')"
+        />
+        <p v-if="!zedSystemId.trim()" class="mt-1 text-xs text-red-500">
+          {{ t('admin.accounts.oauth.zed.systemIdRequired') }}
+        </p>
+        <p
+          v-else-if="!isUuidLikeSystemId(zedSystemId)"
+          class="mt-1 text-xs text-amber-600 dark:text-amber-400"
+        >
+          {{ t('admin.accounts.oauth.zed.systemIdFormatWarning') }}
+        </p>
+        <p class="input-hint">{{ t('admin.accounts.oauth.zed.systemIdHint') }}</p>
+      </div>
+
       <!-- Antigravity model restriction (applies to all antigravity types) -->
       <!-- Antigravity 只支持模型映射模式，不支持白名单模式 -->
       <div v-if="account.platform === 'antigravity'" class="border-t border-gray-200 pt-4 dark:border-dark-600">
@@ -2820,8 +2851,10 @@ import {
   applyPlanType,
   buildPlanTypeOptions,
   readPlanType,
+  applyZedSystemID,
   isCustomGrokBaseUrl,
   isHeaderOverrideCapable,
+  isUuidLikeSystemId,
   splitHeaderOverridesObject,
   validateHeaderOverrideRows,
   HEADER_OVERRIDE_ENABLED_CREDENTIAL_KEY,
@@ -2997,6 +3030,7 @@ const upstreamBillingAutoProbeEnabled = ref(false)
 const mixedScheduling = ref(false) // For antigravity accounts: enable mixed scheduling
 const allowOverages = ref(false) // For antigravity accounts: enable AI Credits overages
 const antigravityProjectId = ref('')
+const zedSystemId = ref('')
 const antigravityModelRestrictionMode = ref<'whitelist' | 'mapping'>('whitelist')
 const antigravityWhitelistModels = ref<string[]>([])
 const antigravityModelMappings = ref<ModelMapping[]>([])
@@ -3506,6 +3540,12 @@ const syncFormFromAccount = (newAccount: Account | null) => {
     newAccount.type === 'oauth' &&
     typeof credentials?.antigravity_project_id === 'string'
       ? credentials.antigravity_project_id.trim()
+      : ''
+  zedSystemId.value =
+    newAccount.platform === 'zed' &&
+    newAccount.type === 'oauth' &&
+    typeof credentials?.system_id === 'string'
+      ? credentials.system_id.trim()
       : ''
 
   // Load mixed scheduling setting (only for antigravity accounts)
@@ -4710,6 +4750,20 @@ const handleSubmit = async () => {
         newCredentials.model_mapping = antigravityModelMapping
       }
 
+      updatePayload.credentials = newCredentials
+    }
+
+    // Zed: system_id 可事后更正。空值必须拦在提交前 —— 删掉这个键存进去等于把
+    // 账号改成必然 trial_blocked (403)。
+    if (props.account.platform === 'zed' && props.account.type === 'oauth') {
+      if (!zedSystemId.value.trim()) {
+        appStore.showError(t('admin.accounts.oauth.zed.systemIdRequired'))
+        return
+      }
+      const currentCredentials = (updatePayload.credentials as Record<string, unknown>) ||
+        ((props.account.credentials as Record<string, unknown>) || {})
+      const newCredentials: Record<string, unknown> = { ...currentCredentials }
+      applyZedSystemID(newCredentials, zedSystemId.value)
       updatePayload.credentials = newCredentials
     }
 

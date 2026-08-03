@@ -19,6 +19,7 @@ import geminiAPI from './gemini'
 import antigravityAPI from './antigravity'
 import kiroAPI from './kiro'
 import grokAPI from './grok'
+import zedAPI from './zed'
 import userAttributesAPI from './userAttributes'
 import opsAPI from './ops'
 import errorPassthroughAPI from './errorPassthrough'
@@ -56,6 +57,7 @@ export const adminAPI = {
   antigravity: antigravityAPI,
   kiro: kiroAPI,
   grok: grokAPI,
+  zed: zedAPI,
   userAttributes: userAttributesAPI,
   ops: opsAPI,
   errorPassthrough: errorPassthroughAPI,
@@ -91,6 +93,7 @@ export {
   antigravityAPI,
   kiroAPI,
   grokAPI,
+  zedAPI,
   userAttributesAPI,
   opsAPI,
   errorPassthroughAPI,

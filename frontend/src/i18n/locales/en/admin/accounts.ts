@@ -120,6 +120,7 @@ export default {
         antigravity: 'Antigravity',
         grok: 'Grok',
         kiro: 'Kiro',
+        zed: 'Zed',
       },
       types: {
         oauth: 'OAuth',
@@ -129,6 +130,7 @@ export default {
         codeAssist: 'Code Assist',
         antigravityOauth: 'Antigravity OAuth',
         grokOauth: 'Grok OAuth',
+        zedOauth: 'Zed OAuth',
         kiroApikey: 'Connect to AWS directly via API Key',
         kiroApikeyRelay: 'Relay via external API Key + Base URL',
         kiroOauth: 'Social OAuth / AWS Builder ID / Import',
@@ -1123,6 +1125,31 @@ export default {
           tokenJsonInvalid: 'Kiro Token JSON is invalid and cannot be parsed.',
           tokenJsonLabel: 'Kiro Token JSON',
           tokenJsonRequired: 'Please provide the Kiro Token JSON.'
+        },
+        zed: {
+          title: 'Zed Account Authorization',
+          followSteps: 'Follow these steps to authorize your Zed account:',
+          step1GenerateUrl: 'Generate the Zed authorization URL',
+          generateAuthUrl: 'Generate Auth URL',
+          step2OpenUrl: 'Open the URL in your browser and sign in with GitHub',
+          openUrlDesc: 'Open the authorization URL in a new tab. Zed will redirect to GitHub OAuth. After approval the browser redirects to http://127.0.0.1:43117/... and shows a connection-refused error — this is expected.',
+          importantNotice: 'The browser will show "connection refused" after sign-in — this is normal. Copy the full URL from the address bar and paste it below.',
+          step3EnterCode: 'Paste the callback URL',
+          authCodeDesc: 'After authorization, copy the full URL from the browser address bar (including the connection-refused page):',
+          authCode: 'Callback URL',
+          authCodePlaceholder: 'Paste the full URL: http://127.0.0.1:43117/?user_id=...&access_token=...',
+          authCodeHint: 'Paste the entire URL. Do not extract individual parameters — the encrypted access_token will be decrypted server-side.',
+          validating: 'Exchanging...',
+          validateAndCreate: 'Exchange & Create Account',
+          failedToGenerateUrl: 'Failed to generate Zed auth URL',
+          missingExchangeParams: 'Missing callback URL or session',
+          failedToExchangeCode: 'Failed to exchange Zed callback',
+          systemIdLabel: 'System ID',
+          systemIdPlaceholder: 'UUID from your local Zed installation',
+          systemIdHint: 'Required. Find it in ~/Library/Application Support/Zed/db/0-global/ (macOS). Zed ties plan eligibility to this value — a wrong system_id causes trial_blocked (403) on every request.',
+          systemIdRequired: 'System ID is required. Without it, every request returns trial_blocked (403).',
+          systemIdFormatWarning:
+            'This does not look like a UUID. Double-check the value — Zed stores it in the 8-4-4-4-12 hex form.'
         },
         // Gemini specific
 	        gemini: {

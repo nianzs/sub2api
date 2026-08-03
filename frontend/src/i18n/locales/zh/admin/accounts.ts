@@ -319,6 +319,7 @@ export default {
         antigravity: 'Antigravity',
         grok: 'Grok',
         kiro: 'Kiro',
+        zed: 'Zed',
       },
       types: {
         oauth: 'OAuth',
@@ -328,6 +329,7 @@ export default {
         codeAssist: 'Code Assist',
         antigravityOauth: 'Antigravity OAuth',
         grokOauth: 'Grok OAuth',
+        zedOauth: 'Zed OAuth',
         kiroApikey: '通过 API Key 直连 AWS',
         kiroApikeyRelay: '通过外部 API Key + Base URL 中转',
         kiroOauth: '社交 OAuth / AWS Builder ID / 导入',
@@ -1178,6 +1180,30 @@ export default {
           tokenJsonInvalid: 'Kiro Token JSON 格式无效，无法解析。',
           tokenJsonLabel: 'Kiro Token JSON',
           tokenJsonRequired: '请填写 Kiro Token JSON。'
+        },
+        zed: {
+          title: 'Zed 账号授权',
+          followSteps: '按以下步骤授权你的 Zed 账号：',
+          step1GenerateUrl: '生成 Zed 授权链接',
+          generateAuthUrl: '生成授权链接',
+          step2OpenUrl: '在浏览器中打开链接并通过 GitHub 登录',
+          openUrlDesc: '在新标签页中打开授权链接，Zed 会跳转到 GitHub OAuth。授权后浏览器会跳转到 http://127.0.0.1:43117/... 并显示连接被拒绝——这是正常现象。',
+          importantNotice: '浏览器显示"无法连接"是正常的。请从地址栏复制完整 URL 并粘贴到下方。',
+          step3EnterCode: '粘贴回调 URL',
+          authCodeDesc: '授权后，从浏览器地址栏复制完整 URL（包括显示连接失败的页面）：',
+          authCode: '回调 URL',
+          authCodePlaceholder: '粘贴完整 URL：http://127.0.0.1:43117/?user_id=...&access_token=...',
+          authCodeHint: '粘贴整个 URL，无需手动提取参数——加密的 access_token 会在服务端解密。',
+          validating: '交换中...',
+          validateAndCreate: '交换并创建账号',
+          failedToGenerateUrl: '生成 Zed 授权链接失败',
+          missingExchangeParams: '缺少回调 URL 或会话',
+          failedToExchangeCode: '交换 Zed 回调失败',
+          systemIdLabel: 'System ID',
+          systemIdPlaceholder: '来自本地 Zed 安装的 UUID',
+          systemIdHint: '必填。macOS 路径：~/Library/Application Support/Zed/db/0-global/。Zed 将套餐资格绑定在此值上——填错会导致所有请求返回 trial_blocked (403)。',
+          systemIdRequired: 'System ID 为必填项。留空会导致所有请求返回 trial_blocked (403)。',
+          systemIdFormatWarning: '这看起来不像 UUID，请再核对一下——Zed 存的是 8-4-4-4-12 的十六进制形式。'
         },
         // Gemini specific
         gemini: {

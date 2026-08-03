@@ -1740,7 +1740,7 @@
         <!-- 账号过滤控制 (OpenAI/Antigravity/Anthropic/Gemini/Kiro) -->
         <div
           v-if="
-            ['openai', 'antigravity', 'anthropic', 'gemini', 'kiro'].includes(
+            ['openai', 'antigravity', 'anthropic', 'gemini', 'kiro', 'zed'].includes(
               createForm.platform,
             )
           "
@@ -4476,6 +4476,7 @@ const platformOptions = computed(() => [
   { value: "antigravity", label: "Antigravity" },
   { value: "kiro", label: "Kiro" },
   { value: "grok", label: "Grok" },
+  { value: "zed", label: "Zed" },
   { value: "composite", label: "Composite" },
 ]);
 
@@ -4487,6 +4488,7 @@ const platformFilterOptions = computed(() => [
   { value: "antigravity", label: "Antigravity" },
   { value: "kiro", label: "Kiro" },
   { value: "grok", label: "Grok" },
+  { value: "zed", label: "Zed" },
   { value: "composite", label: "Composite" },
 ]);
 
@@ -4496,6 +4498,7 @@ const compositeRoutePlatformOptions = computed(() => [
   { value: "gemini", label: "Gemini" },
   { value: "antigravity", label: "Antigravity" },
   { value: "grok", label: "Grok" },
+  { value: "zed", label: "Zed" },
 ]);
 
 const compositeRouteEndpointOptions = computed(() => [
@@ -6390,7 +6393,7 @@ createForm.max_reasoning_effort = normalizeReasoningEffortForPlatform(
       newVal,
     );
     createReasoningEffortPolicyRef.value?.resetValidation();
-    if (!["openai", "antigravity", "anthropic", "gemini", "kiro"].includes(newVal)) {
+    if (!["openai", "antigravity", "anthropic", "gemini", "kiro", "zed"].includes(newVal)) {
       createForm.require_oauth_only = false;
       createForm.require_privacy_set = false;
     }
@@ -6433,7 +6436,7 @@ editForm.max_reasoning_effort = normalizeReasoningEffortForPlatform(
       newVal,
     );
     editReasoningEffortPolicyRef.value?.resetValidation();
-    if (!["openai", "antigravity", "anthropic", "gemini", "kiro"].includes(newVal)) {
+    if (!["openai", "antigravity", "anthropic", "gemini", "kiro", "zed"].includes(newVal)) {
       editForm.require_oauth_only = false;
       editForm.require_privacy_set = false;
     }

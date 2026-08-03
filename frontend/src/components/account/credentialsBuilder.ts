@@ -10,6 +10,42 @@ export function applyInterceptWarmup(
   }
 }
 
+// ========== Zed system_id（必填；上游把套餐与试用资格绑定在这个值上） ==========
+
+export const ZED_SYSTEM_ID_CREDENTIAL_KEY = 'system_id'
+
+/** 与后端 zed.uuidPattern 对齐的 8-4-4-4-12 十六进制形状。 */
+const ZED_SYSTEM_ID_UUID_PATTERN =
+  /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/
+
+/**
+ * 判断 system_id 是否具备 Zed 本地库使用的 UUID 形状。
+ *
+ * 仅用于提示，**不用于阻断提交**：上游哪天改了格式，硬拦会把整个平台锁死；
+ * 而提示足以拦住明显的粘贴错误（贴成路径、贴成整段 JSON）。只有空值是硬性错误。
+ */
+export function isUuidLikeSystemId(systemId: string): boolean {
+  return ZED_SYSTEM_ID_UUID_PATTERN.test((systemId || '').trim())
+}
+
+/**
+ * 把 system_id 写入 credentials。
+ *
+ * 与 applyAntigravityProjectID 不同，这里**没有** edit 模式空值即删键的语义：
+ * system_id 是必填项，空值必须由调用方在提交前拦住，而不是删掉键存进去 ——
+ * 缺这个键的账号在推理时必然 trial_blocked (403)。
+ */
+export function applyZedSystemID(
+  credentials: Record<string, unknown>,
+  systemId: string
+): void {
+  const trimmed = (systemId || '').trim()
+  if (!trimmed) {
+    throw new Error('zed system_id is required')
+  }
+  credentials[ZED_SYSTEM_ID_CREDENTIAL_KEY] = trimmed
+}
+
 export const ANTIGRAVITY_PROJECT_ID_CREDENTIAL_KEY = 'antigravity_project_id'
 
 export function applyAntigravityProjectID(

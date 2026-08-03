@@ -173,6 +173,19 @@
             <PlatformIcon platform="grok" size="sm" />
             Grok
           </button>
+          <button
+            type="button"
+            @click="form.platform = 'zed'"
+            :class="[
+              'flex items-center justify-center gap-1.5 whitespace-nowrap rounded-md px-2 py-2.5 text-xs font-medium transition-all sm:gap-2 sm:px-4 sm:text-sm',
+              form.platform === 'zed'
+                ? 'bg-white text-zinc-900 shadow-sm dark:bg-dark-600 dark:text-zinc-100'
+                : 'text-gray-600 hover:text-gray-900 dark:text-gray-400 dark:hover:text-gray-200'
+            ]"
+          >
+            <PlatformIcon platform="zed" size="sm" />
+            Zed
+          </button>
         </div>
       </div>
 
@@ -422,6 +435,33 @@
             </div>
           </button>
         </div>
+      </div>
+
+      <!-- Zed: OAuth only, show system_id input (required) -->
+      <div v-if="form.platform === 'zed'">
+        <label class="input-label">
+          {{ t('admin.accounts.oauth.zed.systemIdLabel') }}
+          <span class="text-red-500">*</span>
+        </label>
+        <input
+          v-model="zedSystemId"
+          type="text"
+          data-testid="zed-system-id-input"
+          class="input mt-1 font-mono text-xs"
+          :placeholder="t('admin.accounts.oauth.zed.systemIdPlaceholder')"
+        />
+        <p v-if="!zedSystemId.trim()" class="mt-1 text-xs text-red-500">
+          {{ t('admin.accounts.oauth.zed.systemIdRequired') }}
+        </p>
+        <p
+          v-else-if="!isUuidLikeSystemId(zedSystemId)"
+          class="mt-1 text-xs text-amber-600 dark:text-amber-400"
+        >
+          {{ t('admin.accounts.oauth.zed.systemIdFormatWarning') }}
+        </p>
+        <p class="mt-1 text-xs text-amber-600 dark:text-amber-400">
+          {{ t('admin.accounts.oauth.zed.systemIdHint') }}
+        </p>
       </div>
 
       <!-- Account Type Selection (Gemini) -->
@@ -4076,6 +4116,7 @@ import { useGeminiOAuth } from '@/composables/useGeminiOAuth'
 import { useAntigravityOAuth } from '@/composables/useAntigravityOAuth'
 import { useKiroOAuth } from '@/composables/useKiroOAuth'
 import { useGrokOAuth } from '@/composables/useGrokOAuth'
+import { useZedOAuth } from '@/composables/useZedOAuth'
 import type {
   Proxy,
   AdminGroup,
@@ -4105,6 +4146,7 @@ import {
   applyHeaderOverride,
   applyInterceptWarmup,
   isHeaderOverrideCapable,
+  isUuidLikeSystemId,
   validateHeaderOverrideRows,
   type HeaderOverrideRow
 } from '@/components/account/credentialsBuilder'
@@ -4153,6 +4195,7 @@ const oauthStepTitle = computed(() => {
       : t('admin.accounts.oauth.kiro.title')
   }
   if (form.platform === 'grok') return t('admin.accounts.oauth.grok.title')
+  if (form.platform === 'zed') return t('admin.accounts.oauth.zed.title')
   return t('admin.accounts.oauth.title')
 })
 
@@ -4193,6 +4236,7 @@ const geminiOAuth = useGeminiOAuth() // For Gemini OAuth
 const antigravityOAuth = useAntigravityOAuth() // For Antigravity OAuth
 const kiroOAuth = useKiroOAuth() // For Kiro OAuth / IDC
 const grokOAuth = useGrokOAuth() // For Grok OAuth
+const zedOAuth = useZedOAuth() // For Zed OAuth
 
 // Computed: current OAuth state for template binding
 const currentAuthUrl = computed(() => {
@@ -4201,6 +4245,7 @@ const currentAuthUrl = computed(() => {
   if (form.platform === 'antigravity') return antigravityOAuth.authUrl.value
   if (form.platform === 'kiro') return kiroOAuth.authUrl.value
   if (form.platform === 'grok') return grokOAuth.authUrl.value
+  if (form.platform === 'zed') return zedOAuth.authUrl.value
   return oauth.authUrl.value
 })
 
@@ -4210,6 +4255,7 @@ const currentSessionId = computed(() => {
   if (form.platform === 'antigravity') return antigravityOAuth.sessionId.value
   if (form.platform === 'kiro') return kiroOAuth.sessionId.value
   if (form.platform === 'grok') return grokOAuth.sessionId.value
+  if (form.platform === 'zed') return zedOAuth.sessionId.value
   return oauth.sessionId.value
 })
 
@@ -4219,6 +4265,7 @@ const currentOAuthLoading = computed(() => {
   if (form.platform === 'antigravity') return antigravityOAuth.loading.value
   if (form.platform === 'kiro') return kiroOAuth.loading.value
   if (form.platform === 'grok') return grokOAuth.loading.value
+  if (form.platform === 'zed') return zedOAuth.loading.value
   return oauth.loading.value
 })
 
@@ -4228,6 +4275,7 @@ const currentOAuthError = computed(() => {
   if (form.platform === 'antigravity') return antigravityOAuth.error.value
   if (form.platform === 'kiro') return kiroOAuth.error.value
   if (form.platform === 'grok') return grokOAuth.error.value
+  if (form.platform === 'zed') return zedOAuth.error.value
   return oauth.error.value
 })
 
@@ -4400,6 +4448,7 @@ const kiroIDCStartUrl = ref('https://view.awsapps.com/start')
 const kiroIDCRegion = ref('us-east-1')
 const kiroTokenJson = ref('')
 const kiroDeviceRegistrationJson = ref('')
+const zedSystemId = ref('')
 // 「从 Kiro IDE 导入」provider 选择:决定字段显隐/必填/示例,并与 token JSON 内 provider 做一致性校验。
 const kiroImportProvider = ref<'Google' | 'Github' | 'BuilderId' | 'Enterprise' | 'ExternalIdp'>('Google')
 const kiroImportProviderOptions = ['Google', 'Github', 'BuilderId', 'Enterprise', 'ExternalIdp'] as const
@@ -4753,6 +4802,15 @@ const canExchangeCode = computed(() => {
   if (form.platform === 'grok') {
     return authCode.trim() && grokOAuth.sessionId.value && !grokOAuth.loading.value
   }
+  if (form.platform === 'zed') {
+    // system_id 必填：缺了它建出来的账号所有推理都返回 trial_blocked (403)。
+    return (
+      authCode.trim() &&
+      zedSystemId.value.trim() &&
+      zedOAuth.sessionId.value &&
+      !zedOAuth.loading.value
+    )
+  }
   return authCode.trim() && oauth.sessionId.value && !oauth.loading.value
 })
 
@@ -4870,6 +4928,11 @@ watch(
       form.concurrency = 1
       form.load_factor = null
     }
+    if (newPlatform === 'zed') {
+      accountCategory.value = 'oauth-based'
+      addMethod.value = 'oauth'
+      zedSystemId.value = ''
+    }
     if (newPlatform !== 'gemini' && newPlatform !== 'anthropic' && accountCategory.value === 'service_account') {
       accountCategory.value = 'oauth-based'
     }
@@ -4920,6 +4983,7 @@ watch(
     antigravityOAuth.resetState()
     kiroOAuth.resetState()
     grokOAuth.resetState()
+    zedOAuth.resetState()
   }
 )
 
@@ -5967,6 +6031,8 @@ const handleGenerateUrl = async () => {
     }
   } else if (form.platform === 'grok') {
     await grokOAuth.generateAuthUrl(form.proxy_id)
+  } else if (form.platform === 'zed') {
+    await zedOAuth.generateAuthUrl()
   } else {
     await oauth.generateAuthUrl(addMethod.value, form.proxy_id)
   }
@@ -6845,7 +6911,36 @@ const handleKiroExchange = async (authCode: string) => {
   }
 }
 
-// Grok OAuth 授权码兑换
+// Zed 回调 URL 兑换
+const handleZedExchange = async (callbackUrl: string) => {
+  if (!callbackUrl.trim() || !zedOAuth.sessionId.value) return
+  if (!zedSystemId.value.trim()) {
+    zedOAuth.error.value = t('admin.accounts.oauth.zed.systemIdRequired')
+    appStore.showError(zedOAuth.error.value)
+    return
+  }
+
+  zedOAuth.loading.value = true
+  zedOAuth.error.value = ''
+
+  try {
+    const tokenInfo = await zedOAuth.exchangeCallback({
+      sessionId: zedOAuth.sessionId.value,
+      callbackUrl: callbackUrl.trim(),
+      systemId: zedSystemId.value.trim()
+    })
+    if (!tokenInfo) return
+
+    const credentials = zedOAuth.buildCredentials(tokenInfo)
+    await createAccountAndFinish('zed', 'oauth', credentials)
+  } catch (error: any) {
+    zedOAuth.error.value = error.response?.data?.detail || t('admin.accounts.oauth.authFailed')
+    appStore.showError(zedOAuth.error.value)
+  } finally {
+    zedOAuth.loading.value = false
+  }
+}
+
 const handleGrokExchange = async (authCode: string) => {
   if (!authCode.trim() || !grokOAuth.sessionId.value) return
   if (!validateGrokOAuthUpstreamConfig()) return
@@ -6986,6 +7081,8 @@ const handleExchangeCode = async () => {
       return handleAntigravityExchange(authCode)
     case 'grok':
       return handleGrokExchange(authCode)
+    case 'zed':
+      return handleZedExchange(authCode)
     default:
       return handleAnthropicExchange(authCode)
   }

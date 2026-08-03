@@ -103,6 +103,7 @@ export default {
       antigravity: 'Antigravity',
       grok: 'Grok',
       kiro: 'Kiro',
+      zed: 'Zed',
       more: 'More'
     },
     // CTA section

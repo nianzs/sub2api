@@ -509,6 +509,7 @@ export default {
         usageAntigravity: '用量 (Antigravity)',
         usageGrok: '用量 (Grok)',
         usageKiro: '用量 (Kiro)',
+        usageZed: '用量 (Zed)',
         concurrency: '并发数',
         status: '状态',
         lastActive: '最后活跃时间',
@@ -880,6 +881,7 @@ export default {
         antigravity: 'Antigravity',
         grok: 'Grok',
         kiro: 'Kiro',
+        zed: 'Zed',
         composite: 'Composite',
       },
       kiroCache: {

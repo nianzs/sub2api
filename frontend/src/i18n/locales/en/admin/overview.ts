@@ -529,6 +529,7 @@ export default {
         usageAntigravity: 'Usage (Antigravity)',
         usageGrok: 'Usage (Grok)',
         usageKiro: 'Usage (Kiro)',
+        usageZed: 'Usage (Zed)',
         concurrency: 'Concurrency',
         status: 'Status',
         lastActive: 'Last Active',
@@ -947,6 +948,7 @@ export default {
         antigravity: 'Antigravity',
         grok: 'Grok',
         kiro: 'Kiro',
+        zed: 'Zed',
         composite: 'Composite',
       },
       kiroCache: {

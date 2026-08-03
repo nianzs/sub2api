@@ -3,14 +3,17 @@ import {
   ANTIGRAVITY_PROJECT_ID_CREDENTIAL_KEY,
   HEADER_OVERRIDE_ENABLED_CREDENTIAL_KEY,
   HEADER_OVERRIDES_CREDENTIAL_KEY,
+  ZED_SYSTEM_ID_CREDENTIAL_KEY,
   applyAntigravityProjectID,
   applyHeaderOverride,
   applyInterceptWarmup,
   applyPlanType,
+  applyZedSystemID,
   buildHeaderOverridesObject,
   buildPlanTypeOptions,
   isCustomGrokBaseUrl,
   isHeaderOverrideCapable,
+  isUuidLikeSystemId,
   GROK_BASE_URL_PRESETS,
   parseHeaderOverridesJson,
   planTypeDisplayLabel,
@@ -61,6 +64,40 @@ describe('applyInterceptWarmup', () => {
     expect(creds.api_key).toBe('sk')
     expect(creds.base_url).toBe('url')
     expect('intercept_warmup_requests' in creds).toBe(false)
+  })
+})
+
+describe('applyZedSystemID', () => {
+  it('trims and stores the value', () => {
+    const creds: Record<string, unknown> = { access_token: 'tok' }
+    applyZedSystemID(creds, '  3f2504e0-4f89-11d3-9a0c-0305e82c3301  ')
+    expect(creds[ZED_SYSTEM_ID_CREDENTIAL_KEY]).toBe('3f2504e0-4f89-11d3-9a0c-0305e82c3301')
+  })
+
+  // Deliberately unlike applyAntigravityProjectID: deleting the key would turn the
+  // account into one that fails every request with trial_blocked (403), so an empty
+  // value must be caught by the caller instead of silently persisted.
+  it.each([['empty', ''], ['whitespace', '   ']])('throws on an %s value', (_label, value) => {
+    const creds: Record<string, unknown> = {
+      access_token: 'tok',
+      [ZED_SYSTEM_ID_CREDENTIAL_KEY]: 'existing'
+    }
+    expect(() => applyZedSystemID(creds, value)).toThrow()
+    expect(creds[ZED_SYSTEM_ID_CREDENTIAL_KEY]).toBe('existing')
+  })
+})
+
+describe('isUuidLikeSystemId', () => {
+  it.each([
+    ['3f2504e0-4f89-11d3-9a0c-0305e82c3301', true],
+    ['3F2504E0-4F89-11D3-9A0C-0305E82C3301', true],
+    ['  3f2504e0-4f89-11d3-9a0c-0305e82c3301  ', true],
+    ['3f2504e04f8911d39a0c0305e82c3301', false],
+    ['/Users/me/Library/Application Support/Zed', false],
+    ['{"system_id":"3f2504e0-4f89-11d3-9a0c-0305e82c3301"}', false],
+    ['', false]
+  ])('%s -> %s', (value, expected) => {
+    expect(isUuidLikeSystemId(value as string)).toBe(expected)
   })
 })
 
