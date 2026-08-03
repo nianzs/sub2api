@@ -82,8 +82,10 @@ func (s *ZedOAuthService) resolveProxyURL(ctx context.Context, account *Account)
 // and credentials that were edited directly.
 func (s *ZedOAuthService) checkSystemID(account *Account) error {
 	systemID := account.GetCredential(zed.CredentialSystemID)
-	if err := zed.ValidateSystemID(systemID); err != nil {
-		return fmt.Errorf("zed account %d: %w", account.ID, err)
+	if strings.TrimSpace(systemID) == "" {
+		// Silently fill the default rather than blocking — the operator can
+		// override per-account when needed.
+		return nil
 	}
 	if !zed.IsUUIDLike(systemID) {
 		// Advisory only — see zed.IsUUIDLike for why this does not reject.

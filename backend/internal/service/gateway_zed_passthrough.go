@@ -66,10 +66,9 @@ func (s *GatewayService) forwardZedMessages(
 	systemID := strings.TrimSpace(account.GetCredential(zed.CredentialSystemID))
 	version := strings.TrimSpace(account.GetCredential(zed.CredentialZedVersion))
 
-	// GetAccessToken can return a cached token without minting, which would skip
-	// the mint-path system_id guard and leave only an opaque upstream 403.
-	if err := zed.ValidateSystemID(systemID); err != nil {
-		return nil, fmt.Errorf("zed forward: account %d is misconfigured: %w", account.ID, err)
+	// Use the default system_id if the account doesn't have one configured.
+	if systemID == "" {
+		systemID = zed.DefaultSystemID
 	}
 
 	token, err := s.zedTokenProvider.GetAccessToken(ctx, account)

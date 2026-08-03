@@ -40,11 +40,6 @@ func (r *ZedTokenRefresher) CanRefresh(account *Account) bool {
 	if account.Platform != PlatformZed || account.Type != AccountTypeOAuth {
 		return false
 	}
-	// A missing system_id makes the minted token unusable at inference time, so
-	// there is nothing to gain from minting one on a schedule.
-	if zed.ValidateSystemID(account.GetCredential(zed.CredentialSystemID)) != nil {
-		return false
-	}
 	// Without the minting credential there is nothing to mint from.
 	return strings.TrimSpace(account.GetCredential(zed.CredentialAccessToken)) != ""
 }

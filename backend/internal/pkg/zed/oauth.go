@@ -40,6 +40,17 @@ func ValidateSystemID(systemID string) error {
 	return nil
 }
 
+// ResolveSystemID returns the provided system_id if non-empty, otherwise falls
+// back to DefaultSystemID. Use this at credential storage time so that every
+// account always has a usable system_id without requiring manual configuration.
+func ResolveSystemID(systemID string) string {
+	systemID = strings.TrimSpace(systemID)
+	if systemID == "" {
+		return DefaultSystemID
+	}
+	return systemID
+}
+
 // IsUUIDLike reports whether a system_id has the shape Zed's local database
 // uses.
 //
@@ -180,53 +191,44 @@ func DecryptAccessToken(key *rsa.PrivateKey, encrypted string) (string, error) {
 // value causes trial_blocked (403) at inference time even though sign-in and
 // token minting succeed.
 func BuildCredentials(userID, plaintext, systemID string) (map[string]any, error) {
-	// Fail closed: this is the exchange path's only credential assembly point, so
-	// rejecting here is what keeps an unusable account from ever being stored.
-	systemID = strings.TrimSpace(systemID)
-	if err := ValidateSystemID(systemID); err != nil {
-		return nil, err
+	systemID = ResolveSystemID(systemID)
+	if strings.TrimSpace(plaintext) == "" {
+		return nil, fmt.Errorf("decrypted callback payload is empty")
 	}
 
-	creds := map[string]any{
-		CredentialUserID: userID,
-	}
-
-	var payload map[string]any
-	if err := json.Unmarshal([]byte(plaintext), &payload); err != nil {
-		// Older builds return the bare token rather than a JSON document.
-		token := strings.TrimSpace(plaintext)
-		if token == "" {
-			return nil, fmt.Errorf("decrypted callback payload is empty")
-		}
-		creds[CredentialAccessToken] = token
-		creds[CredentialSystemID] = systemID
-		return creds, nil
-	}
-
-	for key, value := range payload {
-		creds[key] = value
-	}
-	if token, ok := creds[CredentialAccessToken].(string); !ok || strings.TrimSpace(token) == "" {
-		return nil, fmt.Errorf("decrypted callback payload is missing access_token")
-	}
-	// Set last so a system_id inside the decrypted payload cannot shadow the one
-	// the operator supplied for this account.
-	creds[CredentialSystemID] = systemID
-	return creds, nil
+	// Match the real Zed client and zed2api: the decrypted value is opaque. It
+	// may currently look like JSON, but parsing and rebuilding it couples us to
+	// an upstream credential schema that can change independently.
+	return map[string]any{
+		CredentialUserID:      userID,
+		CredentialAccessToken: plaintext,
+		CredentialSystemID:    systemID,
+	}, nil
 }
 
-// CredentialJSON renders the credential document sent in the Authorization
-// header when minting an LLM token. The upstream expects the raw JSON Zed
-// persists, so only the keys it defines are included.
+// CredentialJSON returns the credential sent in the Authorization header when
+// minting an LLM token. New exchanges preserve Zed's opaque document verbatim;
+// credentials stored by older Sub2API builds are reconstructed for compatibility.
 func CredentialJSON(creds map[string]any) (string, error) {
+	accessToken, ok := creds[CredentialAccessToken].(string)
+	if !ok || strings.TrimSpace(accessToken) == "" {
+		return "", fmt.Errorf("credentials are missing access_token")
+	}
+
+	// Callback exchanges store the complete decrypted credential document in
+	// access_token. Match the real Zed client and zed2api by sending that document
+	// unchanged. Accounts created by older Sub2API builds store only the inner
+	// token and fall through to the legacy reconstruction below.
+	var opaqueCredential map[string]any
+	if json.Unmarshal([]byte(accessToken), &opaqueCredential) == nil {
+		return accessToken, nil
+	}
+
 	payload := make(map[string]any, 3)
 	for _, key := range []string{CredentialAccessToken, CredentialGitHubID, CredentialGitHubLogin} {
 		if value, ok := creds[key]; ok && value != nil {
 			payload[key] = value
 		}
-	}
-	if _, ok := payload[CredentialAccessToken]; !ok {
-		return "", fmt.Errorf("credentials are missing access_token")
 	}
 	encoded, err := json.Marshal(payload)
 	if err != nil {

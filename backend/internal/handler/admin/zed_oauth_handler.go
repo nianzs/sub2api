@@ -1,8 +1,6 @@
 package admin
 
 import (
-	"strings"
-
 	"github.com/Wei-Shaw/sub2api/internal/pkg/response"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/zed"
 	"github.com/Wei-Shaw/sub2api/internal/service"
@@ -45,10 +43,8 @@ type ZedExchangeCodeRequest struct {
 	// CallbackURL 是管理员从浏览器地址栏粘贴回来的完整回调 URL；
 	// 也接受仅包含 user_id / access_token 的裸 query string。
 	CallbackURL string `json:"callback_url" binding:"required"`
-	// SystemID 必须取自管理员本机 Zed 的 system_id。上游把套餐与试用资格绑定在
-	// 账号注册时使用的 system_id 上，填错仍能成功铸造 token，但推理会返回
-	// trial_blocked (403)；留空则整个 header 被省略，等于必然不可用。
-	SystemID string `json:"system_id" binding:"required"`
+	// SystemID 可选。留空时使用内置默认值（与 zed2api 行为一致）。
+	SystemID string `json:"system_id"`
 }
 
 func (h *ZedOAuthHandler) ExchangeCode(c *gin.Context) {
@@ -74,7 +70,8 @@ type ZedImportTokenRequest struct {
 	// 授权流程的场景直接导入。
 	UserID      string `json:"user_id" binding:"required"`
 	AccessToken string `json:"access_token" binding:"required"`
-	SystemID    string `json:"system_id" binding:"required"`
+	// SystemID 可选。留空时使用内置默认值。
+	SystemID    string `json:"system_id"`
 	GitHubLogin string `json:"github_user_login"`
 }
 
@@ -85,14 +82,7 @@ func (h *ZedOAuthHandler) ImportToken(c *gin.Context) {
 		return
 	}
 
-	// binding:"required" rejects "" but not "   ", so trim and validate here as
-	// well: this endpoint must not emit a credential set the mint layer will
-	// later refuse.
-	systemID := strings.TrimSpace(req.SystemID)
-	if err := zed.ValidateSystemID(systemID); err != nil {
-		response.BadRequest(c, "请求无效: "+err.Error())
-		return
-	}
+	systemID := zed.ResolveSystemID(req.SystemID)
 
 	credentials := map[string]any{
 		zed.CredentialUserID:      req.UserID,

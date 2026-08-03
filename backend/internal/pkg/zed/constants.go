@@ -26,6 +26,12 @@ const (
 // release. See ZedVersionForAccount.
 const DefaultZedVersion = "1.13.1"
 
+// DefaultSystemID is the fallback system_id used when an account does not
+// supply one. The upstream only requires that the same system_id is used
+// consistently across mint and completions calls — it does not need to
+// originate from an actual Zed installation.
+const DefaultSystemID = "6b87ab66-af2c-49c7-b986-ef4c27c9e1fb"
+
 // Provider identifiers used in the envelope's "provider" field.
 const (
 	ProviderAnthropic = "anthropic"

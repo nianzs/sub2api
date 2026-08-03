@@ -62,13 +62,14 @@ func ApplyMintHeaders(h http.Header, userID, credentialJSON, systemID, version s
 	if version == "" {
 		version = DefaultZedVersion
 	}
+	if systemID == "" {
+		systemID = DefaultSystemID
+	}
 	h.Set("Authorization", MintAuthorization(userID, credentialJSON))
 	h.Set("Content-Type", "application/json")
 	h.Set("Accept", "application/json")
 	h.Set("User-Agent", UserAgent(version))
-	if systemID != "" {
-		h.Set(HeaderZedSystemID, systemID)
-	}
+	h.Set(HeaderZedSystemID, systemID)
 }
 
 // ApplyCompletionHeaders sets the headers required by POST /completions.
@@ -84,13 +85,14 @@ func ApplyCompletionHeaders(h http.Header, token, systemID, version string) {
 	if version == "" {
 		version = DefaultZedVersion
 	}
+	if systemID == "" {
+		systemID = DefaultSystemID
+	}
 	h.Set("Authorization", "Bearer "+token)
 	h.Set("Content-Type", "application/json")
 	h.Set(HeaderZedVersion, version)
 	h.Set(HeaderSupportsStatusMessages, "true")
 	h.Set(HeaderSupportsStreamEnded, "true")
 	h.Set("User-Agent", UserAgent(version))
-	if systemID != "" {
-		h.Set(HeaderZedSystemID, systemID)
-	}
+	h.Set(HeaderZedSystemID, systemID)
 }

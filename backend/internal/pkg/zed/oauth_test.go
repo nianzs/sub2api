@@ -72,8 +72,8 @@ func TestOAuthRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("BuildCredentials: %v", err)
 	}
-	if creds[CredentialAccessToken] != "zed_secret" {
-		t.Errorf("access_token = %v, want it extracted", creds[CredentialAccessToken])
+	if creds[CredentialAccessToken] != plaintext {
+		t.Errorf("access_token = %v, want the complete decrypted payload", creds[CredentialAccessToken])
 	}
 	if creds[CredentialUserID] != "1234" {
 		t.Errorf("user_id = %v, want it recorded", creds[CredentialUserID])
@@ -81,8 +81,15 @@ func TestOAuthRoundTrip(t *testing.T) {
 	if creds[CredentialSystemID] != "sys-1" {
 		t.Errorf("system_id = %v, want it recorded; a mismatch causes trial_blocked", creds[CredentialSystemID])
 	}
-	if creds[CredentialGitHubLogin] != "octocat" {
-		t.Errorf("github_user_login = %v, want it carried over", creds[CredentialGitHubLogin])
+	if _, ok := creds[CredentialGitHubLogin]; ok {
+		t.Error("callback credential fields must not be parsed into separate stored values")
+	}
+	credentialJSON, err := CredentialJSON(creds)
+	if err != nil {
+		t.Fatalf("CredentialJSON: %v", err)
+	}
+	if credentialJSON != plaintext {
+		t.Errorf("CredentialJSON = %q, want original plaintext %q", credentialJSON, plaintext)
 	}
 }
 
@@ -148,6 +155,25 @@ func TestBuildCredentialsAcceptsBareToken(t *testing.T) {
 	}
 	if creds[CredentialSystemID] != "sys-7" {
 		t.Errorf("system_id = %v, want it stored on the bare-token path too", creds[CredentialSystemID])
+	}
+}
+
+func TestBuildCredentialsPreservesOpaqueJSONObject(t *testing.T) {
+	plaintext := `{"kind":"zed","credential":{"secret":"opaque"}}`
+	creds, err := BuildCredentials("7", plaintext, "sys-7")
+	if err != nil {
+		t.Fatalf("BuildCredentials: %v", err)
+	}
+	if creds[CredentialAccessToken] != plaintext {
+		t.Errorf("access_token = %v, want the complete decrypted payload", creds[CredentialAccessToken])
+	}
+
+	encoded, err := CredentialJSON(creds)
+	if err != nil {
+		t.Fatalf("CredentialJSON: %v", err)
+	}
+	if encoded != plaintext {
+		t.Errorf("CredentialJSON = %q, want opaque payload %q", encoded, plaintext)
 	}
 }
 

@@ -26,7 +26,6 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/pkg/openai"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/openai_compat"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/xai"
-	"github.com/Wei-Shaw/sub2api/internal/pkg/zed"
 	"github.com/Wei-Shaw/sub2api/internal/util/urlvalidator"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -258,12 +257,6 @@ func (s *AccountTestService) testZedAccountConnection(c *gin.Context, account *A
 	}
 
 	s.sendEvent(c, TestEvent{Type: "test_start", Model: "zed"})
-
-	// Checked before spending an upstream call: without a system_id the account
-	// mints fine and then fails every /completions request with trial_blocked.
-	if err := zed.ValidateSystemID(account.GetCredential(zed.CredentialSystemID)); err != nil {
-		return s.sendErrorAndEnd(c, err.Error())
-	}
 
 	tokenInfo, err := s.zedOAuthService.MintToken(ctx, account)
 	if err != nil {
