@@ -253,7 +253,7 @@ type ResponsesInputItem struct {
 	Role    string          `json:"role,omitempty"`
 	Content json.RawMessage `json:"content,omitempty"` // string or []ResponsesContentPart
 
-// type=reasoning (multi-turn replay of encrypted reasoning)
+	// type=reasoning (multi-turn replay of encrypted reasoning)
 	EncryptedContent string `json:"encrypted_content,omitempty"`
 
 	// type=function_call / custom_tool_call

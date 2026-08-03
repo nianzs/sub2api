@@ -208,6 +208,11 @@ func DeriveUpstreamEndpoint(inbound, rawRequestPath, platform string) string {
 	case service.PlatformAnthropic:
 		return EndpointMessages
 
+	case service.PlatformZed:
+		// Zed accounts serve Claude and GPT models, but both are translated to
+		// and from the Anthropic Messages shape at the gateway boundary.
+		return EndpointMessages
+
 	case service.PlatformGemini:
 		return EndpointGeminiModels
 

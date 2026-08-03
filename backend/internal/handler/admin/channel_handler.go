@@ -2,6 +2,7 @@ package admin
 
 import (
 	"fmt"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -507,14 +508,16 @@ func (h *ChannelHandler) GetModelDefaultPricing(c *gin.Context) {
 	})
 }
 
-// platformToLiteLLMProvider maps a channel platform name to the corresponding
-// LiteLLM provider string used as the key in the pricing catalog.
-var platformToLiteLLMProvider = map[string]string{
-	service.PlatformAnthropic:   "anthropic",
-	service.PlatformOpenAI:      "openai",
-	service.PlatformGemini:      "google",
-	service.PlatformAntigravity: "anthropic",
-	service.PlatformGrok:        "xai",
+// platformToLiteLLMProviders maps a channel platform to one or more LiteLLM
+// provider keys. Most platforms have a single catalog; Zed proxies both Claude
+// and GPT, so its pricing sync must union the two.
+var platformToLiteLLMProviders = map[string][]string{
+	service.PlatformAnthropic:   {"anthropic"},
+	service.PlatformOpenAI:      {"openai"},
+	service.PlatformGemini:      {"google"},
+	service.PlatformAntigravity: {"anthropic"},
+	service.PlatformGrok:        {"xai"},
+	service.PlatformZed:         {"anthropic", "openai"},
 }
 
 // SyncPricingModels 返回 LiteLLM 定价目录中指定平台的最新模型列表
@@ -527,7 +530,7 @@ func (h *ChannelHandler) SyncPricingModels(c *gin.Context) {
 		return
 	}
 
-	provider, ok := platformToLiteLLMProvider[platform]
+	providers, ok := platformToLiteLLMProviders[platform]
 	if !ok {
 		response.ErrorFrom(c, infraerrors.BadRequest("UNSUPPORTED_PLATFORM",
 			fmt.Sprintf("unsupported platform: %s", platform)).
@@ -535,6 +538,19 @@ func (h *ChannelHandler) SyncPricingModels(c *gin.Context) {
 		return
 	}
 
-	models := h.pricingService.ListModelNamesByProvider(provider)
+	// Union + dedupe so multi-provider platforms (Zed) surface every catalog entry
+	// once. Sort for a stable response that matches the single-provider path.
+	seen := make(map[string]struct{})
+	models := make([]string, 0)
+	for _, provider := range providers {
+		for _, name := range h.pricingService.ListModelNamesByProvider(provider) {
+			if _, exists := seen[name]; exists {
+				continue
+			}
+			seen[name] = struct{}{}
+			models = append(models, name)
+		}
+	}
+	sort.Strings(models)
 	response.Success(c, gin.H{"models": models})
 }

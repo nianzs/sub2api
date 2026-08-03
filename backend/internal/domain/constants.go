@@ -24,6 +24,7 @@ const (
 	PlatformAntigravity = "antigravity"
 	PlatformKiro        = "kiro"
 	PlatformGrok        = "grok"
+	PlatformZed         = "zed"
 	PlatformComposite   = "composite"
 )
 

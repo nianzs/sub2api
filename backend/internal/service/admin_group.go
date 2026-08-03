@@ -20,6 +20,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/pkg/openai"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/pagination"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/xai"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/zed"
 )
 
 // Group management implementations
@@ -354,6 +355,8 @@ func defaultModelsListCandidateIDs(platform string) []string {
 			ids = append(ids, model.ID)
 		}
 		return ids
+	case PlatformZed:
+		return zed.SupportedModelIDs()
 	case PlatformGrok:
 		return xai.DefaultModelIDs()
 	case PlatformComposite:
@@ -376,7 +379,7 @@ func defaultAllowImageGenerationForPlatform(platform string) bool {
 func compositeDefaultModelsListCandidateIDs() []string {
 	seen := make(map[string]struct{})
 	ids := make([]string, 0)
-	for _, platform := range []string{PlatformAnthropic, PlatformGemini, PlatformOpenAI, PlatformAntigravity, PlatformGrok} {
+	for _, platform := range []string{PlatformAnthropic, PlatformGemini, PlatformOpenAI, PlatformAntigravity, PlatformGrok, PlatformZed} {
 		for _, id := range defaultModelsListCandidateIDs(platform) {
 			if _, ok := seen[id]; ok {
 				continue
@@ -402,6 +405,7 @@ func groupSupportsOAuthOnlyFilter(platform string) bool {
 		platform == PlatformGemini ||
 		platform == PlatformKiro ||
 		platform == PlatformGrok ||
+		platform == PlatformZed ||
 		platform == PlatformComposite
 }
 

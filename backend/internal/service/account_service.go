@@ -22,13 +22,14 @@ const AccountPrivacyModeUnsetFilter = "__unset__"
 // accounts. Candidate platforms are supplied by TokenRefreshService's refresher
 // registry so repository eligibility cannot drift from registered providers.
 type OAuthRefreshPageOptions struct {
-	Platforms            []string
-	AfterID              int64
-	Limit                int
-	ActiveOnly           bool
-	IncludeSetupToken    bool
-	RequireRefreshToken  bool
-	ExcludeRetryCooldown bool
+	Platforms                   []string
+	AfterID                     int64
+	Limit                       int
+	ActiveOnly                  bool
+	IncludeSetupToken           bool
+	RequireRefreshToken         bool
+	RefreshTokenExemptPlatforms []string
+	ExcludeRetryCooldown        bool
 }
 
 // OAuthRefreshCandidatePage keeps cursor metadata from the raw SQL ID page.
@@ -494,6 +495,10 @@ func (s *AccountService) TestCredentials(ctx context.Context, id int64) error {
 		return nil
 	case PlatformGrok:
 		// Grok OAuth credentials are validated via token exchange/refresh and request-path probes.
+		return nil
+	case PlatformZed:
+		// Zed credentials are validated by minting an LLM token, which the token
+		// provider does on the request path and the connection test does eagerly.
 		return nil
 	default:
 		return fmt.Errorf("unsupported platform: %s", account.Platform)

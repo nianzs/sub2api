@@ -429,7 +429,7 @@ func (r *usageLogRepository) loadSubscriptions(ctx context.Context, ids []int64)
 
 func scanUsageLog(scanner interface{ Scan(...any) error }) (*service.UsageLog, error) {
 	var (
-id                        int64
+		id                        int64
 		userID                    int64
 		apiKeyID                  int64
 		accountID                 int64

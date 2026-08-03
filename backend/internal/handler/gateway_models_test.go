@@ -55,35 +55,36 @@ func newGatewayModelsHandlerForTest(repo service.AccountRepository) *GatewayHand
 	return &GatewayHandler{
 		gatewayService: service.NewGatewayService(
 			repo,
-				nil, // groupRepo
-				nil, // usageLogRepo
-				nil, // usageBillingRepo
-				nil, // userRepo
-				nil, // userSubRepo
-				nil, // userGroupRateRepo
-				nil, // cache
-				nil, // cfg
-				nil, // schedulerSnapshot
-				nil, // concurrencyService
-				nil, // billingService
-				nil, // rateLimitService
-				nil, // billingCacheService
-				nil, // identityService
-				nil, // httpUpstream
-				nil, // deferredService
-				nil, // claudeTokenProvider
-				nil, // kiroTokenProvider
-				nil, // kiroCooldownStore
-				nil, // sessionLimitCache
-				nil, // rpmCache
-				nil, // digestStore
-				nil, // settingService
-				nil, // tlsFPProfileService
-				nil, // channelService
-				nil, // resolver
-				nil, // compositeResolver
-				nil, // balanceNotifyService
-				nil, // userPlatformQuotaRepo
+			nil, // groupRepo
+			nil, // usageLogRepo
+			nil, // usageBillingRepo
+			nil, // userRepo
+			nil, // userSubRepo
+			nil, // userGroupRateRepo
+			nil, // cache
+			nil, // cfg
+			nil, // schedulerSnapshot
+			nil, // concurrencyService
+			nil, // billingService
+			nil, // rateLimitService
+			nil, // billingCacheService
+			nil, // identityService
+			nil, // httpUpstream
+			nil, // deferredService
+			nil, // claudeTokenProvider
+			nil, // kiroTokenProvider
+			nil, // zedTokenProvider
+			nil, // kiroCooldownStore
+			nil, // sessionLimitCache
+			nil, // rpmCache
+			nil, // digestStore
+			nil, // settingService
+			nil, // tlsFPProfileService
+			nil, // channelService
+			nil, // resolver
+			nil, // compositeResolver
+			nil, // balanceNotifyService
+			nil, // userPlatformQuotaRepo
 		),
 	}
 }

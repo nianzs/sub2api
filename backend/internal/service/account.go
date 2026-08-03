@@ -16,6 +16,7 @@ import (
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/domain"
+	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/openai_compat"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/xai"
 )
@@ -280,6 +281,35 @@ func (a *Account) IsGrok() bool {
 
 func (a *Account) IsGrokOAuth() bool {
 	return a.IsGrok() && a.Type == AccountTypeOAuth
+}
+
+func (a *Account) IsZed() bool {
+	return a.Platform == PlatformZed
+}
+
+// IsZedOAuth reports whether this is a Zed account served through the Zed relay.
+// Zed credentials are always minted from an OAuth sign-in, so the relay only
+// handles OAuth-typed accounts.
+func (a *Account) IsZedOAuth() bool {
+	return a.IsZed() && a.Type == AccountTypeOAuth
+}
+
+// validateZedAccountType enforces the only account type the Zed relay can serve.
+//
+// Non-OAuth Zed accounts save fine today and then fall through gateway_forward's
+// IsZedOAuth branch into the Anthropic path, which cannot mint a Zed JWT. Reject
+// them at create/update so they never reach the scheduler.
+func validateZedAccountType(platform, accountType string) error {
+	if platform != PlatformZed {
+		return nil
+	}
+	if accountType != AccountTypeOAuth {
+		return infraerrors.BadRequest(
+			"ZED_OAUTH_ONLY",
+			"zed accounts must use type oauth; apikey/setup-token/upstream are not supported",
+		)
+	}
+	return nil
 }
 
 func (a *Account) IsOpenAICompatible() bool {

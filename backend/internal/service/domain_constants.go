@@ -44,6 +44,7 @@ const (
 	PlatformAntigravity = domain.PlatformAntigravity
 	PlatformKiro        = domain.PlatformKiro
 	PlatformGrok        = domain.PlatformGrok
+	PlatformZed         = domain.PlatformZed
 	PlatformComposite   = domain.PlatformComposite
 )
 
@@ -57,6 +58,7 @@ var AllowedQuotaPlatforms = []string{
 	PlatformAntigravity,
 	PlatformKiro,
 	PlatformGrok,
+	PlatformZed,
 }
 
 // IsAllowedQuotaPlatform 报告 s 是否为合法的 quota platform 标识。
