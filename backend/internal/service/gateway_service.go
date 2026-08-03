@@ -702,6 +702,7 @@ type GatewayService struct {
 	concurrencyService    *ConcurrencyService
 	claudeTokenProvider   *ClaudeTokenProvider
 	kiroTokenProvider     *KiroTokenProvider
+	zedTokenProvider      *ZedTokenProvider
 	kiroCooldownStore     KiroCooldownStore
 	sessionLimitCache     SessionLimitCache // 会话数量限制缓存（仅 Anthropic OAuth/SetupToken）
 	rpmCache              RPMCache          // RPM 计数缓存（仅 Anthropic OAuth/SetupToken）
@@ -721,6 +722,12 @@ type GatewayService struct {
 	tlsFPProfileService   *TLSFingerprintProfileService
 	balanceNotifyService  *BalanceNotifyService
 	userPlatformQuotaRepo UserPlatformQuotaRepository
+}
+
+// SetZedTokenProvider injects the Zed relay's token provider after construction,
+// keeping it out of the already-long constructor signature.
+func (s *GatewayService) SetZedTokenProvider(provider *ZedTokenProvider) {
+	s.zedTokenProvider = provider
 }
 
 // NewGatewayService creates a new GatewayService
@@ -744,6 +751,7 @@ func NewGatewayService(
 	deferredService *DeferredService,
 	claudeTokenProvider *ClaudeTokenProvider,
 	kiroTokenProvider *KiroTokenProvider,
+	zedTokenProvider *ZedTokenProvider,
 	kiroCooldownStore KiroCooldownStore,
 	sessionLimitCache SessionLimitCache,
 	rpmCache RPMCache,
@@ -780,6 +788,7 @@ func NewGatewayService(
 		deferredService:       deferredService,
 		claudeTokenProvider:   claudeTokenProvider,
 		kiroTokenProvider:     kiroTokenProvider,
+		zedTokenProvider:      zedTokenProvider,
 		kiroCooldownStore:     kiroCooldownStore,
 		sessionLimitCache:     sessionLimitCache,
 		rpmCache:              rpmCache,

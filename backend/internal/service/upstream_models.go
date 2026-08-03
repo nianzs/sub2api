@@ -85,6 +85,10 @@ func (s *AccountTestService) FetchUpstreamSupportedModels(ctx context.Context, a
 		return s.fetchAntigravityOAuthUpstreamModels(ctx, account)
 	}
 
+	if account.Platform == PlatformZed {
+		return s.fetchZedUpstreamModels(ctx, account)
+	}
+
 	if s.httpUpstream == nil {
 		return nil, newUpstreamModelSyncConfigError("Upstream HTTP client is not configured", nil)
 	}
@@ -607,4 +611,34 @@ func dedupeAndSortModelIDs(models []string) []string {
 	}
 	sort.Strings(result)
 	return result
+}
+
+func (s *AccountTestService) fetchZedUpstreamModels(ctx context.Context, account *Account) ([]string, error) {
+	if s.zedOAuthService == nil {
+		return nil, newUpstreamModelSyncConfigError("Zed OAuth service is not configured", nil)
+	}
+
+	tokenInfo, err := s.zedOAuthService.MintToken(ctx, account)
+	if err != nil {
+		return nil, newUpstreamModelSyncUpstreamError("Failed to mint Zed token", err)
+	}
+	token := ""
+	if tokenInfo != nil {
+		token = tokenInfo.Token
+	}
+
+	models, err := s.zedOAuthService.FetchModels(ctx, account, token)
+	if err != nil {
+		return nil, newUpstreamModelSyncUpstreamError("Failed to fetch Zed models", err)
+	}
+	if len(models) == 0 {
+		return nil, newUpstreamModelSyncUpstreamError("Upstream returned no supported models", nil)
+	}
+
+	ids := make([]string, 0, len(models))
+	for _, m := range models {
+		ids = append(ids, m.ID)
+	}
+	sort.Strings(ids)
+	return ids, nil
 }

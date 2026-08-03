@@ -453,6 +453,9 @@ func normalizeGrokMediaEligibilityUpdateExtra(account *Account, input *UpdateAcc
 }
 
 func buildAccountForCreate(input *CreateAccountInput, accountExtra map[string]any) (*Account, error) {
+	if err := validateZedAccountType(input.Platform, input.Type); err != nil {
+		return nil, err
+	}
 	// Probe/session state is system-managed. New accounts always start with automatic refresh disabled.
 	delete(accountExtra, UpstreamBillingProbeEnabledExtraKey)
 	delete(accountExtra, UpstreamBillingProbeExtraKey)
@@ -649,6 +652,16 @@ func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *U
 		}
 	}
 	wasOveragesEnabled := account.IsOveragesEnabled()
+
+	// Zed only has an OAuth path: changing type (or loading a non-oauth row) would
+	// drop the account into the Anthropic forwarder, which cannot mint a Zed JWT.
+	nextType := account.Type
+	if input.Type != "" {
+		nextType = input.Type
+	}
+	if err := validateZedAccountType(account.Platform, nextType); err != nil {
+		return nil, err
+	}
 
 	if input.Name != "" {
 		account.Name = input.Name

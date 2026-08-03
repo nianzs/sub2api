@@ -127,6 +127,10 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 		return s.forwardKiroMessages(ctx, c, account, parsed, startTime)
 	}
 
+	if account != nil && account.IsZedOAuth() {
+		return s.forwardZedMessages(ctx, c, account, parsed, startTime)
+	}
+
 	// Beta policy: evaluate once; block check + cache filter set for buildUpstreamRequest.
 	// Always overwrite the cache to prevent stale values from a previous retry with a different account.
 	if account.Platform == PlatformAnthropic && c != nil {

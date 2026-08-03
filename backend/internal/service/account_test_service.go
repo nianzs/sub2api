@@ -14,6 +14,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -25,6 +26,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/pkg/openai"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/openai_compat"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/xai"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/zed"
 	"github.com/Wei-Shaw/sub2api/internal/util/urlvalidator"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -72,11 +74,18 @@ type AccountTestService struct {
 	kiroTokenProvider         *KiroTokenProvider
 	grokTokenProvider         *GrokTokenProvider
 	antigravityGatewayService *AntigravityGatewayService
+	zedOAuthService           *ZedOAuthService
 	httpUpstream              HTTPUpstream
 	cfg                       *config.Config
 	tlsFPProfileService       *TLSFingerprintProfileService
 	agentIdentityTaskMu       sync.Mutex
 	agentIdentityWS           agentIdentityWSConnectionInvalidator
+}
+
+// SetZedOAuthService injects the Zed dependency after construction, keeping the
+// constructor's already-long signature stable.
+func (s *AccountTestService) SetZedOAuthService(zedOAuthService *ZedOAuthService) {
+	s.zedOAuthService = zedOAuthService
 }
 
 // NewAccountTestService creates a new AccountTestService
@@ -225,7 +234,89 @@ func (s *AccountTestService) TestAccountConnection(c *gin.Context, accountID int
 		return s.testKiroAccountConnection(c, account, modelID)
 	}
 
+	if account.IsZed() {
+		return s.testZedAccountConnection(c, account)
+	}
+
 	return s.testClaudeAccountConnection(c, account, modelID)
+}
+
+// testZedAccountConnection verifies a Zed account end to end without spending
+// inference quota: minting an LLM token proves the stored credential is valid,
+// and /client/users/me proves the account is in good standing and reports its
+// plan.
+//
+// Note a successful mint alone is not sufficient evidence that inference will
+// work — a system_id that does not match the one the account was registered
+// under still mints fine but makes /completions return trial_blocked (403), so
+// the plan readout is what makes the result trustworthy.
+func (s *AccountTestService) testZedAccountConnection(c *gin.Context, account *Account) error {
+	ctx := c.Request.Context()
+
+	if s.zedOAuthService == nil {
+		return s.sendErrorAndEnd(c, "Zed OAuth service is not configured")
+	}
+
+	s.sendEvent(c, TestEvent{Type: "test_start", Model: "zed"})
+
+	// Checked before spending an upstream call: without a system_id the account
+	// mints fine and then fails every /completions request with trial_blocked.
+	if err := zed.ValidateSystemID(account.GetCredential(zed.CredentialSystemID)); err != nil {
+		return s.sendErrorAndEnd(c, err.Error())
+	}
+
+	tokenInfo, err := s.zedOAuthService.MintToken(ctx, account)
+	if err != nil {
+		return s.sendErrorAndEnd(c, "Failed to mint Zed LLM token: "+err.Error())
+	}
+	s.sendEvent(c, TestEvent{
+		Type: "content",
+		Text: "Minted an LLM token, valid until " + tokenInfo.ExpiresAt.UTC().Format(time.RFC3339) + ".\n",
+	})
+
+	outcome := evaluateZedAccountStatus(s.zedOAuthService.FetchAccountInfo(ctx, account))
+	if !outcome.Pass {
+		return s.sendErrorAndEnd(c, outcome.Text)
+	}
+	s.sendEvent(c, TestEvent{Type: "content", Text: outcome.Text + "\n"})
+	s.sendEvent(c, TestEvent{Type: "test_complete", Success: true})
+	return nil
+}
+
+// zedStatusOutcome is the connection test's verdict on the /client/users/me
+// readout.
+type zedStatusOutcome struct {
+	Pass bool
+	Text string
+}
+
+// evaluateZedAccountStatus decides whether a Zed account passes its connection
+// test, given the account-info result.
+//
+// A successful mint is deliberately not sufficient: a system_id that does not
+// match the one the account was registered under mints fine but makes
+// /completions return trial_blocked (403). The status readout is the only signal
+// in this test that can catch that, along with a broken proxy, a suspended
+// account, or a permission problem — so swallowing its failure would make the
+// whole test meaningless.
+func evaluateZedAccountStatus(info map[string]any, err error) zedStatusOutcome {
+	if err != nil {
+		var upstreamErr *ZedUpstreamError
+		if errors.As(err, &upstreamErr) && upstreamErr.IsAuthFailure() {
+			return zedStatusOutcome{Text: "Account status check was rejected (" +
+				strconv.Itoa(upstreamErr.StatusCode) + "). The credential mints tokens but the account is not in good standing — " +
+				"check that system_id matches the Zed installation this account was registered on, and that the account is not trial-blocked."}
+		}
+		return zedStatusOutcome{Text: "Could not read account status: " + err.Error() +
+			". A successful mint alone does not prove inference will work, so this counts as a failure."}
+	}
+	if plan, ok := info["plan"].(string); ok && plan != "" {
+		return zedStatusOutcome{Pass: true, Text: "Plan: " + plan + "."}
+	}
+	// A 200 proves the credential is in good standing even when the payload shape
+	// is unfamiliar. An upstream field rename must not fail every account.
+	return zedStatusOutcome{Pass: true,
+		Text: "Account is reachable, but the response did not include a recognizable plan; plan eligibility could not be confirmed."}
 }
 
 // testClaudeAccountConnection tests an Anthropic Claude account's connection

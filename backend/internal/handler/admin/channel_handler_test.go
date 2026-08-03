@@ -459,7 +459,7 @@ func TestSyncPricingModels_ValidPlatform_EmptyService(t *testing.T) {
 	svc := service.NewPricingService(nil, nil)
 	router := setupSyncPricingModelsRouter(svc)
 
-	for _, platform := range []string{"anthropic", "openai", "gemini", "antigravity"} {
+	for _, platform := range []string{"anthropic", "openai", "gemini", "antigravity", "grok", "zed"} {
 		req := httptest.NewRequest(http.MethodGet, "/channels/pricing/sync-models?platform="+platform, nil)
 		w := httptest.NewRecorder()
 		router.ServeHTTP(w, req)
@@ -474,4 +474,14 @@ func TestSyncPricingModels_ValidPlatform_EmptyService(t *testing.T) {
 		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &body))
 		require.NotNil(t, body.Data.Models, "models must not be null for platform=%s", platform)
 	}
+}
+
+// Zed proxies both Claude and GPT, so its provider list must be the union of the
+// two catalogs. Single-provider platforms must not grow a second key.
+func TestPlatformToLiteLLMProviders_ZedUnionsAnthropicAndOpenAI(t *testing.T) {
+	require.Equal(t, []string{"anthropic", "openai"}, platformToLiteLLMProviders[service.PlatformZed])
+	require.Equal(t, []string{"anthropic"}, platformToLiteLLMProviders[service.PlatformAnthropic])
+	require.Equal(t, []string{"openai"}, platformToLiteLLMProviders[service.PlatformOpenAI])
+	require.Equal(t, []string{"xai"}, platformToLiteLLMProviders[service.PlatformGrok])
+	require.Equal(t, []string{"google"}, platformToLiteLLMProviders[service.PlatformGemini])
 }
