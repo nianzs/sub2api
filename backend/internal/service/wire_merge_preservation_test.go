@@ -26,7 +26,7 @@ func TestProvideAccountTestServicePreservesKiroAndAgentIdentityDependencies(t *t
 	gateway := &OpenAIGatewayService{}
 
 	svc := ProvideAccountTestService(
-		nil, nil, nil, kiro, nil, nil, nil, nil, nil, gateway, nil,
+		nil, nil, nil, kiro, nil, nil, nil, nil, nil, gateway, nil, nil,
 	)
 
 	require.Equal(t, kiro, svc.kiroTokenProvider)

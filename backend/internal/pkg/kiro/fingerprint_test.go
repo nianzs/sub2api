@@ -10,6 +10,23 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestBuildUsageRuntimeUserAgentUsesCurrentAdmittedClient(t *testing.T) {
+	key := BuildAccountKey("client-id", "", "", "", 1)
+	machineID := BuildMachineID("refresh-token", "", "")
+
+	ua := BuildUsageRuntimeUserAgent(key, machineID)
+	amzUA := BuildUsageRuntimeAmzUserAgent(key, machineID)
+
+	require.Contains(t, ua, "api/codewhispererstreaming#1.0.34")
+	require.Contains(t, ua, "aws-sdk-js/1.0.34")
+	require.Contains(t, ua, "KiroIDE-"+UsageAPIKiroVersion+"-")
+	require.Contains(t, ua, machineID)
+	require.Contains(t, amzUA, "aws-sdk-js/1.0.34")
+	require.Contains(t, amzUA, "KiroIDE-"+UsageAPIKiroVersion+"-")
+	require.NotContains(t, ua, "api/codewhispererruntime")
+	require.Contains(t, BuildRuntimeUserAgent(key, machineID), "KiroIDE-"+UsageAPIKiroVersion+"-")
+}
+
 func TestBuildLoginHeadersStable(t *testing.T) {
 	headers1 := BuildLoginHeaders("", "")
 	headers2 := BuildLoginHeaders("", "")
@@ -30,7 +47,7 @@ func TestBuildLoginHeadersUsesProvidedMachineID(t *testing.T) {
 
 	require.Equal(t, headers1["User-Agent"], headers2["User-Agent"])
 	require.NotEqual(t, headers1["User-Agent"], headers3["User-Agent"])
-	require.Contains(t, headers1["User-Agent"], "KiroIDE-0.11.")
+	require.Contains(t, headers1["User-Agent"], "KiroIDE-0.12.")
 	require.Contains(t, headers1["User-Agent"], machineIDA)
 }
 

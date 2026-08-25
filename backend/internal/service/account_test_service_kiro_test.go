@@ -207,8 +207,7 @@ func TestAccountTestService_KiroInvalidModelDoesNotRefreshProfileArnOrRetry(t *t
 
 	firstBody, readErr := io.ReadAll(upstream.requests[0].Body)
 	require.NoError(t, readErr)
-	// Q endpoint 不传 profileArn（凭据中的占位符 ARN 会导致 403）
-	require.NotContains(t, string(firstBody), `"profileArn"`)
+	require.Contains(t, string(firstBody), `"profileArn":"arn:aws:codewhisperer:us-east-1:123456789012:profile/STALE"`)
 	require.Equal(t, "arn:aws:codewhisperer:us-east-1:123456789012:profile/STALE", account.GetCredential("profile_arn"))
 }
 
@@ -271,7 +270,7 @@ func TestBuildKiroPayloadForAccount_KiroBuilderIDWithoutProfileArnOmitsProfileAr
 	buildResult, err := (&GatewayService{}).buildKiroPayloadForAccount(context.Background(), account, nil, payloadBytes, "claude-sonnet-4-6", "kiro-access-token", "claude-sonnet-4-6", nil)
 	require.NoError(t, err)
 	kiroPayload := buildResult.Payload
-	require.NotContains(t, string(kiroPayload), `"profileArn":`)
+	require.Contains(t, string(kiroPayload), `"profileArn":"`+kiroBuilderIDProfileARN+`"`)
 }
 
 func TestBuildKiroPayloadForAccount_KiroBuilderIDWithCachedProfileArnOmitsForQMode(t *testing.T) {
@@ -297,8 +296,7 @@ func TestBuildKiroPayloadForAccount_KiroBuilderIDWithCachedProfileArnOmitsForQMo
 	buildResult, err := (&GatewayService{}).buildKiroPayloadForAccount(context.Background(), account, nil, payloadBytes, "claude-sonnet-4-6", "kiro-access-token", "claude-sonnet-4-6", nil)
 	require.NoError(t, err)
 	kiroPayload := buildResult.Payload
-	// parsed=nil → Q endpoint 模式，Q endpoint 不传 profileArn
-	require.NotContains(t, string(kiroPayload), `"profileArn"`)
+	require.Contains(t, string(kiroPayload), `"profileArn":"arn:aws:codewhisperer:us-east-1:123456789012:profile/CACHED"`)
 }
 
 func TestGatewayServiceForwardRoutesKiroOAuthAndCapturesMeteringCredits(t *testing.T) {

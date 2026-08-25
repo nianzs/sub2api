@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -18,13 +19,17 @@ import (
 )
 
 const (
-	kiroUsageOrigin       = "AI_EDITOR"
-	kiroUsageResourceType = "AGENTIC_REQUEST"
-
-	kiroDefaultRegion = "us-east-1"
+	kiroUsageOrigin          = "AI_EDITOR"
+	kiroUsageResourceType    = "AGENTIC_REQUEST"
+	kiroUsageIsEmailRequired = "true"
+	kiroUsagePrimaryEURegion = "eu-central-1"
+	kiroDefaultRegion        = "us-east-1"
 )
 
 var resolveKiroRuntimeEndpoint = kiroRuntimeEndpoint
+
+// 单测把 getUsageLimits 打到 httptest 时置位，避免 ensureKiroUsageProfileArn 外呼 ListAvailableProfiles。
+var kiroUsageSkipEnterpriseProfileResolve bool
 
 type kiroUsageLimitsResponse struct {
 	NextDateReset      any                  `json:"nextDateReset"`
@@ -154,16 +159,13 @@ func (s *AccountUsageService) fetchAndCacheKiroUsage(ctx context.Context, accoun
 		return nil, fmt.Errorf("no access token available")
 	}
 
-	region := kiroAPIRegion(account)
-	profileArn := resolveKiroPayloadProfileArn(account)
-
-	resp, err := s.requestKiroUsageLimits(ctx, account, region, profileArn, token)
+	resp, err := s.requestKiroUsageLimits(ctx, account, token)
 	if err != nil {
 		// API Key 账号无可刷新 token,跳过刷新重试。
 		if account.Type != AccountTypeAPIKey && s.shouldRetryKiroUsageWithRefresh(err) {
 			refreshedToken, refreshErr := s.kiroTokenProvider.ForceRefreshAccessToken(ctx, account)
 			if refreshErr == nil && strings.TrimSpace(refreshedToken) != "" {
-				resp, err = s.requestKiroUsageLimits(ctx, account, region, profileArn, strings.TrimSpace(refreshedToken))
+				resp, err = s.requestKiroUsageLimits(ctx, account, strings.TrimSpace(refreshedToken))
 				if err == nil {
 					usage := mapKiroUsageToInfo(resp)
 					usage.Source = source
@@ -250,18 +252,57 @@ func cloneUsageInfo(info *UsageInfo) *UsageInfo {
 	return &cloned
 }
 
-func (s *AccountUsageService) requestKiroUsageLimits(ctx context.Context, account *Account, region, profileArn, token string) (*kiroUsageLimitsResponse, error) {
-	endpoint := resolveKiroRuntimeEndpoint(region)
+func (s *AccountUsageService) requestKiroUsageLimits(ctx context.Context, account *Account, token string) (*kiroUsageLimitsResponse, error) {
+	var repo AccountRepository
+	if s != nil {
+		repo = s.accountRepo
+	}
+	ensureKiroEnterpriseRealProfileArn(ctx, repo, account, token)
+	profileArn := kiroUsageQueryProfileArn(account)
+	seen := make(map[string]struct{}, 2)
+	var lastErr error
+
+	candidates := kiroUsageRegionCandidates(account)
+	for i, region := range candidates {
+		endpoint := strings.TrimRight(resolveKiroRuntimeEndpoint(region), "/")
+		if endpoint == "" {
+			continue
+		}
+		if _, dup := seen[endpoint]; dup {
+			continue
+		}
+		seen[endpoint] = struct{}{}
+
+		parsed, err := s.doKiroUsageLimitsRequest(ctx, account, endpoint, token, profileArn)
+		if err == nil {
+			return parsed, nil
+		}
+		lastErr = err
+
+		var httpErr *kiroUsageHTTPError
+		if errors.As(err, &httpErr) && httpErr.StatusCode == http.StatusForbidden && i+1 < len(candidates) {
+			continue
+		}
+		return nil, lastErr
+	}
+	if lastErr != nil {
+		return nil, lastErr
+	}
+	return nil, fmt.Errorf("kiro usage request failed: no endpoint")
+}
+
+func (s *AccountUsageService) doKiroUsageLimitsRequest(ctx context.Context, account *Account, endpoint, token, profileArn string) (*kiroUsageLimitsResponse, error) {
 	reqURL, err := url.Parse(endpoint + "/getUsageLimits")
 	if err != nil {
 		return nil, fmt.Errorf("build kiro usage url failed: %w", err)
 	}
 	q := reqURL.Query()
 	q.Set("origin", kiroUsageOrigin)
+	q.Set("resourceType", kiroUsageResourceType)
+	q.Set("isEmailRequired", kiroUsageIsEmailRequired)
 	if profileArn = strings.TrimSpace(profileArn); profileArn != "" {
 		q.Set("profileArn", profileArn)
 	}
-	q.Set("resourceType", kiroUsageResourceType)
 	reqURL.RawQuery = q.Encode()
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, reqURL.String(), nil)
@@ -309,17 +350,59 @@ func (s *AccountUsageService) applyKiroRuntimeHeaders(req *http.Request, account
 	machineID := buildKiroMachineID(account)
 	req.Header.Set("Accept", "*/*")
 	req.Header.Set("Authorization", "Bearer "+strings.TrimSpace(token))
-	req.Header.Set("User-Agent", kiropkg.BuildRuntimeUserAgent(accountKey, machineID))
-	req.Header.Set("X-Amz-User-Agent", kiropkg.BuildRuntimeAmzUserAgent(accountKey, machineID))
+	req.Header.Set("User-Agent", kiropkg.BuildUsageRuntimeUserAgent(accountKey, machineID))
+	req.Header.Set("X-Amz-User-Agent", kiropkg.BuildUsageRuntimeAmzUserAgent(accountKey, machineID))
 	req.Header.Set("x-amzn-kiro-agent-mode", "vibe")
 	req.Header.Set("x-amzn-codewhisperer-optout", "true")
-	req.Header.Set("Amz-Sdk-Request", "attempt=1; max=3")
+	req.Header.Set("Amz-Sdk-Request", "attempt=1; max=1")
 	req.Header.Set("Amz-Sdk-Invocation-Id", uuid.NewString())
 
 	if account == nil {
 		return
 	}
 	applyKiroConditionalHeaders(req, account)
+}
+
+// kiroUsageQueryProfileArn 返回用量 REST GET 必须携带的 profileArn。
+// getUsageLimits 已把 profileArn 当必填：不带会 403 "User is not authorized to make this call."
+// Builder ID 没有真实 profile，必须带 IDE 硬编码占位符；Social 用固定 social ARN；
+// Enterprise 应先由 ensureKiroUsageProfileArn 回填真实 ARN（占位符对该身份会 invalid token）。
+func kiroUsageQueryProfileArn(account *Account) string {
+	arn := strings.TrimSpace(resolveKiroPayloadProfileArn(account))
+	if arn != "" && !kiroIsPlaceholderProfileARN(arn) {
+		return arn
+	}
+	if kiroIsSocialLogin(account) {
+		return kiroSocialProfileARN
+	}
+	if kiroAccountLacksEnterpriseProfile(account) {
+		if arn != "" {
+			return arn
+		}
+		return kiroBuilderIDProfileARN
+	}
+	return ""
+}
+
+func kiroUsageRegionCandidates(account *Account) []string {
+	hint := kiroUsageHintRegion(account)
+	if hint == kiroUsagePrimaryEURegion || strings.HasPrefix(hint, "eu-") {
+		return []string{kiroUsagePrimaryEURegion, kiroDefaultRegion}
+	}
+	return []string{kiroDefaultRegion, kiroUsagePrimaryEURegion}
+}
+
+func kiroUsageHintRegion(account *Account) string {
+	if account == nil {
+		return kiroDefaultRegion
+	}
+	if api := strings.TrimSpace(account.GetCredential("api_region")); api != "" {
+		return api
+	}
+	if region := strings.TrimSpace(account.GetCredential("region")); region != "" {
+		return region
+	}
+	return kiroDefaultRegion
 }
 
 func accountProxyURL(account *Account) string {

@@ -228,6 +228,16 @@ func resolveKiroPayloadProfileArn(account *Account) string {
 	return strings.TrimSpace(account.GetCredential("profile_arn"))
 }
 
+// kiroOAuthRequestProfileArn 返回 Q 端点（用量 / 模型列表 / 对话）必须带的 profileArn。
+// API Key（ksk_）不能带 profileArn。OAuth：Social 用固定 ARN，Builder ID 用占位符，
+// Enterprise 必须是 ListAvailableProfiles 得到的真实 ARN。
+func kiroOAuthRequestProfileArn(account *Account) string {
+	if account == nil || account.Type == AccountTypeAPIKey {
+		return ""
+	}
+	return kiroUsageQueryProfileArn(account)
+}
+
 // kiroResolveProfileArnForKRS 返回 KRS endpoint 所需的 profileArn。
 // KRS endpoint（runtime.us-east-1.kiro.dev）强制要求 profileArn，
 // 凭据无值时 fallback 到默认 ARN（Social → Social ARN，其余 → BuilderID 占位符）。
@@ -263,9 +273,11 @@ func newKiroJSONRequest(ctx context.Context, endpointURL string, payload []byte,
 		req.Header.Set("X-Amz-Target", amzTarget)
 	}
 	if account != nil {
-		profileArn := resolveKiroPayloadProfileArn(account)
-		if profileArn == "" && endpointURL == kiroKRSEndpointURL {
+		var profileArn string
+		if endpointURL == kiroKRSEndpointURL {
 			profileArn = kiroResolveProfileArnForKRS(account)
+		} else {
+			profileArn = kiroOAuthRequestProfileArn(account)
 		}
 		if profileArn != "" {
 			req.Header.Set("x-amzn-kiro-profile-arn", profileArn)

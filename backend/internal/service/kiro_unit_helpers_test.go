@@ -10,6 +10,10 @@ import (
 	kiropkg "github.com/Wei-Shaw/sub2api/internal/pkg/kiro"
 )
 
+func init() {
+	kiroUsageSkipEnterpriseProfileResolve = true
+}
+
 func (s *GatewayService) streamKeepaliveIntervalForAccount(account *Account) time.Duration {
 	if account != nil && account.Platform == PlatformKiro {
 		if s != nil && s.cfg != nil && s.cfg.Gateway.KiroStreamKeepaliveInterval > 0 {
@@ -27,6 +31,8 @@ func (s *GatewayService) buildKiroPayloadForAccount(ctx context.Context, account
 	var profileArn string
 	if kiroEndpointModeForRequest(account, parsed) == KiroEndpointModeKRS {
 		profileArn = kiroResolveProfileArnForKRS(account)
+	} else {
+		profileArn = kiroOAuthRequestProfileArn(account)
 	}
 	return s.buildKiroPayloadForAccountWithArn(ctx, account, parsed, anthropicBody, modelID, token, requestModel, headers, profileArn)
 }

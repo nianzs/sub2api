@@ -365,10 +365,7 @@ func (s *GatewayService) executeKiroUpstream(ctx context.Context, account *Accou
 func (s *GatewayService) executeKiroUpstreamWithParsed(ctx context.Context, account *Account, parsed *ParsedRequest, anthropicBody []byte, mappedModel, requestModel, token string, headers http.Header) (*http.Response, kiropkg.KiroRequestContext, error) {
 	var requestCtx kiropkg.KiroRequestContext
 	mode := kiroEndpointModeForRequest(account, parsed)
-	// KRS/Auto 模式：确保 profileArn 已解析（已有值时零开销，仅为安全兜底）
-	if mode == KiroEndpointModeAuto || mode == KiroEndpointModeKRS {
-		s.ensureKiroProfileArnForRequest(ctx, account, token, KiroEndpointModeKRS)
-	}
+	s.ensureKiroProfileArnForRequest(ctx, account, token, mode)
 	accountKey := buildKiroAccountKey(account)
 	if err := s.checkKiroCooldown(ctx, accountKey); err != nil {
 		if failoverErr := asKiroCooldownFailoverError(err); failoverErr != nil {
@@ -386,10 +383,12 @@ func (s *GatewayService) executeKiroUpstreamWithParsed(ctx context.Context, acco
 	maxRetries := 2
 
 	for idx, endpoint := range endpoints {
-		// 按端点维度构建 payload：Q 端点 profileArn 为空，KRS 端点需要 profileArn
+		// Q 与 KRS 现在都要求 profileArn。API Key 走 Q 且不能带 ARN。
 		var profileArn string
 		if endpoint.Name == "KiroRuntime" {
 			profileArn = kiroResolveProfileArnForKRS(account)
+		} else {
+			profileArn = kiroOAuthRequestProfileArn(account)
 		}
 		buildResult, err := s.buildKiroPayloadForAccountWithArn(ctx, account, parsed, anthropicBody, modelID, currentToken, requestModel, headers, profileArn)
 		if err != nil {
@@ -494,7 +493,7 @@ func (s *GatewayService) executeKiroUpstreamWithParsed(ctx context.Context, acco
 						if endpoint.Name == "KiroRuntime" {
 							profileArn = kiroResolveProfileArnForKRS(account)
 						} else {
-							profileArn = ""
+							profileArn = kiroOAuthRequestProfileArn(account)
 						}
 						buildResult, err = s.buildKiroPayloadForAccountWithArn(ctx, account, parsed, anthropicBody, modelID, currentToken, requestModel, headers, profileArn)
 						if err != nil {
