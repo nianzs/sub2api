@@ -3135,6 +3135,7 @@ func (h *AccountHandler) SyncUpstreamModelsPreview(c *gin.Context) {
 		Platform     string            `json:"platform" binding:"required"`
 		Type         string            `json:"type" binding:"required"`
 		BaseURL      string            `json:"base_url"`
+		APIRegion    string            `json:"api_region"`
 		APIKey       string            `json:"api_key" binding:"required"`
 		ModelMapping map[string]string `json:"model_mapping"`
 	}
@@ -3153,6 +3154,7 @@ func (h *AccountHandler) SyncUpstreamModelsPreview(c *gin.Context) {
 		Credentials: map[string]any{
 			"api_key":       req.APIKey,
 			"base_url":      req.BaseURL,
+			"api_region":    req.APIRegion,
 			"model_mapping": modelMapping,
 		},
 	}

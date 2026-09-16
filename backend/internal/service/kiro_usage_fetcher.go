@@ -13,8 +13,6 @@ import (
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/httpclient"
-	kiropkg "github.com/Wei-Shaw/sub2api/internal/pkg/kiro"
-	"github.com/google/uuid"
 )
 
 const (
@@ -307,24 +305,7 @@ func (s *AccountUsageService) requestKiroUsageLimits(ctx context.Context, accoun
 }
 
 func (s *AccountUsageService) applyKiroRuntimeHeaders(req *http.Request, account *Account, token string) {
-	if req == nil {
-		return
-	}
-	accountKey := buildKiroAccountKey(account)
-	machineID := buildKiroMachineID(account)
-	req.Header.Set("Accept", "*/*")
-	req.Header.Set("Authorization", "Bearer "+strings.TrimSpace(token))
-	req.Header.Set("User-Agent", kiropkg.BuildRuntimeUserAgent(accountKey, machineID))
-	req.Header.Set("X-Amz-User-Agent", kiropkg.BuildRuntimeAmzUserAgent(accountKey, machineID))
-	req.Header.Set("x-amzn-kiro-agent-mode", "vibe")
-	req.Header.Set("x-amzn-codewhisperer-optout", "true")
-	req.Header.Set("Amz-Sdk-Request", "attempt=1; max=3")
-	req.Header.Set("Amz-Sdk-Invocation-Id", uuid.NewString())
-
-	if account == nil {
-		return
-	}
-	applyKiroConditionalHeaders(req, account)
+	applyKiroRuntimeGETHeaders(req, account, token)
 }
 
 func accountProxyURL(account *Account) string {

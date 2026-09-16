@@ -224,6 +224,14 @@ func (s *AccountTestService) SyncUpstreamModelCatalog(ctx context.Context, accou
 			"model_count", len(models),
 		)
 	}
+
+	// Kiro 服务 Anthropic 协议，不消费 Extra["upstream_model_metadata"]（该快照只被
+	// OpenAI/Codex 路径读取）。同时 Kiro 直连账号没有可与 models.dev provider 匹配的
+	// base_url，富化必然失败并恒定产生 incomplete warning，把同步成功显示成告警。
+	// 因此对 Kiro 只返回模型 ID，不富化、不持久化、不产生 warning。
+	if account != nil && account.IsKiro() {
+		return &UpstreamModelCatalog{Models: models}, nil
+	}
 	catalog := &UpstreamModelCatalog{Models: models, Metadata: make(map[string]UpstreamModelMetadata)}
 	if len(body) > 0 {
 		_, directMetadata, parseErr := extractUpstreamModelCatalog(body, account != nil && account.IsGrok())
@@ -741,6 +749,11 @@ func (s *AccountTestService) fetchUpstreamModelList(ctx context.Context, account
 		return nil, nil, newUpstreamModelSyncConfigError("Upstream HTTP client is not configured", nil)
 	}
 
+	if isKiroDirectModeAccount(account) {
+		models, err := s.fetchKiroDirectUpstreamModels(ctx, account)
+		return models, nil, err
+	}
+
 	req, err := s.buildUpstreamModelsRequest(ctx, account)
 	if err != nil {
 		return nil, nil, err
@@ -798,6 +811,8 @@ func (s *AccountTestService) buildUpstreamModelsRequest(ctx context.Context, acc
 		return s.buildOpenAIUpstreamModelsRequest(ctx, account)
 	case account.IsGemini():
 		return s.buildGeminiUpstreamModelsRequest(ctx, account)
+	case account.IsKiro():
+		return s.buildKiroRelayUpstreamModelsRequest(ctx, account)
 	case account.IsAnthropic():
 		return s.buildAnthropicUpstreamModelsRequest(ctx, account)
 	default:
@@ -997,6 +1012,43 @@ func (s *AccountTestService) buildAntigravityAPIKeyModelsRequest(ctx context.Con
 	req.Header.Set("anthropic-version", "2023-06-01")
 	req.Header.Set("anthropic-beta", claude.APIKeyBetaHeader)
 	req.Header.Set("x-api-key", apiKey)
+	return req, nil
+}
+
+// buildKiroRelayUpstreamModelsRequest 覆盖「API Key + 自定义 base_url」的 Kiro
+// 账号：这类账号转发走外部 Anthropic 兼容中转（{base_url}/v1/messages + x-api-key，
+// 见 isKiroDirectModeAccount），模型发现因此也用 Anthropic 协议的 /v1/models。
+func (s *AccountTestService) buildKiroRelayUpstreamModelsRequest(ctx context.Context, account *Account) (*http.Request, error) {
+	if account.Type != AccountTypeAPIKey {
+		return nil, newUpstreamModelSyncUnsupportedError(
+			fmt.Sprintf("Unsupported Kiro account type for upstream model sync: %s", account.Type), nil,
+		)
+	}
+	apiKey := firstKiroCredential(account, "kiro_api_key", "kiroApiKey", "api_key")
+	if strings.TrimSpace(apiKey) == "" {
+		return nil, newUpstreamModelSyncConfigError("No Kiro API key is available", nil)
+	}
+	baseURL := strings.TrimSpace(account.GetCredential("base_url"))
+	if baseURL == "" {
+		return nil, newUpstreamModelSyncConfigError("Kiro relay base URL is required for upstream model sync", nil)
+	}
+	normalizedBaseURL, err := s.validateUpstreamBaseURL(baseURL)
+	if err != nil {
+		return nil, newUpstreamModelSyncConfigError("Invalid Kiro base URL", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, buildV1ModelsURL(normalizedBaseURL), nil)
+	if err != nil {
+		return nil, newUpstreamModelSyncConfigError("Invalid Kiro model list URL", err)
+	}
+	for key, value := range claude.DefaultHeaders {
+		req.Header.Set(key, value)
+	}
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("anthropic-version", "2023-06-01")
+	req.Header.Set("anthropic-beta", claude.APIKeyBetaHeader)
+	req.Header.Set("x-api-key", apiKey)
+	account.ApplyHeaderOverrides(req.Header)
 	return req, nil
 }
 

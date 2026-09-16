@@ -266,6 +266,34 @@
             </p>
           </div>
 
+          <div class="mb-3 flex flex-wrap gap-2">
+            <button
+              type="button"
+              data-testid="kiro-fill-related-models"
+              @click="fillKiroRelatedMappings"
+              class="rounded-lg border border-blue-200 px-3 py-1.5 text-sm text-blue-600 hover:bg-blue-50 dark:border-blue-800 dark:text-blue-400 dark:hover:bg-blue-900/30"
+            >
+              {{ t('admin.accounts.fillRelatedModels') }}
+            </button>
+            <button
+              type="button"
+              data-testid="kiro-sync-upstream-models"
+              @click="syncKiroUpstreamModels"
+              :disabled="isSyncingKiroUpstream || !account?.id"
+              class="rounded-lg border border-emerald-200 px-3 py-1.5 text-sm text-emerald-600 hover:bg-emerald-50 disabled:cursor-not-allowed disabled:opacity-60 dark:border-emerald-800 dark:text-emerald-400 dark:hover:bg-emerald-900/30"
+            >
+              {{ isSyncingKiroUpstream ? t('admin.accounts.syncUpstreamModelsLoading') : t('admin.accounts.syncUpstreamModels') }}
+            </button>
+            <button
+              type="button"
+              data-testid="kiro-clear-all-models"
+              @click="clearKiroModelMappings"
+              class="rounded-lg border border-red-200 px-3 py-1.5 text-sm text-red-600 hover:bg-red-50 dark:border-red-800 dark:text-red-400 dark:hover:bg-red-900/30"
+            >
+              {{ t('admin.accounts.clearAllModels') }}
+            </button>
+          </div>
+
           <div v-if="modelMappings.length > 0" class="mb-3 space-y-2">
             <div
               v-for="(mapping, index) in modelMappings"
@@ -869,6 +897,34 @@
             <p class="text-xs text-purple-700 dark:text-purple-400">
               {{ t('admin.accounts.mapRequestModels') }}
             </p>
+          </div>
+
+          <div class="mb-3 flex flex-wrap gap-2">
+            <button
+              type="button"
+              data-testid="kiro-fill-related-models"
+              @click="fillKiroRelatedMappings"
+              class="rounded-lg border border-blue-200 px-3 py-1.5 text-sm text-blue-600 hover:bg-blue-50 dark:border-blue-800 dark:text-blue-400 dark:hover:bg-blue-900/30"
+            >
+              {{ t('admin.accounts.fillRelatedModels') }}
+            </button>
+            <button
+              type="button"
+              data-testid="kiro-sync-upstream-models"
+              @click="syncKiroUpstreamModels"
+              :disabled="isSyncingKiroUpstream || !account?.id"
+              class="rounded-lg border border-emerald-200 px-3 py-1.5 text-sm text-emerald-600 hover:bg-emerald-50 disabled:cursor-not-allowed disabled:opacity-60 dark:border-emerald-800 dark:text-emerald-400 dark:hover:bg-emerald-900/30"
+            >
+              {{ isSyncingKiroUpstream ? t('admin.accounts.syncUpstreamModelsLoading') : t('admin.accounts.syncUpstreamModels') }}
+            </button>
+            <button
+              type="button"
+              data-testid="kiro-clear-all-models"
+              @click="clearKiroModelMappings"
+              class="rounded-lg border border-red-200 px-3 py-1.5 text-sm text-red-600 hover:bg-red-50 dark:border-red-800 dark:text-red-400 dark:hover:bg-red-900/30"
+            >
+              {{ t('admin.accounts.clearAllModels') }}
+            </button>
           </div>
 
           <div v-if="modelMappings.length > 0" class="mb-3 space-y-2" data-testid="oauth-model-mapping-rows">
@@ -3676,6 +3732,7 @@ const antigravityModelRestrictionMode = ref<'whitelist' | 'mapping'>('whitelist'
 const antigravityWhitelistModels = ref<string[]>([])
 const antigravityModelMappings = ref<ModelMapping[]>([])
 const isSyncingAntigravityUpstream = ref(false)
+const isSyncingKiroUpstream = ref(false)
 const tempUnschedEnabled = ref(false)
 const accountSchedulingThresholdOverrideEnabled = ref(false)
 const accountSchedulingThresholdOverrideValue = ref(100)
@@ -4810,6 +4867,74 @@ const syncAntigravityUpstreamModels = async () => {
     appStore.showError(t('admin.accounts.syncUpstreamModelsError', { message }))
   } finally {
     isSyncingAntigravityUpstream.value = false
+  }
+}
+
+// 与白名单选择器的 fillRelated / clearAll 对应。白名单模式填的是本地静态模型表，
+// Kiro 是映射模式，等价物就是预设映射表(presetMappings，Kiro 账号下即 kiroPresetMappings)的全部行。
+const fillKiroRelatedMappings = () => {
+  let addedCount = 0
+  for (const preset of presetMappings.value) {
+    if (!modelMappings.value.some((mapping) => mapping.from === preset.from)) {
+      modelMappings.value.push({ from: preset.from, to: preset.to })
+      addedCount += 1
+    }
+  }
+  if (addedCount === 0) {
+    appStore.showInfo(t('admin.accounts.syncUpstreamModelsNoChanges', { count: presetMappings.value.length }))
+  }
+}
+
+const clearKiroModelMappings = () => {
+  modelMappings.value = []
+}
+
+const syncKiroUpstreamModels = async () => {
+  if (!props.account?.id || isSyncingKiroUpstream.value) return
+
+  isSyncingKiroUpstream.value = true
+  try {
+    const result = await adminAPI.accounts.syncUpstreamModels(props.account.id)
+    const upstreamModels = result.models.map((model) => model.trim()).filter(Boolean)
+    if (upstreamModels.length === 0) {
+      appStore.showInfo(t('admin.accounts.syncUpstreamModelsEmpty'))
+      return
+    }
+
+    // 上游返回目标侧模型名；按预设表反查所有指向它的对外请求名，查不到才用恒等行。
+    const rows: { from: string; to: string }[] = []
+    for (const upstreamModel of upstreamModels) {
+      const publicNames = presetMappings.value
+        .filter((preset) => preset.to === upstreamModel)
+        .map((preset) => preset.from)
+      if (publicNames.length === 0) {
+        rows.push({ from: upstreamModel, to: upstreamModel })
+        continue
+      }
+      for (const publicName of publicNames) {
+        rows.push({ from: publicName, to: upstreamModel })
+      }
+    }
+
+    let addedCount = 0
+    for (const row of rows) {
+      const exists = modelMappings.value.some((mapping) => mapping.from === row.from)
+      if (!exists) {
+        modelMappings.value.push({ from: row.from, to: row.to })
+        addedCount += 1
+      }
+    }
+
+    if (addedCount > 0) {
+      appStore.showSuccess(t('admin.accounts.syncUpstreamModelsSuccess', { count: addedCount, total: upstreamModels.length }))
+    } else {
+      appStore.showInfo(t('admin.accounts.syncUpstreamModelsNoChanges', { count: upstreamModels.length }))
+    }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : t('admin.accounts.syncUpstreamModelsFailed')
+    appStore.showError(t('admin.accounts.syncUpstreamModelsError', { message }))
+  } finally {
+    isSyncingKiroUpstream.value = false
   }
 }
 

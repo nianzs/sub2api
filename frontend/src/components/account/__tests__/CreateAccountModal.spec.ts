@@ -6,6 +6,7 @@ const {
   createAccountMock,
   probeUpstreamBillingMock,
   syncUpstreamModelsMock,
+  syncUpstreamModelsPreviewMock,
   showWarningMock,
   importCodexSessionMock,
   createOpenAICodexPATMock,
@@ -15,6 +16,7 @@ const {
   createAccountMock: vi.fn(),
   probeUpstreamBillingMock: vi.fn(),
   syncUpstreamModelsMock: vi.fn(),
+  syncUpstreamModelsPreviewMock: vi.fn(),
   showWarningMock: vi.fn(),
   importCodexSessionMock: vi.fn(),
   createOpenAICodexPATMock: vi.fn(),
@@ -44,6 +46,7 @@ vi.mock('@/api/admin', () => ({
       create: createAccountMock,
       probeUpstreamBilling: probeUpstreamBillingMock,
       syncUpstreamModels: syncUpstreamModelsMock,
+      syncUpstreamModelsPreview: syncUpstreamModelsPreviewMock,
       checkMixedChannelRisk: vi.fn().mockResolvedValue({ has_risk: false }),
       importCodexSession: importCodexSessionMock,
       createOpenAICodexPAT: createOpenAICodexPATMock,
@@ -237,6 +240,7 @@ describe('CreateAccountModal OpenAI long-context billing', () => {
     createAccountMock.mockReset().mockResolvedValue({ id: 42, platform: 'openai', type: 'apikey' })
     probeUpstreamBillingMock.mockReset().mockResolvedValue({})
     syncUpstreamModelsMock.mockReset().mockResolvedValue({ models: [], metadata: {} })
+    syncUpstreamModelsPreviewMock.mockReset().mockResolvedValue({ models: [], metadata: {} })
     showWarningMock.mockReset()
     importCodexSessionMock.mockReset().mockResolvedValue({
       created: 1,
@@ -734,6 +738,86 @@ describe('CreateAccountModal OpenAI long-context billing', () => {
       api_key: 'ksk-eu',
       api_region: 'eu-central-1'
     })
+  })
+
+  it('previews Kiro upstream models with the selected region before the account exists', async () => {
+    // 上游返回的是目标侧模型名(与预设表 to 同名)。'claude-opus-9' 模拟预设表尚未收录的新模型。
+    syncUpstreamModelsPreviewMock.mockResolvedValue({
+      models: ['claude-sonnet-4.5', 'claude-opus-9'],
+      metadata: {}
+    })
+    const wrapper = mountModal()
+    await selectButtonByText(wrapper, 'Kiro')
+    await selectButtonByText(wrapper, 'API Key')
+    await wrapper.get('form#create-account-form input[type="password"]').setValue('ksk-preview')
+    await wrapper.get<HTMLSelectElement>('[data-testid="kiro-api-region-select"]').setValue('eu-central-1')
+    await wrapper.get('[data-testid="kiro-sync-upstream-models"]').trigger('click')
+    await flushPromises()
+
+    expect(syncUpstreamModelsPreviewMock).toHaveBeenCalledWith({
+      platform: 'kiro',
+      type: 'apikey',
+      api_key: 'ksk-preview',
+      api_region: 'eu-central-1'
+    })
+
+    // 预设表命中的模型按对外请求名落库(默认映射已含),未命中的退化为恒等行。
+    await wrapper.get('form#create-account-form input[type="text"]').setValue('kiro preview account')
+    await wrapper.get('form#create-account-form').trigger('submit.prevent')
+    await flushPromises()
+
+    const mapping = createAccountMock.mock.calls[0]?.[0]?.credentials?.model_mapping
+    expect(mapping).toMatchObject({
+      'claude-sonnet-4-5-20250929': 'claude-sonnet-4.5',
+      'claude-sonnet-4-5-20250929-thinking': 'claude-sonnet-4.5',
+      'claude-opus-9': 'claude-opus-9'
+    })
+  })
+
+  it('offers Kiro upstream model sync only for direct API-key credentials', async () => {
+    const wrapper = mountModal()
+    await selectButtonByText(wrapper, 'Kiro')
+    // OAuth 形态在拿到 token 的同一刻建号,创建期没有可探测的凭据。
+    expect(wrapper.find('[data-testid="kiro-sync-upstream-models"]').exists()).toBe(false)
+
+    await selectButtonByText(wrapper, 'API Key')
+    expect(wrapper.find('[data-testid="kiro-sync-upstream-models"]').exists()).toBe(false)
+    await wrapper.get('form#create-account-form input[type="password"]').setValue('ksk-gate')
+    expect(wrapper.find('[data-testid="kiro-sync-upstream-models"]').exists()).toBe(true)
+
+    // 外部中转账号走通用反代路径,后端 sync 不支持该形态。
+    await selectButtonByText(wrapper, 'API Key + Base URL')
+    expect(wrapper.find('[data-testid="kiro-sync-upstream-models"]').exists()).toBe(false)
+  })
+
+  it('clears and refills every Kiro preset mapping row', async () => {
+    const wrapper = mountModal()
+    await selectButtonByText(wrapper, 'Kiro')
+    await flushPromises()
+
+    const readFroms = () =>
+      wrapper
+        .findAll('[data-testid="kiro-model-mapping-from"]')
+        .map((input) => (input.element as HTMLInputElement).value)
+
+    // 选中 Kiro 即预填默认映射(= 预设表全部行)。
+    const defaults = readFroms()
+    expect(defaults.length).toBeGreaterThan(0)
+
+    await wrapper.get('[data-testid="kiro-clear-all-models"]').trigger('click')
+    expect(readFroms()).toHaveLength(0)
+
+    await wrapper.get('[data-testid="kiro-fill-related-models"]').trigger('click')
+    const refilled = readFroms()
+    expect(refilled).toEqual(defaults)
+    // 非恒等目标的别名行也要回来,否则客户端现有模型名会被白名单挡掉。
+    expect(refilled).toContain('codex-auto-review')
+
+    // 填充/清除对三种账号形态都可用,不受同步按钮的直连门控影响。
+    await selectButtonByText(wrapper, 'API Key + Base URL')
+    expect(wrapper.find('[data-testid="kiro-fill-related-models"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="kiro-clear-all-models"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="kiro-sync-upstream-models"]').exists()).toBe(false)
   })
 
   it('uses the Kiro region select for IDC authorization URLs', async () => {

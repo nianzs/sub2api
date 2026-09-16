@@ -1695,6 +1695,35 @@
             </p>
           </div>
 
+          <div class="mb-3 flex flex-wrap gap-2">
+            <button
+              type="button"
+              data-testid="kiro-fill-related-models"
+              @click="fillKiroRelatedMappings"
+              class="rounded-lg border border-blue-200 px-3 py-1.5 text-sm text-blue-600 hover:bg-blue-50 dark:border-blue-800 dark:text-blue-400 dark:hover:bg-blue-900/30"
+            >
+              {{ t('admin.accounts.fillRelatedModels') }}
+            </button>
+            <button
+              v-if="canSyncKiroUpstream"
+              type="button"
+              data-testid="kiro-sync-upstream-models"
+              @click="syncKiroUpstreamModels"
+              :disabled="isSyncingKiroUpstream"
+              class="rounded-lg border border-emerald-200 px-3 py-1.5 text-sm text-emerald-600 hover:bg-emerald-50 disabled:cursor-not-allowed disabled:opacity-60 dark:border-emerald-800 dark:text-emerald-400 dark:hover:bg-emerald-900/30"
+            >
+              {{ isSyncingKiroUpstream ? t('admin.accounts.syncUpstreamModelsLoading') : t('admin.accounts.syncUpstreamModels') }}
+            </button>
+            <button
+              type="button"
+              data-testid="kiro-clear-all-models"
+              @click="clearKiroModelMappings"
+              class="rounded-lg border border-red-200 px-3 py-1.5 text-sm text-red-600 hover:bg-red-50 dark:border-red-800 dark:text-red-400 dark:hover:bg-red-900/30"
+            >
+              {{ t('admin.accounts.clearAllModels') }}
+            </button>
+          </div>
+
           <div v-if="kiroModelMappings.length > 0" class="mb-3 space-y-2">
             <div
               v-for="(mapping, index) in kiroModelMappings"
@@ -1704,6 +1733,7 @@
               <div class="flex items-center gap-2">
                 <input
                   v-model="mapping.from"
+                  data-testid="kiro-model-mapping-from"
                   type="text"
                   :class="[
                     'input flex-1',
@@ -1716,6 +1746,7 @@
                 </svg>
                 <input
                   v-model="mapping.to"
+                  data-testid="kiro-model-mapping-to"
                   type="text"
                   :class="[
                     'input flex-1',
@@ -5901,6 +5932,92 @@ const addKiroPresetMapping = (from: string, to: string) => {
     return
   }
   kiroModelMappings.value.push({ from, to })
+}
+
+// 与白名单选择器的 fillRelated / clearAll 对应。白名单模式填的是本地静态模型表，
+// Kiro 是映射模式，等价物就是预设映射表(kiroPresetMappings)的全部行。
+const fillKiroRelatedMappings = () => {
+  let addedCount = 0
+  for (const preset of kiroPresetMappings.value) {
+    if (!kiroModelMappings.value.some((mapping) => mapping.from === preset.from)) {
+      kiroModelMappings.value.push({ from: preset.from, to: preset.to })
+      addedCount += 1
+    }
+  }
+  if (addedCount === 0) {
+    appStore.showInfo(t('admin.accounts.syncUpstreamModelsNoChanges', { count: kiroPresetMappings.value.length }))
+  }
+}
+
+const clearKiroModelMappings = () => {
+  kiroModelMappings.value = []
+}
+
+// Kiro 直连 API Key 账号在创建前即可探测上游模型目录：preview 端点不需要 account id。
+// OAuth 形态在拿到 token 的同一刻就建号（见 createAccountAndFinish），没有可同步的中间态；
+// apikey-relay 走外部 Anthropic 兼容中转,后端 sync 不支持,故按钮只对直连 API Key 显示。
+const isSyncingKiroUpstream = ref(false)
+const canSyncKiroUpstream = computed(
+  () => form.platform === 'kiro' && accountCategory.value === 'apikey' && apiKeyValue.value.trim() !== ''
+)
+
+const syncKiroUpstreamModels = async () => {
+  if (isSyncingKiroUpstream.value || !canSyncKiroUpstream.value) return
+
+  isSyncingKiroUpstream.value = true
+  try {
+    const result = await adminAPI.accounts.syncUpstreamModelsPreview({
+      platform: 'kiro',
+      type: 'apikey',
+      api_key: apiKeyValue.value.trim(),
+      api_region: kiroAPIRegion.value.trim() || 'us-east-1'
+    })
+    const upstreamModels = result.models.map((model) => model.trim()).filter(Boolean)
+    if (upstreamModels.length === 0) {
+      appStore.showInfo(t('admin.accounts.syncUpstreamModelsEmpty'))
+      return
+    }
+
+    upstreamModelsPreviewed.value = true
+
+    // 上游返回目标侧模型名；按预设表反查所有指向它的对外请求名，查不到才用恒等行。
+    const rows: ModelMapping[] = []
+    for (const upstreamModel of upstreamModels) {
+      const publicNames = kiroPresetMappings.value
+        .filter((preset) => preset.to === upstreamModel)
+        .map((preset) => preset.from)
+      if (publicNames.length === 0) {
+        rows.push({ from: upstreamModel, to: upstreamModel })
+        continue
+      }
+      for (const publicName of publicNames) {
+        rows.push({ from: publicName, to: upstreamModel })
+      }
+    }
+
+    let addedCount = 0
+    for (const row of rows) {
+      if (!kiroModelMappings.value.some((mapping) => mapping.from === row.from)) {
+        kiroModelMappings.value.push({ from: row.from, to: row.to })
+        addedCount += 1
+      }
+    }
+
+    if (addedCount > 0) {
+      appStore.showSuccess(t('admin.accounts.syncUpstreamModelsSuccess', { count: addedCount, total: upstreamModels.length }))
+    } else {
+      appStore.showInfo(t('admin.accounts.syncUpstreamModelsNoChanges', { count: upstreamModels.length }))
+    }
+  } catch (error: any) {
+    // apiClient 的响应拦截器 reject 的是扁平结构 { status, code, message }，不是 AxiosError，
+    // 所以既没有 error.response 也不是 Error 实例；直接读 message 才能拿到后端文案。
+    const message =
+      (typeof error?.message === 'string' && error.message.trim() !== '' ? error.message : '') ||
+      t('admin.accounts.syncUpstreamModelsFailed')
+    appStore.showError(t('admin.accounts.syncUpstreamModelsError', { message }))
+  } finally {
+    isSyncingKiroUpstream.value = false
+  }
 }
 
 // Error code warning dialog state

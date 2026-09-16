@@ -2,9 +2,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { defineComponent } from 'vue'
 import { flushPromises, mount } from '@vue/test-utils'
 
-const { updateAccountMock, checkMixedChannelRiskMock, authIsSimpleMode } = vi.hoisted(() => ({
+const { updateAccountMock, checkMixedChannelRiskMock, syncUpstreamModelsMock, authIsSimpleMode } = vi.hoisted(() => ({
   updateAccountMock: vi.fn(),
   checkMixedChannelRiskMock: vi.fn(),
+  syncUpstreamModelsMock: vi.fn(),
   authIsSimpleMode: { value: true }
 }))
 
@@ -28,7 +29,8 @@ vi.mock('@/api/admin', () => ({
   adminAPI: {
     accounts: {
       update: updateAccountMock,
-      checkMixedChannelRisk: checkMixedChannelRiskMock
+      checkMixedChannelRisk: checkMixedChannelRiskMock,
+      syncUpstreamModels: syncUpstreamModelsMock
     },
     settings: {
       getWebSearchEmulationConfig: vi.fn().mockResolvedValue({ enabled: false, providers: [] }),
@@ -451,6 +453,53 @@ describe('EditAccountModal', () => {
     const credentials = updateAccountMock.mock.calls[0]?.[1]?.credentials
     expect(credentials).not.toHaveProperty('api_region')
     expect(credentials?.region).toBe('eu-central-1')
+  })
+
+  it('expands synced Kiro upstream models into preset request-name mapping rows', async () => {
+    const account = buildKiroOAuthAccount()
+    syncUpstreamModelsMock.mockReset()
+    syncUpstreamModelsMock.mockResolvedValue({ models: ['claude-opus-4.8', 'brand-new-model'] })
+
+    const wrapper = mountModal(account)
+    await wrapper.get('[data-testid="kiro-sync-upstream-models"]').trigger('click')
+    await flushPromises()
+
+    expect(syncUpstreamModelsMock).toHaveBeenCalledWith(account.id)
+
+    const froms = wrapper
+      .findAll('[data-testid="oauth-model-mapping-from"]')
+      .map((input) => (input.element as HTMLInputElement).value)
+    const tos = wrapper
+      .findAll('[data-testid="oauth-model-mapping-to"]')
+      .map((input) => (input.element as HTMLInputElement).value)
+    const rows = froms.map((from, index) => ({ from, to: tos[index] }))
+
+    // 上游返回目标侧名字，映射行须按预设表展开出所有对外请求名。
+    expect(rows).toEqual(
+      expect.arrayContaining([
+        { from: 'claude-opus-4-8', to: 'claude-opus-4.8' },
+        { from: 'claude-opus-4-8-thinking', to: 'claude-opus-4.8' },
+        // 预设表没有的上游新模型才落恒等行。
+        { from: 'brand-new-model', to: 'brand-new-model' }
+      ])
+    )
+  })
+
+  it('fills every Kiro preset mapping row and clears them all again', async () => {
+    const account = buildKiroOAuthAccount()
+    const wrapper = mountModal(account)
+
+    await wrapper.get('[data-testid="kiro-fill-related-models"]').trigger('click')
+    const filled = wrapper
+      .findAll('[data-testid="oauth-model-mapping-from"]')
+      .map((input) => (input.element as HTMLInputElement).value)
+    // 预设表全部对外请求名都要落成映射行，含非恒等目标的别名行。
+    expect(filled).toContain('claude-opus-4-8')
+    expect(filled).toContain('claude-opus-4-8-thinking')
+    expect(filled).toContain('codex-auto-review')
+
+    await wrapper.get('[data-testid="kiro-clear-all-models"]').trigger('click')
+    expect(wrapper.findAll('[data-testid="oauth-model-mapping-from"]')).toHaveLength(0)
   })
 
   it('sets expiry presets from now instead of extending the saved expiry', async () => {

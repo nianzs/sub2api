@@ -638,6 +638,8 @@ export interface SyncUpstreamPreviewParams {
   platform: string
   type: string
   base_url?: string
+  /** Kiro direct-mode AWS region; other platforms ignore it. */
+  api_region?: string
   api_key: string
   model_mapping?: Record<string, string>
 }

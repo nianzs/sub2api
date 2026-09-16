@@ -42,9 +42,11 @@ type syncUpstreamHTTPUpstream struct {
 	resp      *http.Response
 	responses []*http.Response
 	err       error
+	requests  []*http.Request
 }
 
 func (u *syncUpstreamHTTPUpstream) Do(req *http.Request, proxyURL string, accountID int64, accountConcurrency int) (*http.Response, error) {
+	u.requests = append(u.requests, req)
 	if u.err != nil {
 		return nil, u.err
 	}
@@ -604,6 +606,51 @@ func TestAccountHandlerSyncUpstreamModelsPreviewUsesProvidedModelMapping(t *test
 	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
 	require.Equal(t, []string{"glm-5.3"}, resp.Data.Models)
 	require.Equal(t, []string{"low", "high"}, resp.Data.Metadata["glm-5.3"].SupportedReasoningLevels)
+}
+
+// Kiro 直连账号的运行时端点按 api_region 派生。创建流程的 preview 必须把表单选中的 region
+// 透传下来，否则预览会打到 us-east-1 而账号建成后同步打到另一个区域，两者结果可能不一致。
+func TestAccountHandlerSyncUpstreamModelsPreviewKiroUsesRequestedRegion(t *testing.T) {
+	upstream := &syncUpstreamHTTPUpstream{responses: []*http.Response{
+		// listAvailableModels 的路径大小写探测：首个候选返回 404 时换下一个。
+		{
+			StatusCode: http.StatusNotFound,
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Body:       io.NopCloser(strings.NewReader(`{"message":"Not Found"}`)),
+		},
+		{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Body:       io.NopCloser(strings.NewReader(`{"models":[{"id":"claude-sonnet-4.5"}]}`)),
+		},
+	}}
+	router := setupSyncUpstreamModelsRouter(newStubAdminService(), upstream)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(
+		http.MethodPost,
+		"/api/v1/admin/accounts/models/sync-upstream-preview",
+		strings.NewReader(`{
+			"platform":"kiro",
+			"type":"apikey",
+			"api_key":"ksk_preview",
+			"api_region":"eu-central-1"
+		}`),
+	)
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	var resp struct {
+		Data service.UpstreamModelCatalog `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+	require.Equal(t, []string{"claude-sonnet-4.5"}, resp.Data.Models)
+
+	require.NotEmpty(t, upstream.requests)
+	for _, sent := range upstream.requests {
+		require.Equal(t, "q.eu-central-1.amazonaws.com", sent.URL.Host)
+	}
 }
 
 func TestAccountHandlerSyncUpstreamModels_UpstreamErrorDoesNotExposeBody(t *testing.T) {
