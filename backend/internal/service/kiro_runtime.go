@@ -365,10 +365,7 @@ func (s *GatewayService) executeKiroUpstream(ctx context.Context, account *Accou
 func (s *GatewayService) executeKiroUpstreamWithParsed(ctx context.Context, account *Account, parsed *ParsedRequest, anthropicBody []byte, mappedModel, requestModel, token string, headers http.Header) (*http.Response, kiropkg.KiroRequestContext, error) {
 	var requestCtx kiropkg.KiroRequestContext
 	mode := kiroEndpointModeForRequest(account, parsed)
-	// KRS/Auto 模式：确保 profileArn 已解析（已有值时零开销，仅为安全兜底）
-	if mode == KiroEndpointModeAuto || mode == KiroEndpointModeKRS {
-		s.ensureKiroProfileArnForRequest(ctx, account, token, KiroEndpointModeKRS)
-	}
+	s.ensureKiroProfileArnForRequest(ctx, account, token, mode)
 	accountKey := buildKiroAccountKey(account)
 	if err := s.checkKiroCooldown(ctx, accountKey); err != nil {
 		if failoverErr := asKiroCooldownFailoverError(err); failoverErr != nil {
@@ -386,10 +383,14 @@ func (s *GatewayService) executeKiroUpstreamWithParsed(ctx context.Context, acco
 	maxRetries := 2
 
 	for idx, endpoint := range endpoints {
-		// Q / KRS 端点现在都强制要求 profileArn：缺失时上游返回
-		// 403 "User is not authorized to make this call."。按账号类型解析
-		// （API Key → 空；其余 凭据真实 ARN > Social ARN > Builder ID 占位符）。
-		profileArn := kiroResolveRequestProfileArn(account)
+		// Q 与 KRS 现在都要求 profileArn。API Key 走 Q 且不能带 ARN。
+		// Enterprise 未解析到真实 ARN 时 Q 路径不回填占位符。
+		var profileArn string
+		if endpoint.URL == kiroKRSEndpointURL {
+			profileArn = kiroResolveProfileArnForKRS(account)
+		} else {
+			profileArn = kiroOAuthRequestProfileArn(account)
+		}
 		buildResult, err := s.buildKiroPayloadForAccountWithArn(ctx, account, parsed, anthropicBody, modelID, currentToken, requestModel, headers, profileArn)
 		if err != nil {
 			return nil, requestCtx, err
@@ -489,8 +490,12 @@ func (s *GatewayService) executeKiroUpstreamWithParsed(ctx context.Context, acco
 					if refreshErr == nil && strings.TrimSpace(refreshedToken) != "" {
 						currentToken = refreshedToken
 						accountKey = buildKiroAccountKey(account)
-						// 凭据可能已被 token 刷新更新，重新解析 profileArn（所有端点都需要）
-						profileArn = kiroResolveRequestProfileArn(account)
+						// 凭据可能已被 token 刷新更新，重新解析当前端点的 profileArn
+						if endpoint.URL == kiroKRSEndpointURL {
+							profileArn = kiroResolveProfileArnForKRS(account)
+						} else {
+							profileArn = kiroOAuthRequestProfileArn(account)
+						}
 						buildResult, err = s.buildKiroPayloadForAccountWithArn(ctx, account, parsed, anthropicBody, modelID, currentToken, requestModel, headers, profileArn)
 						if err != nil {
 							return nil, requestCtx, err

@@ -140,6 +140,61 @@ func TestOpenAIGatewayServiceRecordUsage_NormalizesKiroBillingModel(t *testing.T
 	require.InDelta(t, expectedCost.TotalCost, usageRepo.lastLog.TotalCost, 1e-12)
 }
 
+func requireKiroUsageLimitsQuery(t *testing.T, r *http.Request, profileArn string) {
+	t.Helper()
+	require.Equal(t, http.MethodGet, r.Method)
+	require.Equal(t, "/getUsageLimits", r.URL.Path)
+	require.Equal(t, kiroUsageOrigin, r.URL.Query().Get("origin"))
+	require.Equal(t, kiroUsageResourceType, r.URL.Query().Get("resourceType"))
+	require.Equal(t, kiroUsageIsEmailRequired, r.URL.Query().Get("isEmailRequired"))
+	require.Equal(t, profileArn, r.URL.Query().Get("profileArn"))
+	require.Contains(t, r.Header.Get("User-Agent"), "api/codewhispererstreaming#1.0.34")
+	require.Contains(t, r.Header.Get("User-Agent"), "KiroIDE-1.0.437-")
+	require.Contains(t, r.Header.Get("X-Amz-User-Agent"), "KiroIDE-1.0.437-")
+}
+
+func TestKiroUsageQueryProfileArn(t *testing.T) {
+	require.Equal(t, kiroSocialProfileARN, kiroUsageQueryProfileArn(&Account{
+		Credentials: map[string]any{"auth_method": "social", "provider": "Github"},
+	}))
+	require.Equal(t, "arn:aws:codewhisperer:us-east-1:123456789012:profile/REAL", kiroUsageQueryProfileArn(&Account{
+		Credentials: map[string]any{
+			"auth_method": "idc",
+			"provider":    "Enterprise",
+			"profile_arn": "arn:aws:codewhisperer:us-east-1:123456789012:profile/REAL",
+		},
+	}))
+	require.Equal(t, kiroBuilderIDProfileARN, kiroUsageQueryProfileArn(&Account{
+		Credentials: map[string]any{"auth_method": "idc", "provider": "BuilderId"},
+	}))
+	require.Equal(t, kiroBuilderIDProfileARN, kiroUsageQueryProfileArn(&Account{
+		Credentials: map[string]any{
+			"auth_method": "idc",
+			"provider":    "BuilderId",
+			"profile_arn": kiroBuilderIDProfileARN,
+		},
+	}))
+	require.Empty(t, kiroUsageQueryProfileArn(&Account{
+		Credentials: map[string]any{
+			"auth_method": "idc",
+			"provider":    "Enterprise",
+			"start_url":   "https://d-example.awsapps.com/start",
+		},
+	}))
+}
+
+func TestKiroUsageRegionCandidates(t *testing.T) {
+	require.Equal(t, []string{"us-east-1", "eu-central-1"}, kiroUsageRegionCandidates(&Account{
+		Credentials: map[string]any{"provider": "BuilderId"},
+	}))
+	require.Equal(t, []string{"eu-central-1", "us-east-1"}, kiroUsageRegionCandidates(&Account{
+		Credentials: map[string]any{"api_region": "eu-west-1"},
+	}))
+	require.Equal(t, []string{"us-east-1", "eu-central-1"}, kiroUsageRegionCandidates(&Account{
+		Credentials: map[string]any{"region": "ap-northeast-2"},
+	}))
+}
+
 func TestAccountUsageService_GetUsage_KiroMapsCredits(t *testing.T) {
 	account := Account{
 		ID:       701,
@@ -557,10 +612,10 @@ func TestAccountUsageService_GetUsage_KiroUsesAPIRegionForUsageRequest(t *testin
 	usage, err := svc.GetUsage(context.Background(), account.ID)
 	require.NoError(t, err)
 	require.NotNil(t, usage)
-	require.Equal(t, []string{"eu-west-1"}, gotRegions)
+	require.Equal(t, []string{kiroUsagePrimaryEURegion}, gotRegions)
 }
 
-func TestAccountUsageService_GetUsage_KiroUsesDefaultBuilderIDProfileArnAndDefaultRegionWithoutAPIRegionOrProfileArn(t *testing.T) {
+func TestAccountUsageService_GetUsage_KiroEnterpriseWithoutProfileArnOmitsPlaceholder(t *testing.T) {
 	account := Account{
 		ID:       710,
 		Platform: PlatformKiro,
@@ -578,8 +633,7 @@ func TestAccountUsageService_GetUsage_KiroUsesDefaultBuilderIDProfileArnAndDefau
 
 	gotRegions := make([]string, 0, 2)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		require.Equal(t, "/getUsageLimits", r.URL.Path)
-		require.Equal(t, kiroBuilderIDProfileARN, r.URL.Query().Get("profileArn"))
+		requireKiroUsageLimitsQuery(t, r, "")
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{
 			"subscriptionInfo": {"subscriptionTitle":"KIRO PRO+"},
@@ -604,6 +658,53 @@ func TestAccountUsageService_GetUsage_KiroUsesDefaultBuilderIDProfileArnAndDefau
 	require.NoError(t, err)
 	require.NotNil(t, usage)
 	require.Equal(t, []string{kiroDefaultRegion}, gotRegions)
+}
+
+func TestAccountUsageService_GetUsage_KiroFallsBackToAlternateUsageRegionOn403(t *testing.T) {
+	account := Account{
+		ID:       713,
+		Platform: PlatformKiro,
+		Type:     AccountTypeOAuth,
+		Credentials: map[string]any{
+			"access_token": "kiro-access-token",
+			"provider":     "Enterprise",
+			"auth_method":  "idc",
+			"start_url":    "https://d-example.awsapps.com/start",
+		},
+	}
+	repo := &stubOpenAIAccountRepo{accounts: []Account{account}}
+	svc := NewAccountUsageService(repo, nil, nil, nil, nil, nil, nil, nil, NewUsageCache(), nil, nil)
+
+	primaryHits := 0
+	fallbackHits := 0
+	primary := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		primaryHits++
+		requireKiroUsageLimitsQuery(t, r, "")
+		http.Error(w, `{"message":"Invalid token"}`, http.StatusForbidden)
+	}))
+	defer primary.Close()
+	fallback := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fallbackHits++
+		requireKiroUsageLimitsQuery(t, r, "")
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(kiroUsageTestBody(19)))
+	}))
+	defer fallback.Close()
+
+	prevResolver := resolveKiroRuntimeEndpoint
+	resolveKiroRuntimeEndpoint = func(region string) string {
+		if region == kiroUsagePrimaryEURegion {
+			return fallback.URL
+		}
+		return primary.URL
+	}
+	t.Cleanup(func() { resolveKiroRuntimeEndpoint = prevResolver })
+
+	usage, err := svc.GetUsage(context.Background(), account.ID)
+	require.NoError(t, err)
+	require.Equal(t, 19.0, usage.KiroCredit.CurrentUsage)
+	require.Equal(t, 1, primaryHits)
+	require.Equal(t, 1, fallbackHits)
 }
 
 func TestAccountUsageService_GetUsage_KiroIncludesRuntimeCooldownState(t *testing.T) {

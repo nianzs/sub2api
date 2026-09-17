@@ -239,18 +239,25 @@ func kiroResolveProfileArnForKRS(account *Account) string {
 	return kiroDefaultProfileARN(account)
 }
 
+// kiroOAuthRequestProfileArn 返回 Q 端点（用量 / 模型列表 / 对话）应携带的 profileArn。
+// API Key（ksk_）不能带 profileArn。OAuth：Social 用固定 ARN，Builder ID 用占位符，
+// Enterprise 必须是 ListAvailableProfiles 得到的真实 ARN——失败不回填占位符，避免 403 Invalid token。
+func kiroOAuthRequestProfileArn(account *Account) string {
+	if account == nil || account.Type == AccountTypeAPIKey {
+		return ""
+	}
+	return kiroUsageQueryProfileArn(account)
+}
+
 // kiroResolveRequestProfileArn 返回直连 AWS 请求（getUsageLimits /
 // generateAssistantResponse，Q 与 KRS 端点）应携带的 profileArn。
 //
 // 上游现在对所有端点强制要求 profileArn：缺失 → 403 "User is not authorized to
 // make this call."（或 getUsageLimits 的 400 "profileArn is required"）。
 // API Key 凭据没有 profile 概念（与 kiroResolveAndPersistProfileArn 一致），返回空；
-// 其余账号走 kiroResolveProfileArnForKRS（凭据真实 ARN > Social ARN > Builder ID 占位符）。
+// Q 端点走 kiroOAuthRequestProfileArn（Enterprise 不回填占位符）；KRS 仍可回退默认 ARN。
 func kiroResolveRequestProfileArn(account *Account) string {
-	if account != nil && account.Type == AccountTypeAPIKey {
-		return ""
-	}
-	return kiroResolveProfileArnForKRS(account)
+	return kiroOAuthRequestProfileArn(account)
 }
 
 func newKiroJSONRequest(ctx context.Context, endpointURL string, payload []byte, token, accountKey, machineID, amzTarget string, account *Account) (*http.Request, error) {
@@ -277,9 +284,11 @@ func newKiroJSONRequest(ctx context.Context, endpointURL string, payload []byte,
 		req.Header.Set("X-Amz-Target", amzTarget)
 	}
 	if account != nil {
-		profileArn := resolveKiroPayloadProfileArn(account)
-		if profileArn == "" && endpointURL == kiroKRSEndpointURL {
+		var profileArn string
+		if endpointURL == kiroKRSEndpointURL {
 			profileArn = kiroResolveProfileArnForKRS(account)
+		} else {
+			profileArn = kiroOAuthRequestProfileArn(account)
 		}
 		if profileArn != "" {
 			req.Header.Set("x-amzn-kiro-profile-arn", profileArn)

@@ -136,8 +136,8 @@ func TestAccountTestService_KiroIDCWithoutProfileArnUsesDefaultProfileArnAndDefa
 	require.Equal(t, "q.us-east-1.amazonaws.com", upstream.requests[0].URL.Host)
 	body, readErr := io.ReadAll(upstream.requests[0].Body)
 	require.NoError(t, readErr)
-	// Builder ID / 无企业 profile 的账号回退占位符 ARN（现在 Q 端点也必须带 profileArn）。
-	require.Contains(t, string(body), kiroBuilderIDProfileARN)
+	// Enterprise IdC 未解析到真实 ARN 时不回填 Builder ID 占位符，避免 403 Invalid token。
+	require.NotContains(t, string(body), `"profileArn":`)
 }
 
 func TestAccountTestService_KiroInvalidModelErrorPassthrough(t *testing.T) {
@@ -554,7 +554,7 @@ func buildKiroEventStreamFrame(t *testing.T, eventType string, payload map[strin
 	return frame
 }
 
-func TestBuildKiroPayloadForAccount_KiroEnterpriseIDCUsesBuilderIDPlaceholderForMissingProfileArn(t *testing.T) {
+func TestBuildKiroPayloadForAccount_KiroEnterpriseIDCOmitsPlaceholderForMissingProfileArn(t *testing.T) {
 	account := &Account{
 		ID:       4,
 		Name:     "kiro-enterprise-idc",
@@ -577,9 +577,8 @@ func TestBuildKiroPayloadForAccount_KiroEnterpriseIDCUsesBuilderIDPlaceholderFor
 	buildResult, err := (&GatewayService{}).buildKiroPayloadForAccount(context.Background(), account, nil, payloadBytes, "claude-sonnet-4-6", "kiro-access-token", "claude-sonnet-4-6", nil)
 	require.NoError(t, err)
 	kiroPayload := buildResult.Payload
-	// 纯构建路径不查 ListAvailableProfiles，Enterprise 缺真实 ARN 时回退占位符；
-	// 真实 Enterprise ARN 由 ensureKiroProfileArnForRequest 在 Auto/KRS 请求前解析回填。
-	require.Contains(t, string(kiroPayload), kiroBuilderIDProfileARN)
+	// Q 路径 Enterprise 缺真实 ARN 时不回填 Builder ID 占位符，避免 403 Invalid token。
+	require.NotContains(t, string(kiroPayload), `"profileArn":`)
 }
 
 func TestBuildKiroPayloadForAccount_StableConversationIDByDefault(t *testing.T) {

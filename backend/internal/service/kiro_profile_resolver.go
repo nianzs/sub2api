@@ -213,16 +213,48 @@ func (s *GatewayService) resolveAndPersistKiroProfileArn(ctx context.Context, ac
 }
 
 // ensureKiroProfileArnForRequest 确保 Kiro 请求的 profileArn 已解析。
-// 在流式/非流式请求发送前调用，如果是 KRS 模式且 profileArn 缺失或为占位符，
-// 则触发 ListAvailableProfiles 解析并回填。
+// Q / KRS 都会走到这里：Builder ID / Social 回填默认 ARN；Enterprise 只回填 ListAvailableProfiles 的真实 ARN。
 func (s *GatewayService) ensureKiroProfileArnForRequest(ctx context.Context, account *Account, token string, mode string) {
-	if account == nil || mode != KiroEndpointModeKRS {
+	_ = mode
+	if account == nil || account.Type == AccountTypeAPIKey {
 		return
 	}
-	existingARN := strings.TrimSpace(account.GetCredential("profile_arn"))
-	if existingARN != "" && !kiroIsPlaceholderProfileARN(existingARN) {
+	if kiroAccountLacksEnterpriseProfile(account) {
+		_ = s.resolveAndPersistKiroProfileArn(ctx, account, token)
 		return
 	}
-	// 触发解析（内部有去重逻辑）
-	_ = s.resolveAndPersistKiroProfileArn(ctx, account, token)
+	ensureKiroEnterpriseRealProfileArn(ctx, s.accountRepo, account, token)
+}
+
+// ensureKiroEnterpriseRealProfileArn 为企业 IdC 解析真实 profileArn。
+// Builder ID 占位符对该身份会 403 Invalid token，失败时不回填占位符。
+func ensureKiroEnterpriseRealProfileArn(ctx context.Context, repo AccountRepository, account *Account, token string) {
+	if account == nil || strings.TrimSpace(token) == "" {
+		return
+	}
+	existing := strings.TrimSpace(resolveKiroPayloadProfileArn(account))
+	if existing != "" && !kiroIsPlaceholderProfileARN(existing) {
+		return
+	}
+	if kiroIsSocialLogin(account) || kiroAccountLacksEnterpriseProfile(account) {
+		return
+	}
+	if kiroUsageSkipEnterpriseProfileResolve {
+		return
+	}
+	profiles, err := kiroListAvailableProfiles(ctx, account, token)
+	if err != nil {
+		return
+	}
+	real := profiles.firstARN()
+	if real == "" {
+		return
+	}
+	if account.Credentials == nil {
+		account.Credentials = make(map[string]any)
+	}
+	account.Credentials["profile_arn"] = real
+	if repo != nil {
+		_ = persistAccountCredentials(ctx, repo, account, account.Credentials)
+	}
 }

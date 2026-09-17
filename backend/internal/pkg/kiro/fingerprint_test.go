@@ -10,6 +10,23 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestBuildUsageRuntimeUserAgentUsesCurrentAdmittedClient(t *testing.T) {
+	key := BuildAccountKey("client-id", "", "", "", 1)
+	machineID := BuildMachineID("refresh-token", "", "")
+
+	ua := BuildUsageRuntimeUserAgent(key, machineID)
+	amzUA := BuildUsageRuntimeAmzUserAgent(key, machineID)
+
+	require.Contains(t, ua, "api/codewhispererstreaming#1.0.34")
+	require.Contains(t, ua, "aws-sdk-js/1.0.34")
+	require.Contains(t, ua, "KiroIDE-1.0.437-")
+	require.Contains(t, ua, machineID)
+	require.Contains(t, amzUA, "aws-sdk-js/1.0.34")
+	require.Contains(t, amzUA, "KiroIDE-1.0.437-")
+	require.NotContains(t, ua, "api/codewhispererruntime")
+	require.Contains(t, BuildRuntimeUserAgent(key, machineID), "KiroIDE-1.0.437-")
+}
+
 func TestBuildLoginHeadersStable(t *testing.T) {
 	headers1 := BuildLoginHeaders("", "")
 	headers2 := BuildLoginHeaders("", "")
