@@ -240,6 +240,10 @@ func (s *GatewayService) forwardKiroMessages(ctx context.Context, c *gin.Context
 		return nil, s.handleKiroHTTPError(ctx, resp, c, account, mappedModel, body)
 	}
 
+	if len(requestCtx.RetainedInputBody) > 0 {
+		body = requestCtx.RetainedInputBody
+		inputTokens = estimateKiroInputTokens(ctx, body)
+	}
 	cacheUsage := s.buildKiroCacheEmulationUsage(ctx, account, parsed.Group, body, mappedModel, inputTokens)
 	requestCtx.CacheEmulationUsage = cacheUsage.toKiroUsage()
 	requestCtx.EstimatedInputTokens = inputTokens
@@ -326,6 +330,11 @@ func (s *GatewayService) openKiroAnthropicStreamResponse(ctx context.Context, ac
 		return resp, inputTokens, nil
 	}
 	plan := cachePlanOverride
+	if len(requestCtx.RetainedInputBody) > 0 {
+		anthropicBody = requestCtx.RetainedInputBody
+		inputTokens = estimateKiroInputTokens(ctx, anthropicBody)
+		plan = nil // Discard compatibility-protocol plans based on untrimmed input.
+	}
 	if plan == nil {
 		plan = s.prepareKiroCacheEmulationUsage(ctx, account, group, anthropicBody, mappedModel, inputTokens)
 	}
@@ -785,7 +794,7 @@ func estimateKiroInputTokens(ctx context.Context, body []byte) int {
 
 func kiroUsageToClaude(usage kiropkg.Usage, fallbackInput int) ClaudeUsage {
 	inputTokens := usage.InputTokens
-	if inputTokens == 0 {
+	if inputTokens == 0 && usage.CacheReadInputTokens == 0 && usage.CacheCreationInputTokens == 0 {
 		inputTokens = fallbackInput
 	}
 	return ClaudeUsage{

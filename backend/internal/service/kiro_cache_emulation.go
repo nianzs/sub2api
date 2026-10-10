@@ -58,6 +58,7 @@ var globalKiroCacheTracker = &kiroCacheTracker{entries: make(map[uint64]map[[32]
 // 得到估算结果，commit() 才会把本次前缀写入 tracker。调用方应在确认上游请求成功后
 // 再 commit()，避免请求失败/未发出时就把内容错误标记为已缓存，污染下一次请求的估算。
 type kiroCacheEmulationPlan struct {
+	group    *Group
 	usage    *kiroCacheEmulationUsage
 	cacheKey uint64
 	profile  *kiroCacheProfile
@@ -168,7 +169,8 @@ func (s *GatewayService) prepareKiroCacheEmulationPlanFromProfile(account *Accou
 	if result.CacheReadInputTokens == 0 && result.CacheCreationInputTokens == 0 {
 		result = nil
 	}
-	return &kiroCacheEmulationPlan{usage: result, cacheKey: cacheKey, profile: profile}
+	groupSnapshot := *group
+	return &kiroCacheEmulationPlan{usage: result, cacheKey: cacheKey, profile: profile, group: &groupSnapshot}
 }
 
 func scaleKiroCacheCreationTTLTokens(tokens5m, tokens1h, scaledTotal int, ratio float64) (int, int) {
@@ -1324,4 +1326,12 @@ func (u *kiroCacheEmulationUsage) toKiroUsage() *kiropkg.Usage {
 		CacheCreation5mInputTokens: u.CacheCreation5mInputTokens,
 		CacheCreation1hInputTokens: u.CacheCreation1hInputTokens,
 	}
+}
+
+// Rebuild against retained input without committing the discarded source prefix.
+func (s *GatewayService) rebuildRetainedKiroCachePlan(ctx context.Context, account *Account, previous *kiroCacheEmulationPlan, body []byte, model string, inputTokens int) *kiroCacheEmulationPlan {
+	if previous == nil {
+		return nil
+	}
+	return s.prepareKiroCacheEmulationUsage(ctx, account, previous.group, body, model, inputTokens)
 }

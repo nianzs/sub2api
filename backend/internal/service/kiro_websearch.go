@@ -48,15 +48,6 @@ func (w *kiroStreamChunkCollector) Write(p []byte) (int, error) {
 	return len(p), nil
 }
 
-func bufferKiroAnthropicStream(ctx context.Context, body io.Reader, responseModel string, inputTokens int) ([][]byte, *kiropkg.StreamResult, error) {
-	collector := &kiroStreamChunkCollector{}
-	result, err := kiropkg.StreamEventStreamAsAnthropicWithContext(ctx, body, collector, responseModel, inputTokens, kiropkg.KiroRequestContext{})
-	if err != nil {
-		return nil, nil, err
-	}
-	return collector.chunks, result, nil
-}
-
 func writeSSEChunks(w io.Writer, chunks [][]byte) error {
 	for _, chunk := range chunks {
 		if len(chunk) == 0 {
@@ -120,10 +111,6 @@ func (s *GatewayService) streamKiroWebSearchAsAnthropic(
 	currentToolUseID := "srvtoolu_" + kiropkg.GenerateToolUseID()
 	nextContentBlockIndex := 0
 
-	if err := writeAnthropicMessageStart(w, "", requestModel, inputTokens, plan.result()); err != nil {
-		return err
-	}
-
 	for iteration := 0; iteration < kiroMaxWebSearchIterations; iteration++ {
 		s.prefetchKiroWebSearchDescription(ctx, account, token)
 
@@ -135,23 +122,34 @@ func (s *GatewayService) streamKiroWebSearchAsAnthropic(
 			results = nil
 		}
 
-		if err := writeSSEChunks(w, kiropkg.GenerateSearchIndicatorEvents(query, currentToolUseID, results, nextContentBlockIndex)); err != nil {
-			return err
-		}
-		nextContentBlockIndex += 2
-
 		currentBody, err = kiropkg.InjectToolResultsClaude(currentBody, currentToolUseID, query, results)
 		if err != nil {
 			return errKiroWebSearchFallback
 		}
 
-		resp, _, err := s.executeKiroUpstream(ctx, account, currentBody, mappedModel, requestModel, token, headers)
+		resp, requestCtx, err := s.executeKiroUpstream(ctx, account, currentBody, mappedModel, requestModel, token, headers)
 		if err != nil {
 			return err
 		}
 		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 			return &kiroWebSearchHTTPError{Response: resp}
 		}
+		if len(requestCtx.RetainedInputBody) > 0 {
+			inputTokens = estimateKiroInputTokens(ctx, requestCtx.RetainedInputBody)
+			plan = s.rebuildRetainedKiroCachePlan(ctx, account, plan, requestCtx.RetainedInputBody, mappedModel, inputTokens)
+		}
+		if iteration == 0 {
+			if err := writeAnthropicMessageStart(w, "", requestModel, inputTokens, plan.result()); err != nil {
+				_ = resp.Body.Close()
+				return err
+			}
+		}
+		if err := writeSSEChunks(w, kiropkg.GenerateSearchIndicatorEvents(query, currentToolUseID, results, nextContentBlockIndex)); err != nil {
+			_ = resp.Body.Close()
+			return err
+		}
+		nextContentBlockIndex += 2
+
 		if iteration == 0 {
 			// 首轮请求已确认成功，此时提交缓存前缀落盘才是安全的。
 			plan.commit()
@@ -159,7 +157,10 @@ func (s *GatewayService) streamKiroWebSearchAsAnthropic(
 
 		chunks, _, streamErr := func() ([][]byte, *kiropkg.StreamResult, error) {
 			defer func() { _ = resp.Body.Close() }()
-			return bufferKiroAnthropicStream(ctx, resp.Body, requestModel, inputTokens)
+			requestCtx.CacheEmulationUsage = plan.result().toKiroUsage()
+			collector := &kiroStreamChunkCollector{}
+			result, err := kiropkg.StreamEventStreamAsAnthropicWithContext(ctx, resp.Body, collector, requestModel, inputTokens, requestCtx)
+			return collector.chunks, result, err
 		}()
 		if streamErr != nil {
 			return streamErr
@@ -237,7 +238,7 @@ func (s *GatewayService) executeKiroWebSearch(ctx context.Context, account *Acco
 			return nil, errKiroWebSearchFallback
 		}
 
-		resp, _, err := s.executeKiroUpstream(ctx, account, currentBody, mappedModel, requestModel, token, headers)
+		resp, requestCtx, err := s.executeKiroUpstream(ctx, account, currentBody, mappedModel, requestModel, token, headers)
 		if err != nil {
 			return nil, err
 		}
@@ -247,6 +248,11 @@ func (s *GatewayService) executeKiroWebSearch(ctx context.Context, account *Acco
 
 		parseResult, parseErr := func() (*kiropkg.ParseResult, error) {
 			defer func() { _ = resp.Body.Close() }()
+			if len(requestCtx.RetainedInputBody) > 0 {
+				inputTokens = estimateKiroInputTokens(ctx, requestCtx.RetainedInputBody)
+				cacheUsage = s.buildKiroCacheEmulationUsage(ctx, account, group, requestCtx.RetainedInputBody, mappedModel, inputTokens)
+				cacheUsageResolved = true
+			}
 			if !cacheUsageResolved {
 				cacheUsage = s.buildKiroCacheEmulationUsage(ctx, account, group, anthropicBody, mappedModel, inputTokens)
 				cacheUsageResolved = true
