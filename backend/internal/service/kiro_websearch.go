@@ -48,15 +48,6 @@ func (w *kiroStreamChunkCollector) Write(p []byte) (int, error) {
 	return len(p), nil
 }
 
-func bufferKiroAnthropicStream(ctx context.Context, body io.Reader, responseModel string, inputTokens int) ([][]byte, *kiropkg.StreamResult, error) {
-	collector := &kiroStreamChunkCollector{}
-	result, err := kiropkg.StreamEventStreamAsAnthropicWithContext(ctx, body, collector, responseModel, inputTokens, kiropkg.KiroRequestContext{})
-	if err != nil {
-		return nil, nil, err
-	}
-	return collector.chunks, result, nil
-}
-
 func writeSSEChunks(w io.Writer, chunks [][]byte) error {
 	for _, chunk := range chunks {
 		if len(chunk) == 0 {
