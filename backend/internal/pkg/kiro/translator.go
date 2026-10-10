@@ -106,6 +106,9 @@ type ParseResult struct {
 }
 
 type KiroRequestContext struct {
+	// RetainedInputBody contains only input retained after payload truncation.
+	RetainedInputBody []byte
+
 	ToolNameMap              map[string]string
 	ThinkingEnabled          bool
 	CacheEmulationUsage      *Usage
@@ -615,6 +618,7 @@ func BuildKiroPayloadWithContext(claudeBody []byte, modelID, profileArn, origin 
 		InferenceConfig:              inferenceConfig,
 		AdditionalModelRequestFields: buildAdditionalModelRequestFields(thinking, modelID),
 	}
+	wasOversized := kiroPayloadByteSize(&payload) > kiroMaxPayloadBytes
 	if err := truncateKiroPayloadToLimit(
 		&payload, strings.TrimSpace(systemPrompt) != "",
 	); err != nil {
@@ -623,6 +627,12 @@ func BuildKiroPayloadWithContext(claudeBody []byte, modelID, profileArn, origin 
 	payloadBytes, err := json.Marshal(payload)
 	if err != nil {
 		return nil, err
+	}
+	if wasOversized {
+		requestCtx.RetainedInputBody, err = retainedKiroInputBody(payload, claudeBody)
+		if err != nil {
+			return nil, err
+		}
 	}
 	return &KiroBuildResult{Payload: payloadBytes, Context: requestCtx}, nil
 }
@@ -639,7 +649,7 @@ func ParseNonStreamingEventStreamWithContext(body io.Reader, model string, reque
 	// 未生效且上游没有 tokenUsage.uncachedInputTokens 时用调用方预估值兜底,
 	// 避免响应体 usage.input_tokens 输出 0。放在 merge 之后,让缓存模拟的
 	// 更精确取值优先。
-	if usage.InputTokens == 0 && requestCtx.EstimatedInputTokens > 0 {
+	if usage.InputTokens == 0 && requestCtx.EstimatedInputTokens > 0 && requestCtx.CacheEmulationUsage == nil && usage.CacheReadInputTokens == 0 && usage.CacheCreationInputTokens == 0 {
 		usage.InputTokens = requestCtx.EstimatedInputTokens
 	}
 	return &ParseResult{
