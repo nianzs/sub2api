@@ -639,7 +639,7 @@ func ParseNonStreamingEventStreamWithContext(body io.Reader, model string, reque
 	// 未生效且上游没有 tokenUsage.uncachedInputTokens 时用调用方预估值兜底,
 	// 避免响应体 usage.input_tokens 输出 0。放在 merge 之后,让缓存模拟的
 	// 更精确取值优先。
-	if usage.InputTokens == 0 && requestCtx.EstimatedInputTokens > 0 {
+	if usage.InputTokens == 0 && requestCtx.EstimatedInputTokens > 0 && requestCtx.CacheEmulationUsage == nil && usage.CacheReadInputTokens == 0 && usage.CacheCreationInputTokens == 0 {
 		usage.InputTokens = requestCtx.EstimatedInputTokens
 	}
 	return &ParseResult{

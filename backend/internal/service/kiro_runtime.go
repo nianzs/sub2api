@@ -785,7 +785,7 @@ func estimateKiroInputTokens(ctx context.Context, body []byte) int {
 
 func kiroUsageToClaude(usage kiropkg.Usage, fallbackInput int) ClaudeUsage {
 	inputTokens := usage.InputTokens
-	if inputTokens == 0 {
+	if inputTokens == 0 && usage.CacheReadInputTokens == 0 && usage.CacheCreationInputTokens == 0 {
 		inputTokens = fallbackInput
 	}
 	return ClaudeUsage{
