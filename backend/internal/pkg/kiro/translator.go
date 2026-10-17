@@ -106,6 +106,12 @@ type ParseResult struct {
 }
 
 type KiroRequestContext struct {
+	// RetainedInputBody contains only input retained after payload truncation.
+	RetainedInputBody []byte
+	// CacheFingerprintBody preserves the original client history for cache prefix
+	// matching while RetainedInputBody remains the billing token source.
+	CacheFingerprintBody []byte
+
 	ToolNameMap              map[string]string
 	ThinkingEnabled          bool
 	CacheEmulationUsage      *Usage
@@ -615,14 +621,22 @@ func BuildKiroPayloadWithContext(claudeBody []byte, modelID, profileArn, origin 
 		InferenceConfig:              inferenceConfig,
 		AdditionalModelRequestFields: buildAdditionalModelRequestFields(thinking, modelID),
 	}
-	if err := truncateKiroPayloadToLimit(
+	wasOversized, err := truncateKiroPayloadToLimitWithStatus(
 		&payload, strings.TrimSpace(systemPrompt) != "",
-	); err != nil {
+	)
+	if err != nil {
 		return nil, err
 	}
 	payloadBytes, err := json.Marshal(payload)
 	if err != nil {
 		return nil, err
+	}
+	if wasOversized {
+		requestCtx.RetainedInputBody, err = retainedKiroInputBody(payload, claudeBody)
+		requestCtx.CacheFingerprintBody = append([]byte(nil), claudeBody...)
+		if err != nil {
+			return nil, err
+		}
 	}
 	return &KiroBuildResult{Payload: payloadBytes, Context: requestCtx}, nil
 }
@@ -1999,8 +2013,13 @@ func truncateUTF8(s string, limit int) string {
 // 系统提示对、最近若干轮和当前消息保留。只有确实丢掉旧轮次时才插入一次占位。
 // 丢掉之后仍然超限，则静默缩短当前消息正文和仍保留的工具结果，不附加截断说明。
 func truncateKiroPayloadToLimit(payload *KiroPayload, hasPriming bool) error {
+	_, err := truncateKiroPayloadToLimitWithStatus(payload, hasPriming)
+	return err
+}
+
+func truncateKiroPayloadToLimitWithStatus(payload *KiroPayload, hasPriming bool) (bool, error) {
 	if payload == nil || kiroPayloadByteSize(payload) <= kiroMaxPayloadBytes {
-		return nil
+		return false, nil
 	}
 
 	history := payload.ConversationState.History
@@ -2065,7 +2084,7 @@ func truncateKiroPayloadToLimit(payload *KiroPayload, hasPriming bool) error {
 	shrinkKiroPayloadText(payload)
 	if kiroPayloadByteSize(payload) <= kiroMaxPayloadBytes &&
 		kiroTailToolResultsPaired(tail, current) {
-		return nil
+		return true, nil
 	}
 
 	// If the payload is still too large, discard further old history.
@@ -2088,11 +2107,11 @@ func truncateKiroPayloadToLimit(payload *KiroPayload, hasPriming bool) error {
 
 		shrinkKiroPayloadText(payload)
 		if kiroPayloadByteSize(payload) <= kiroMaxPayloadBytes {
-			return nil
+			return true, nil
 		}
 	}
 
-	return fmt.Errorf(
+	return false, fmt.Errorf(
 		"kiro payload exceeds %d bytes without a safe history cut",
 		kiroMaxPayloadBytes,
 	)
