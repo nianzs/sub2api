@@ -664,11 +664,13 @@ func StreamEventStreamAsAnthropicWithContext(ctx context.Context, body io.Reader
 	textBlockOpen := false
 	thinkingBlockOpen := false
 	processedIDs := make(map[string]bool)
-	emittedToolContents := make(map[string]bool)
+	emittedToolIDs := make(map[string]bool)
 	streamingToolNames := make(map[string]string)
 	streamingToolStopped := make(map[string]bool)
 	streamingToolInputBuf := make(map[string]*strings.Builder)
 	streamingToolInvalid := make(map[string]bool)
+	var streamingToolOrder []string
+	streamingToolFailures := make(map[string]bool)
 	currentStreamingToolID := ""
 	toolBlockEmitted := false
 	pendingAssistantText := ""
@@ -748,6 +750,7 @@ func StreamEventStreamAsAnthropicWithContext(ctx context.Context, body io.Reader
 		delete(streamingToolNames, toolUseID)
 		delete(streamingToolInputBuf, toolUseID)
 		delete(streamingToolInvalid, toolUseID)
+		delete(streamingToolFailures, toolUseID)
 	}
 	closeStreamingTool := func(toolUseID string) error {
 		if toolUseID == "" || streamingToolStopped[toolUseID] {
@@ -760,18 +763,20 @@ func StreamEventStreamAsAnthropicWithContext(ctx context.Context, body io.Reader
 		invalid := streamingToolInvalid[toolUseID]
 		discardStreamingTool(toolUseID)
 		if invalid || name == "" || buf == nil {
+			streamingToolFailures[toolUseID] = true
 			return nil
 		}
 
 		responseName := normalizeResponseToolName(restoreResponseToolName(name, requestCtx))
-		inputJSON, input, ok := normalizeStreamingToolInput(responseName, buf.String())
+		inputJSON, _, ok := normalizeStreamingToolInput(responseName, buf.String())
 		if !ok {
+			// A later assistant snapshot may still recover this ID. Report any
+			// unresolved failure at EOF instead of silently ending the turn.
+			streamingToolFailures[toolUseID] = true
 			return nil
 		}
 		processedIDs[toolUseID] = true
-		tool := KiroToolUse{ToolUseID: toolUseID, Name: responseName, Input: input}
-		contentKey := toolUseContentKey(tool)
-		if contentKey == "" || emittedToolContents[contentKey] {
+		if emittedToolIDs[toolUseID] {
 			return nil
 		}
 		if err := ensureMessageStart(); err != nil {
@@ -814,7 +819,7 @@ func StreamEventStreamAsAnthropicWithContext(ctx context.Context, body io.Reader
 		if err := writeEvent("content_block_stop", map[string]any{"type": "content_block_stop", "index": blockIndex}); err != nil {
 			return err
 		}
-		emittedToolContents[contentKey] = true
+		emittedToolIDs[toolUseID] = true
 		toolBlockEmitted = true
 		_, _ = outputTextBuf.WriteString(inputJSON)
 		if stopReason == "" {
@@ -822,17 +827,15 @@ func StreamEventStreamAsAnthropicWithContext(ctx context.Context, body io.Reader
 		}
 		return nil
 	}
-	closeOpenStreamingTool := func() error {
-		return closeStreamingTool(currentStreamingToolID)
-	}
 	bufferStreamingToolInput := func(toolUseID, name, fragment string, snapshot bool) error {
 		if toolUseID == "" || processedIDs[toolUseID] || streamingToolStopped[toolUseID] {
 			return nil
 		}
-		if currentStreamingToolID != "" && currentStreamingToolID != toolUseID {
-			if err := closeOpenStreamingTool(); err != nil {
-				return err
-			}
+		// Tools can interleave with other tools, text, and reasoning. Only an
+		// explicit stop, a complete assistant snapshot, or EOF finalizes an ID.
+		if _, seen := streamingToolNames[toolUseID]; !seen {
+			streamingToolOrder = append(streamingToolOrder, toolUseID)
+			streamingToolNames[toolUseID] = name
 		}
 		currentStreamingToolID = toolUseID
 		if name != "" {
@@ -906,9 +909,6 @@ func StreamEventStreamAsAnthropicWithContext(ctx context.Context, body io.Reader
 				text = pendingLeadingWhitespace + text
 				pendingLeadingWhitespace = ""
 			}
-		}
-		if err := closeOpenStreamingTool(); err != nil {
-			return err
 		}
 		if err := ensureMessageStart(); err != nil {
 			return err
@@ -985,7 +985,7 @@ func StreamEventStreamAsAnthropicWithContext(ctx context.Context, body io.Reader
 		if !structuredOutput && !isEmittableToolUse(tool) {
 			return nil
 		}
-		if !shouldEmitToolUse(tool, emittedToolContents) {
+		if !shouldEmitToolUse(tool, emittedToolIDs) {
 			return nil
 		}
 		if structuredOutput {
@@ -997,9 +997,6 @@ func StreamEventStreamAsAnthropicWithContext(ctx context.Context, body io.Reader
 				stopReason = "end_turn"
 			}
 			return emitTextDelta(string(inputJSON), true)
-		}
-		if err := closeOpenStreamingTool(); err != nil {
-			return err
 		}
 		if err := ensureMessageStart(); err != nil {
 			return err
@@ -1062,9 +1059,6 @@ func StreamEventStreamAsAnthropicWithContext(ctx context.Context, body io.Reader
 		return flushPendingAssistantText()
 	}
 	startThinkingBlock := func() error {
-		if err := closeOpenStreamingTool(); err != nil {
-			return err
-		}
 		if err := closeText(); err != nil {
 			return err
 		}
@@ -1354,8 +1348,16 @@ func StreamEventStreamAsAnthropicWithContext(ctx context.Context, body io.Reader
 		}
 	}
 
-	if err := closeOpenStreamingTool(); err != nil {
-		return nil, err
+	// Flush every pending ID, including tools that did not get an explicit stop.
+	// Stable ordering avoids Go map iteration order changing the SSE blocks.
+	for _, toolUseID := range streamingToolOrder {
+		if err := closeStreamingTool(toolUseID); err != nil {
+			return nil, err
+		}
+	}
+	if len(streamingToolFailures) > 0 {
+		// Do not include argument contents: they can contain code or credentials.
+		return nil, fmt.Errorf("kiro eventstream: %d tool call(s) have incomplete or invalid input", len(streamingToolFailures))
 	}
 	if err := flushThinkingAtEOF(); err != nil {
 		return nil, err
@@ -3761,7 +3763,16 @@ func readEventStreamMessage(reader *bufio.Reader) (*eventStreamMessage, error) {
 	if _, err := io.ReadFull(reader, remaining); err != nil {
 		return nil, err
 	}
-	eventType := extractEventType(remaining[:headersLength])
+	headers := remaining[:headersLength]
+	messageType := extractStringHeader(headers, ":message-type")
+	if messageType == "exception" || messageType == "error" {
+		codeHeader := ":exception-type"
+		if messageType == "error" {
+			codeHeader = ":error-code"
+		}
+		return nil, &EventStreamError{MessageType: messageType, Code: safeEventStreamErrorCode(extractStringHeader(headers, codeHeader))}
+	}
+	eventType := extractEventType(headers)
 	payloadStart := headersLength
 	payloadEnd := uint32(len(remaining)) - 4
 	if payloadStart >= payloadEnd {
@@ -3774,6 +3785,10 @@ func readEventStreamMessage(reader *bufio.Reader) (*eventStreamMessage, error) {
 }
 
 func extractEventType(headers []byte) string {
+	return extractStringHeader(headers, ":event-type")
+}
+
+func extractStringHeader(headers []byte, key string) string {
 	offset := 0
 	for offset < len(headers) {
 		nameLen := int(headers[offset])
@@ -3799,7 +3814,7 @@ func extractEventType(headers []byte) string {
 			}
 			value := string(headers[offset : offset+valueLen])
 			offset += valueLen
-			if name == ":event-type" {
+			if name == key {
 				return value
 			}
 			continue
@@ -4268,18 +4283,11 @@ func isEmittableToolUse(tool KiroToolUse) bool {
 	return !tool.IsTruncated && strings.TrimSpace(tool.ToolUseID) != "" && strings.TrimSpace(tool.Name) != ""
 }
 
-func shouldEmitToolUse(tool KiroToolUse, emittedToolContents map[string]bool) bool {
-	if tool.IsTruncated {
+func shouldEmitToolUse(tool KiroToolUse, emittedToolIDs map[string]bool) bool {
+	if !isEmittableToolUse(tool) || emittedToolIDs[tool.ToolUseID] {
 		return false
 	}
-	key := toolUseContentKey(tool)
-	if key == "" {
-		return false
-	}
-	if emittedToolContents[key] {
-		return false
-	}
-	emittedToolContents[key] = true
+	emittedToolIDs[tool.ToolUseID] = true
 	return true
 }
 
@@ -4294,7 +4302,6 @@ func hasUsableToolUses(toolUses []KiroToolUse) bool {
 
 func deduplicateToolUses(toolUses []KiroToolUse) []KiroToolUse {
 	seenIDs := make(map[string]bool)
-	seenContent := make(map[string]bool)
 	out := make([]KiroToolUse, 0, len(toolUses))
 	for _, tool := range toolUses {
 		if tool.ToolUseID != "" {
@@ -4303,25 +4310,9 @@ func deduplicateToolUses(toolUses []KiroToolUse) []KiroToolUse {
 			}
 			seenIDs[tool.ToolUseID] = true
 		}
-		key := toolUseContentKey(tool)
-		if key != "" && seenContent[key] {
-			continue
-		}
-		if key != "" {
-			seenContent[key] = true
-		}
 		out = append(out, tool)
 	}
 	return out
-}
-
-func toolUseContentKey(tool KiroToolUse) string {
-	name := strings.TrimSpace(tool.Name)
-	if name == "" {
-		return ""
-	}
-	inputJSON, _ := json.Marshal(tool.Input)
-	return name + ":" + string(inputJSON)
 }
 
 func drainEmbeddedToolText(text string) (cleanText string, toolUses []KiroToolUse, pending string) {

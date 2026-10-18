@@ -1129,6 +1129,11 @@ func (s *GatewayService) handleStreamingResponse(ctx context.Context, resp *http
 
 		case <-intervalCh:
 			lastRead := time.Unix(0, atomic.LoadInt64(&lastReadAt))
+			if activity, ok := resp.Body.(interface{ lastUpstreamReadAt() time.Time }); ok {
+				if upstreamRead := activity.lastUpstreamReadAt(); upstreamRead.After(lastRead) {
+					lastRead = upstreamRead
+				}
+			}
 			if time.Since(lastRead) < streamInterval {
 				continue
 			}
