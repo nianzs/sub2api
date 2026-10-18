@@ -336,28 +336,16 @@ func (s *GatewayService) openKiroAnthropicStreamResponse(ctx context.Context, ac
 	requestCtx.CacheEmulationUsage = plan.result().toKiroUsage()
 	requestCtx.TokenizerAlgorithm = s.kiroMeteringAlgorithm(ctx)
 
-	pr, pw := io.Pipe()
 	wrappedHeaders := resp.Header.Clone()
 	wrappedHeaders.Set("Content-Type", "text/event-stream")
 	claudeReqID := kiropkg.NewClaudeRequestID()
 	wrappedHeaders.Set("x-request-id", claudeReqID)
 	wrappedHeaders.Set("request-id", claudeReqID)
 
-	go func() {
-		defer func() { _ = resp.Body.Close() }()
-		_, streamErr := kiropkg.StreamEventStreamAsAnthropicWithContext(upstreamCtx, resp.Body, pw, requestModel, inputTokens, requestCtx)
-		if streamErr != nil {
-			_, _ = io.WriteString(pw, "event: error\ndata: {\"type\":\"error\",\"error\":{\"type\":\"api_error\",\"message\":\"stream interrupted\"}}\n\n")
-			_ = pw.CloseWithError(streamErr)
-			return
-		}
-		_ = pw.Close()
-	}()
-
 	return &http.Response{
 		StatusCode: resp.StatusCode,
 		Header:     wrappedHeaders,
-		Body:       pr,
+		Body:       newKiroAnthropicStreamBody(upstreamCtx, resp.Body, requestModel, inputTokens, requestCtx),
 	}, inputTokens, nil
 }
 
