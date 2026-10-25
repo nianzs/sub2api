@@ -75,7 +75,7 @@ func (s *AccountTestService) testFishTokenConnection(c *gin.Context, account *Ac
 	client := fish.NewClient(fish.Options{ProxyURL: accountProxyURL(account), APIBase: apiBase})
 	self, err := client.UserSelf(ctx, token, identity)
 	if err != nil {
-		return s.sendErrorAndEnd(c, formatFishTestError(err))
+		return s.endFishTestError(c, account, err)
 	}
 	if self.Banned {
 		return s.sendErrorAndEnd(c, "fish account is banned")
@@ -125,7 +125,7 @@ func (s *AccountTestService) testFishTokenConnection(c *gin.Context, account *Ac
 		if !domain.IsFishPublicModel(mappedModel) {
 			return s.sendErrorAndEnd(c, fmt.Sprintf("fish model %q is not available on this account", modelID))
 		}
-		if err := s.testFishTokenImage(c, client, token, identity, mappedModel, prompt); err != nil {
+		if err := s.testFishTokenImage(c, account, client, token, identity, mappedModel, prompt); err != nil {
 			return err
 		}
 	}
@@ -135,7 +135,7 @@ func (s *AccountTestService) testFishTokenConnection(c *gin.Context, account *Ac
 }
 
 // testFishTokenImage 用最低档 1024x1024 出一张图，并把产物 URL 推给测试窗。
-func (s *AccountTestService) testFishTokenImage(c *gin.Context, client *fish.Client, token string, identity fish.Identity, modelID, prompt string) error {
+func (s *AccountTestService) testFishTokenImage(c *gin.Context, account *Account, client *fish.Client, token string, identity fish.Identity, modelID, prompt string) error {
 	ctx, cancel := context.WithTimeout(c.Request.Context(), fishTestImageTimeout)
 	defer cancel()
 
@@ -149,7 +149,7 @@ func (s *AccountTestService) testFishTokenImage(c *gin.Context, client *fish.Cli
 		Count:     1,
 	})
 	if err != nil {
-		return s.sendErrorAndEnd(c, formatFishTestError(err))
+		return s.endFishTestError(c, account, err)
 	}
 	if price == nil {
 		return s.sendErrorAndEnd(c, "fish price response was empty")
@@ -167,7 +167,7 @@ func (s *AccountTestService) testFishTokenImage(c *gin.Context, client *fish.Cli
 		PricingVersion:  price.PricingVersion,
 	})
 	if err != nil {
-		return s.sendErrorAndEnd(c, formatFishTestError(err))
+		return s.endFishTestError(c, account, err)
 	}
 	if group == nil || strings.TrimSpace(group.ID) == "" {
 		return s.sendErrorAndEnd(c, "fish generate returned no task group")
@@ -202,6 +202,22 @@ func (s *AccountTestService) testFishTokenImage(c *gin.Context, client *fish.Cli
 		}
 	}
 	return s.sendErrorAndEnd(c, "fish image generation finished without a media URL")
+}
+
+// endFishTestError 结束连通性测试并上报错误。撞上游 429 时按请求路径同口径
+// 落限流冷却（free 号到下一个 UTC 零点——当天基本废了，短冷却回锅会虚增
+// 可用账号数、挡住自动补号；其余 5 分钟），否则管理员测出 rate limited 后
+// 紧接着的请求仍会选到刚被上游限流的号。
+func (s *AccountTestService) endFishTestError(c *gin.Context, account *Account, err error) error {
+	var rateLimited *fish.RateLimitedError
+	if errors.As(err, &rateLimited) && s != nil && s.accountRepo != nil && account != nil && account.ID > 0 && isFishTokenAccount(account) {
+		until := time.Now().Add(fishRateLimitCooldown)
+		if fishAccountPlanIsFree(account) {
+			until = nextUTCMidnight(time.Now())
+		}
+		writeFishCooldown(c.Request.Context(), s.accountRepo, account.ID, until, fishRateLimitCooldownReason)
+	}
+	return s.sendErrorAndEnd(c, formatFishTestError(err))
 }
 
 // formatFishTestError 把 fish 客户端错误转成面向管理员的简短文案。

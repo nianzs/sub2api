@@ -67,6 +67,9 @@ func TestClassifyFishErrorRateLimited(t *testing.T) {
 	if failure.Cooldown != fishRateLimitCooldown || failure.Failover.Reason != fishFailureUpstream {
 		t.Fatalf("failure = %+v", failure)
 	}
+	if !failure.RateLimited {
+		t.Fatal("rate-limited failure must carry the RateLimited marker")
+	}
 }
 
 func TestClassifyFishErrorTemporary(t *testing.T) {
@@ -434,6 +437,33 @@ func TestFishInsufficientCooldownKeepsTwoHoursWhenLookupUnusable(t *testing.T) {
 	})
 }
 
+func TestFishRateLimitCooldownFreePlanGoesStraightToMidnight(t *testing.T) {
+	// free 号 429：不打 entitlements，单次写入冷却到下一个 UTC 零点——
+	// 持续 429 的 free 号当天基本废了，5 分钟回锅会虚增可用账号数。
+	_, entitlements, other := fishEntitlementServer(t, http.StatusOK,
+		`{"plan":"free","dailyImage":{"limit":3,"used":1,"remaining":2,"resetAt":"2099-03-14T00:00:00Z"}}`, false)
+	account := fishCooldownAccount()
+	account.Credentials[fishCredentialPlan] = fishPlanFree
+	repo := &fishCooldownRepo{account: account}
+	started := time.Now()
+	failure := classifyFishError(&fish.RateLimitedError{RequestError: fish.RequestError{StatusCode: 429}})
+	applyFishCooldown(context.Background(), repo, 7, failure)
+
+	repo.assertWritesHadLiveContext(t)
+	if repo.sets != 1 {
+		t.Fatalf("cooldown writes = %d, want 1 (free goes straight to midnight)", repo.sets)
+	}
+	if want := nextUTCMidnight(started); !repo.until.Equal(want) {
+		t.Fatalf("until = %v, want next UTC midnight %v", repo.until, want)
+	}
+	if repo.reason != fishRateLimitCooldownReason {
+		t.Fatalf("reason = %q", repo.reason)
+	}
+	if entitlements.Load() != 0 || other.Load() != 0 {
+		t.Fatalf("entitlements=%d other=%d, want no upstream query", entitlements.Load(), other.Load())
+	}
+}
+
 func TestFishRateLimitCooldownDoesNotQueryEntitlements(t *testing.T) {
 	_, entitlements, other := fishEntitlementServer(t, http.StatusOK,
 		`{"plan":"free","dailyImage":{"limit":3,"used":3,"remaining":0,"resetAt":"2099-03-14T00:00:00Z"}}`, false)
@@ -441,8 +471,9 @@ func TestFishRateLimitCooldownDoesNotQueryEntitlements(t *testing.T) {
 	started := time.Now()
 	failure := classifyFishError(&fish.RateLimitedError{RequestError: fish.RequestError{StatusCode: 429}})
 	applyFishCooldown(context.Background(), repo, 7, failure)
-	assertFishDurationCooldown(t, repo, started, fishRateLimitCooldown, "fish rate limited")
-	if repo.gets != 0 || entitlements.Load() != 0 || other.Load() != 0 {
-		t.Fatalf("gets=%d entitlements=%d other=%d, want no lookup", repo.gets, entitlements.Load(), other.Load())
+	assertFishDurationCooldown(t, repo, started, fishRateLimitCooldown, fishRateLimitCooldownReason)
+	// plan 未知只做一次 GetByID 读 plan，不打 entitlements。
+	if repo.gets != 1 || entitlements.Load() != 0 || other.Load() != 0 {
+		t.Fatalf("gets=%d entitlements=%d other=%d, want plan check only", repo.gets, entitlements.Load(), other.Load())
 	}
 }

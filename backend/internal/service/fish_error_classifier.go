@@ -17,6 +17,10 @@ import (
 // fishRateLimitCooldown 是上游 429 后账号的冷却时长。
 const fishRateLimitCooldown = 5 * time.Minute
 
+// fishRateLimitCooldownReason 是 429 限流冷却的原因文案（请求路径与连通性
+// 测试路径共用）。
+const fishRateLimitCooldownReason = "fish rate limited"
+
 // fishInsufficientCooldown 是 402 后立即落库的冷却。402 本身不带 resetAt；
 // 后台补查确认 dailyImage 已耗尽时，冷却延长到重置时刻（resetAt 缺失或过期
 // 时回落到下一个 UTC 零点）。free 号不补查：直接冷却到下一个 UTC 零点——
@@ -53,6 +57,9 @@ type fishFailure struct {
 	Failover            *UpstreamFailoverError
 	Cooldown            time.Duration
 	CooldownReason      string
+	// RateLimited 标记 429 限流（Reason 与 5xx 同为 fishFailureUpstream，
+	// 靠本字段区分账号侧处置）。
+	RateLimited         bool
 	SetAccountError     bool
 	AccountErrorMessage string
 }
@@ -152,7 +159,8 @@ func classifyFishError(err error) fishFailure {
 				NextAccountAction: NextAccountRetry,
 			},
 			Cooldown:       fishRateLimitCooldown,
-			CooldownReason: "fish rate limited",
+			CooldownReason: fishRateLimitCooldownReason,
+			RateLimited:    true,
 		}
 	}
 
@@ -254,12 +262,23 @@ var fishRunAsync = func(fn func()) { go fn() }
 var fishDailyResetSF singleflight.Group
 
 // applyFishCooldown 先按固定时长落库冷却（不等补查，换号不被拖住，查询失败
-// 也一定有冷却）。free 号例外：402 直接冷却到下一个 UTC 零点，不补查——
-// 次数按 UTC 日重置、积分是长期总额，两个维度零点前都无恢复可能，补查
-// dailyImage 区分不了。其余 402（paid/plan 未知）再在后台补查每日出图窗口：
-// 确认耗尽时把冷却延长到重置时刻——SetTempUnschedulable 只延长、不缩短。
+// 也一定有冷却）。两类例外直接落 UTC 零点、不补查：
+//   - 402 free 号：次数按 UTC 日重置、积分是长期总额，两个维度零点前都无
+//     恢复可能，补查 dailyImage 区分不了；
+//   - 429 free 号：实测被 fish 持续 429 的 free 号当天基本废了，5 分钟回锅
+//     会虚增可用账号数、挡住自动补号。plus/pro 保持 5 分钟（更可能是瞬时限流）。
+//
+// 其余 402（paid/plan 未知）再在后台补查每日出图窗口：确认耗尽时把冷却延长
+// 到重置时刻——SetTempUnschedulable 只延长、不缩短。
 func applyFishCooldown(ctx context.Context, repo fishAccountCooldownStore, accountID int64, failure fishFailure) {
 	if repo == nil || accountID <= 0 || failure.Cooldown <= 0 {
+		return
+	}
+	if failure.RateLimited {
+		if fishFreePlanCooldownUntilMidnight(ctx, repo, accountID, failure.CooldownReason) {
+			return
+		}
+		writeFishCooldown(ctx, repo, accountID, time.Now().Add(failure.Cooldown), failure.CooldownReason)
 		return
 	}
 	if failure.Failover == nil || failure.Failover.Reason != fishFailureInsufficientCredits {
@@ -284,12 +303,12 @@ func applyFishCooldown(ctx context.Context, repo fishAccountCooldownStore, accou
 	})
 }
 
-// fishFreePlanCooldownUntilMidnight 对 free 号的 402 直接把冷却挂到下一个
+// fishFreePlanCooldownUntilMidnight 对 free 号的 402/429 直接把冷却挂到下一个
 // UTC 零点，不打 entitlements。free 的积分是长期总额、次数按 UTC 日重置：
 // 402 无论因次数耗尽还是积分不够，零点前都不可能成功（分不够时次数重置了
-// 也用不了），零点后一次探测即可发现积分是否已补。返回 true 表示已落库。
-// plan 未知走老路径（2h + 补查）：用量拉取/连通性测试会回填 plan_type，
-// 下一轮 402 即进入本分支。
+// 也用不了）；429 实测当天基本废了。零点后一次探测即可发现是否恢复。
+// 返回 true 表示已落库。plan 未知走老路径（402 补查 / 429 五分钟）：
+// 用量拉取/巡检/连通性测试会回填 plan_type，下一轮即进入本分支。
 func fishFreePlanCooldownUntilMidnight(ctx context.Context, repo fishAccountCooldownStore, accountID int64, reason string) bool {
 	account, err := repo.GetByID(ctx, accountID)
 	if err != nil || account == nil {

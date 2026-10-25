@@ -5,6 +5,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/fish"
 	"github.com/gin-gonic/gin"
@@ -110,4 +111,59 @@ func TestFishTokenImageTestSubmitsAndEmitsImage(t *testing.T) {
 	if !strings.Contains(body, `"success":true`) {
 		t.Fatalf("test_complete missing success: %s", body)
 	}
+}
+
+// fishTestCooldownCase 驱动一次撞 429 的连通性测试并断言落库的冷却。
+func fishTestCooldownCase(t *testing.T, account *Account, wantUntil func(time.Time) time.Time, wantReason string) {
+	t.Helper()
+	gin.SetMode(gin.TestMode)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusTooManyRequests)
+		_, _ = w.Write([]byte(`{"status":429,"message":"rate limited"}`))
+	}))
+	t.Cleanup(server.Close)
+
+	repo := &fishUsageRepoStub{}
+	svc := &AccountTestService{accountRepo: repo}
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest(http.MethodGet, "/", nil)
+	started := time.Now()
+	_ = svc.testFishAccountConnectionWithBase(c, account, server.URL)
+
+	if repo.sets != 1 {
+		t.Fatalf("cooldown writes = %d, want 1 (repo=%+v body=%s)", repo.sets, repo, w.Body.String())
+	}
+	if repo.reason != wantReason {
+		t.Fatalf("reason = %q, want %q", repo.reason, wantReason)
+	}
+	// until 落在 [want(started), want(结束时)] 区间内（now 在两取值点之间）。
+	if floor, ceil := wantUntil(started), wantUntil(time.Now()); repo.until.Before(floor) || repo.until.After(ceil) {
+		t.Fatalf("until = %v, want within [%v, %v]", repo.until, floor, ceil)
+	}
+	if !strings.Contains(w.Body.String(), "rate limited") {
+		t.Fatalf("test SSE missing rate-limited error: %s", w.Body.String())
+	}
+}
+
+func TestFishAccountTestRateLimitedCoolsFreePlanToMidnight(t *testing.T) {
+	account := &Account{
+		ID:          42,
+		Type:        AccountTypeAPIKey,
+		Platform:    PlatformFish,
+		Credentials: map[string]any{fishCredentialToken: "tok", fishCredentialPlan: fishPlanFree},
+	}
+	fishTestCooldownCase(t, account, nextUTCMidnight, fishRateLimitCooldownReason)
+}
+
+func TestFishAccountTestRateLimitedCoolsUnknownPlanFiveMinutes(t *testing.T) {
+	account := &Account{
+		ID:          42,
+		Type:        AccountTypeAPIKey,
+		Platform:    PlatformFish,
+		Credentials: map[string]any{fishCredentialToken: "tok"},
+	}
+	fishTestCooldownCase(t, account, func(started time.Time) time.Time {
+		return started.Add(fishRateLimitCooldown)
+	}, fishRateLimitCooldownReason)
 }
