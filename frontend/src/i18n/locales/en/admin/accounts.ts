@@ -1842,7 +1842,6 @@ export default {
         kiroBonus: 'Bonus',
         kiroCredits: 'Credits',
         fishCredits: 'Credits',
-        fishDaily: 'Daily images',
         fishReset: 'Reset',
         kiroDaysLeft: '{days}d left',
         kiroExpires: 'Expires',

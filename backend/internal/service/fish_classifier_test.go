@@ -244,6 +244,98 @@ func assertFishDurationCooldown(t *testing.T, repo *fishCooldownRepo, started ti
 	}
 }
 
+func TestFishInsufficientCooldownFreePlanGoesStraightToMidnight(t *testing.T) {
+	// free 号：不打 entitlements，单次写入冷却到下一个 UTC 零点。
+	_, entitlements, other := fishEntitlementServer(t, http.StatusOK,
+		`{"plan":"free","dailyImage":{"limit":3,"used":1,"remaining":2,"resetAt":"2099-03-14T00:00:00Z"}}`, false)
+	account := fishCooldownAccount()
+	account.Credentials[fishCredentialPlan] = fishPlanFree
+	repo := &fishCooldownRepo{account: account}
+	started := time.Now()
+	applyFishCooldown(context.Background(), repo, 7, fishInsufficientFailure())
+
+	repo.assertWritesHadLiveContext(t)
+	if repo.sets != 1 {
+		t.Fatalf("cooldown writes = %d, want 1 (free goes straight to midnight)", repo.sets)
+	}
+	if want := nextUTCMidnight(started); !repo.until.Equal(want) {
+		t.Fatalf("until = %v, want next UTC midnight %v", repo.until, want)
+	}
+	if repo.reason != "fish credits exhausted or quota exceeded" {
+		t.Fatalf("reason = %q", repo.reason)
+	}
+	if entitlements.Load() != 0 || other.Load() != 0 {
+		t.Fatalf("entitlements=%d other=%d, want no upstream query", entitlements.Load(), other.Load())
+	}
+}
+
+func TestFishInsufficientCooldownExtendsToMidnightWhenResetAtUnusable(t *testing.T) {
+	// 日窗口确认耗尽但 resetAt 缺失/过期：兜底到下一个 UTC 零点而不是保持 2h。
+	cases := []struct {
+		name string
+		body string
+	}{
+		{
+			name: "resetAt missing",
+			body: `{"plan":"pro","dailyImage":{"limit":3,"used":3,"remaining":0}}`,
+		},
+		{
+			name: "resetAt expired",
+			body: `{"plan":"pro","dailyImage":{"limit":3,"used":3,"remaining":0,"resetAt":"2000-01-01T00:00:00Z"}}`,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			fishEntitlementServer(t, http.StatusOK, tc.body, false)
+			repo := &fishCooldownRepo{account: fishCooldownAccount()}
+			started := time.Now()
+			applyFishCooldown(context.Background(), repo, 7, fishInsufficientFailure())
+
+			repo.assertWritesHadLiveContext(t)
+			if repo.sets != 2 {
+				t.Fatalf("cooldown writes = %d, want 2 (2h then midnight)", repo.sets)
+			}
+			if want := nextUTCMidnight(started); !repo.until.Equal(want) {
+				t.Fatalf("until = %v, want next UTC midnight %v", repo.until, want)
+			}
+			if repo.reason != fishDailyQuotaExhaustedReason {
+				t.Fatalf("reason = %q", repo.reason)
+			}
+		})
+	}
+}
+
+func TestNextUTCMidnight(t *testing.T) {
+	cases := []struct {
+		now  time.Time
+		want time.Time
+	}{
+		{
+			now:  time.Date(2026, 10, 25, 10, 30, 0, 0, time.UTC),
+			want: time.Date(2026, 10, 26, 0, 0, 0, 0, time.UTC),
+		},
+		{
+			now:  time.Date(2026, 10, 25, 23, 59, 59, 999000000, time.UTC),
+			want: time.Date(2026, 10, 26, 0, 0, 0, 0, time.UTC),
+		},
+		{
+			// 恰在零点：刚重置过，下一个零点是明天。
+			now:  time.Date(2026, 10, 25, 0, 0, 0, 0, time.UTC),
+			want: time.Date(2026, 10, 26, 0, 0, 0, 0, time.UTC),
+		},
+		{
+			// 带时区的入参换算到 UTC 后再取零点：CST 26 日 07 点 = UTC 25 日 23 点。
+			now:  time.Date(2026, 10, 26, 7, 0, 0, 0, time.FixedZone("CST", 8*3600)),
+			want: time.Date(2026, 10, 26, 0, 0, 0, 0, time.UTC),
+		},
+	}
+	for _, tc := range cases {
+		if got := nextUTCMidnight(tc.now); !got.Equal(tc.want) {
+			t.Fatalf("nextUTCMidnight(%v) = %v, want %v", tc.now, got, tc.want)
+		}
+	}
+}
+
 func TestFishInsufficientCooldownUsesDailyResetAt(t *testing.T) {
 	_, entitlements, other := fishEntitlementServer(t, http.StatusOK,
 		`{"plan":"free","dailyImage":{"limit":3,"used":3,"remaining":0,"resetAt":"2099-03-14T00:00:00Z"}}`, false)
@@ -307,11 +399,6 @@ func TestFishInsufficientCooldownKeepsTwoHoursWhenLookupUnusable(t *testing.T) {
 			name:   "upstream 5xx",
 			status: http.StatusInternalServerError,
 			body:   `{"message":"boom"}`,
-		},
-		{
-			name:   "resetAt expired",
-			status: http.StatusOK,
-			body:   `{"plan":"free","dailyImage":{"limit":3,"used":3,"remaining":0,"resetAt":"2000-01-01T00:00:00Z"}}`,
 		},
 		{
 			name:   "remaining omitted on a fresh window",

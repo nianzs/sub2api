@@ -1091,7 +1091,7 @@ describe('AccountUsageCell', () => {
     expect(wrapper.text()).toContain('admin.accounts.usageWindow.kiroReset')
   })
 
-  it('Fish token 号用 passive source 展示积分与每日出图，并回写套餐', async () => {
+  it('Fish token 号用 passive source 展示积分与套餐，并回写套餐（不再展示今日出图）', async () => {
     const account = makeAccount({
       id: 4001,
       platform: 'fish',
@@ -1132,7 +1132,8 @@ describe('AccountUsageCell', () => {
     expect(wrapper.emitted('fishUsageMeta')?.[0]).toEqual([{ plan_type: 'free' }])
     expect(wrapper.find('[data-testid="fish-usage"]').exists()).toBe(true)
     expect(wrapper.text()).toContain('admin.accounts.usageWindow.fishCredits')
-    expect(wrapper.text()).toContain('admin.accounts.usageWindow.fishDaily')
+    expect(wrapper.text()).not.toContain('admin.accounts.usageWindow.fishDaily')
+    expect(wrapper.find('[data-testid="fish-daily"]').exists()).toBe(false)
     expect(wrapper.text()).toContain('Free')
   })
 

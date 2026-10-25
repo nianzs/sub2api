@@ -29,6 +29,9 @@ const (
 	// fishCredentialMaxPerGen 是账号单次生图上限（entitlements
 	// maxImagesPerGeneration：free=2 / plus=4 / pro=8），连通性测试回填。
 	fishCredentialMaxPerGen = "max_images_per_generation"
+	// fishCredentialPlan 是套餐档位（entitlements.plan：free/plus/pro），
+	// 连通性测试与用量拉取回填；402 冷却路径据此分流（free 直挂 UTC 零点）。
+	fishCredentialPlan = "plan_type"
 )
 
 const (

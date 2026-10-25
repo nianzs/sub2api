@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -197,9 +198,33 @@ func (s *AccountUsageService) fetchAndCacheFishUsage(ctx context.Context, accoun
 				}
 			}
 		}
+		s.applyFishDailyObservation(ctx, account, entitlements)
 	}
 	s.storeFishUsageSnapshot(account.ID, info)
 	return info, nil
+}
+
+// applyFishDailyObservation 把 entitlements 观察落到账号侧（纯反应式冷却之外
+// 的主动通道：没被流量打到的耗尽号在这里也能挂上冷却）：
+//   - dailyImage 已耗尽 → SetTempUnschedulable 到重置时刻（resetAt 缺失/过期
+//     回落下一个 UTC 零点；SQL 只延长不缩短，不影响更长的既有冷却）；
+//   - plan 回填 credentials.plan_type——402 冷却路径据此把 free 号直挂 UTC 零点。
+//
+// 失败只降级精度（冷却/回填缺失），不影响用量展示。
+func (s *AccountUsageService) applyFishDailyObservation(ctx context.Context, account *Account, entitlements *fish.Entitlements) {
+	if s == nil || s.accountRepo == nil || account == nil || account.ID <= 0 || entitlements == nil || !isFishTokenAccount(account) {
+		return
+	}
+	if until, ok := fishDailyResetFromQuota(entitlements.DailyImage, time.Now()); ok {
+		writeFishCooldown(ctx, s.accountRepo, account.ID, until, fishDailyQuotaExhaustedReason)
+	}
+	if plan := strings.TrimSpace(entitlements.Plan); plan != "" && strings.TrimSpace(account.GetCredential(fishCredentialPlan)) != plan {
+		credentials := shallowCopyMap(account.Credentials)
+		credentials[fishCredentialPlan] = plan
+		if err := persistAccountCredentials(ctx, s.accountRepo, account, credentials); err != nil {
+			slog.Warn("fish: persist plan_type failed", "account_id", account.ID, "error", err)
+		}
+	}
 }
 
 func buildFishDegradedUsage(err error) *UsageInfo {

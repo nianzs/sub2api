@@ -1163,6 +1163,9 @@ type GatewayConfig struct {
 	// CNProviders: 国产 OpenAI 兼容供应商（kimi/zhipu/deepseek）的余额检测配置。
 	// 仅作用于 payg（按量付费）账号：周期探测余额，低于阈值则临时停调。
 	CNProviders GatewayCNProvidersConfig `mapstructure:"cn_providers"`
+
+	// Fish: fish 渠道的周期配额巡检配置。
+	Fish GatewayFishConfig `mapstructure:"fish"`
 }
 
 // GatewayGrokConfig holds Grok-specific gateway scheduling knobs.
@@ -1205,6 +1208,16 @@ type GatewayCNProvidersConfig struct {
 	BalanceCheckEnabled         bool    `mapstructure:"balance_check_enabled"`
 	BalanceThreshold            float64 `mapstructure:"balance_threshold"`
 	BalanceCheckIntervalMinutes int     `mapstructure:"balance_check_interval_minutes"`
+}
+
+// GatewayFishConfig fish 渠道的周期配额巡检。
+//
+//   - quota_sweep_interval_minutes: 巡检周期（分钟，默认 30；<=0 关闭）。
+//     每轮对全部 active 的 fish token 号拉一次 entitlements（复用用量服务的
+//     缓存/singleflight/代理路由），看到每日出图次数耗尽即落临时不可调度到
+//     重置时刻——不依赖请求流量和管理端看列表。
+type GatewayFishConfig struct {
+	QuotaSweepIntervalMinutes int `mapstructure:"quota_sweep_interval_minutes"`
 }
 
 type GatewayLiveConfig struct {
@@ -2573,6 +2586,8 @@ func setDefaults() {
 	viper.SetDefault("gateway.cn_providers.balance_check_enabled", true)
 	viper.SetDefault("gateway.cn_providers.balance_threshold", 0.5)
 	viper.SetDefault("gateway.cn_providers.balance_check_interval_minutes", 10)
+	// fish 渠道周期配额巡检：耗尽号不依赖流量/看列表即可落冷却。
+	viper.SetDefault("gateway.fish.quota_sweep_interval_minutes", 30)
 	viper.SetDefault("gateway.image_concurrency.enabled", false)
 	viper.SetDefault("gateway.image_concurrency.max_concurrent_requests", 0)
 	viper.SetDefault("gateway.image_concurrency.overflow_mode", ImageConcurrencyOverflowModeReject)

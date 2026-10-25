@@ -108,7 +108,7 @@ func (s *AccountTestService) testFishTokenConnection(c *gin.Context, account *Ac
 			credentials[fishCredentialMaxPerGen] = entitlements.MaxImagesPerGeneration
 		}
 		if entitlements != nil && strings.TrimSpace(entitlements.Plan) != "" {
-			credentials["plan_type"] = strings.TrimSpace(entitlements.Plan)
+			credentials[fishCredentialPlan] = strings.TrimSpace(entitlements.Plan)
 		}
 		// 内存态先更新（repo 缺失时 persistAccountCredentials 直接跳过），
 		// 再走标准持久化。

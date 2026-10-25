@@ -603,7 +603,6 @@ export default {
         leonardoReset: '重置',
         kiroCredits: 'Credits',
         fishCredits: 'Credits',
-        fishDaily: '今日出图',
         fishReset: '重置',
         kiroDaysLeft: '剩余 {days} 天',
         kiroExpires: '到期',

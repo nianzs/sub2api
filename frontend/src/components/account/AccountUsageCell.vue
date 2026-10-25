@@ -819,16 +819,6 @@
           </div>
         </div>
 
-        <div v-if="usageInfo?.fish_daily" class="space-y-1" data-testid="fish-daily">
-          <div class="flex items-baseline justify-between gap-2 text-[11px] text-gray-600 dark:text-gray-300">
-            <span class="font-medium tracking-[0.01em]">{{ t('admin.accounts.usageWindow.fishDaily') }}</span>
-            <span class="font-semibold tabular-nums text-gray-700 dark:text-gray-200">{{ formatKiroAmount(usageInfo.fish_daily.current_usage) }} / {{ formatKiroAmount(usageInfo.fish_daily.usage_limit) }}</span>
-          </div>
-          <div class="h-1.5 overflow-hidden rounded-full bg-gray-200 dark:bg-gray-700">
-            <div class="h-full rounded-full bg-emerald-500 transition-all" :style="{ width: `${fishDailyPercent}%` }"></div>
-          </div>
-        </div>
-
         <div class="flex flex-wrap items-center gap-x-3 gap-y-1 text-[10px] text-gray-500 dark:text-gray-400">
           <span v-if="fishResetDisplay" class="inline-flex items-center gap-1">
             <span class="text-gray-400 dark:text-gray-500">{{ t('admin.accounts.usageWindow.fishReset') }}</span>
@@ -1858,10 +1848,9 @@ const syncUsageMeta = (info?: AccountUsageInfo | null) => {
 }
 
 const fishUsageAvailable = computed(() =>
-  !!(usageInfo.value?.fish_credits || usageInfo.value?.fish_daily || usageInfo.value?.fish_plan)
+  !!(usageInfo.value?.fish_credits || usageInfo.value?.fish_plan)
 )
 const fishCreditPercent = computed(() => clampPercent(usageInfo.value?.fish_credits?.percentage_used))
-const fishDailyPercent = computed(() => clampPercent(usageInfo.value?.fish_daily?.percentage_used))
 const fishPlanLabel = computed(() => {
   const plan = (usageInfo.value?.fish_plan || '').trim()
   if (!plan) return ''

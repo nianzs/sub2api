@@ -18,9 +18,16 @@ import (
 const fishRateLimitCooldown = 5 * time.Minute
 
 // fishInsufficientCooldown 是 402 后立即落库的冷却。402 本身不带 resetAt；
-// 后台补查确认 dailyImage 已耗尽且 resetAt 在未来时，冷却延长到该时刻。
-// 钱包耗尽、查询失败、resetAt 无效或已过期保持 2h。
+// 后台补查确认 dailyImage 已耗尽时，冷却延长到重置时刻（resetAt 缺失或过期
+// 时回落到下一个 UTC 零点）。free 号不补查：直接冷却到下一个 UTC 零点——
+// 出图次数按 UTC 日重置，积分是长期总额、不随次数重置（分不够时次数重置了
+// 也用不了），无论 402 因次数还是积分，零点前都不可能成功，零点一次探测
+// 即可发现积分是否已补，2h 探测纯属浪费选号。钱包耗尽、查询失败保持 2h。
 const fishInsufficientCooldown = 2 * time.Hour
+
+// fishPlanFree 是 entitlements.plan 的免费档标识；连通性测试与用量拉取会把
+// plan 回填到 credentials.plan_type（fishCredentialPlan），402 路径据此分流。
+const fishPlanFree = "free"
 
 // fishDailyQuotaExhaustedReason 是每日出图窗口耗尽、挂到 resetAt 时的冷却原因。
 const fishDailyQuotaExhaustedReason = "fish daily image quota exhausted"
@@ -247,16 +254,22 @@ var fishRunAsync = func(fn func()) { go fn() }
 var fishDailyResetSF singleflight.Group
 
 // applyFishCooldown 先按固定时长落库冷却（不等补查，换号不被拖住，查询失败
-// 也一定有冷却）。402 再在后台补查每日出图窗口：确认耗尽且 resetAt 在未来时
-// 把冷却延长到 resetAt——SetTempUnschedulable 只延长、不缩短。
+// 也一定有冷却）。free 号例外：402 直接冷却到下一个 UTC 零点，不补查——
+// 次数按 UTC 日重置、积分是长期总额，两个维度零点前都无恢复可能，补查
+// dailyImage 区分不了。其余 402（paid/plan 未知）再在后台补查每日出图窗口：
+// 确认耗尽时把冷却延长到重置时刻——SetTempUnschedulable 只延长、不缩短。
 func applyFishCooldown(ctx context.Context, repo fishAccountCooldownStore, accountID int64, failure fishFailure) {
 	if repo == nil || accountID <= 0 || failure.Cooldown <= 0 {
 		return
 	}
-	writeFishCooldown(ctx, repo, accountID, time.Now().Add(failure.Cooldown), failure.CooldownReason)
 	if failure.Failover == nil || failure.Failover.Reason != fishFailureInsufficientCredits {
+		writeFishCooldown(ctx, repo, accountID, time.Now().Add(failure.Cooldown), failure.CooldownReason)
 		return
 	}
+	if fishFreePlanCooldownUntilMidnight(ctx, repo, accountID, failure.CooldownReason) {
+		return
+	}
+	writeFishCooldown(ctx, repo, accountID, time.Now().Add(failure.Cooldown), failure.CooldownReason)
 	bgCtx := context.WithoutCancel(ctx)
 	fishRunAsync(func() {
 		_, _, _ = fishDailyResetSF.Do(strconv.FormatInt(accountID, 10), func() (any, error) {
@@ -269,6 +282,46 @@ func applyFishCooldown(ctx context.Context, repo fishAccountCooldownStore, accou
 			return nil, nil
 		})
 	})
+}
+
+// fishFreePlanCooldownUntilMidnight 对 free 号的 402 直接把冷却挂到下一个
+// UTC 零点，不打 entitlements。free 的积分是长期总额、次数按 UTC 日重置：
+// 402 无论因次数耗尽还是积分不够，零点前都不可能成功（分不够时次数重置了
+// 也用不了），零点后一次探测即可发现积分是否已补。返回 true 表示已落库。
+// plan 未知走老路径（2h + 补查）：用量拉取/连通性测试会回填 plan_type，
+// 下一轮 402 即进入本分支。
+func fishFreePlanCooldownUntilMidnight(ctx context.Context, repo fishAccountCooldownStore, accountID int64, reason string) bool {
+	account, err := repo.GetByID(ctx, accountID)
+	if err != nil || account == nil {
+		if err != nil {
+			logger.L().With(zap.String("component", "service.fish")).Warn(
+				"fish.free_plan_check_failed",
+				zap.Int64("account_id", accountID),
+				zap.Error(err),
+			)
+		}
+		return false
+	}
+	if !isFishTokenAccount(account) || !fishAccountPlanIsFree(account) {
+		return false
+	}
+	writeFishCooldown(ctx, repo, accountID, nextUTCMidnight(time.Now()), reason)
+	return true
+}
+
+// fishAccountPlanIsFree 按 credentials.plan_type 判断 free 档。
+func fishAccountPlanIsFree(account *Account) bool {
+	return strings.EqualFold(strings.TrimSpace(account.GetCredential(fishCredentialPlan)), fishPlanFree)
+}
+
+// nextUTCMidnight 返回 now 之后的下一个 UTC 零点（fish 日配额重置时刻）。
+func nextUTCMidnight(now time.Time) time.Time {
+	y, m, d := now.UTC().Date()
+	midnight := time.Date(y, m, d, 0, 0, 0, 0, time.UTC)
+	if !midnight.After(now) {
+		midnight = midnight.AddDate(0, 0, 1)
+	}
+	return midnight
 }
 
 // writeFishCooldown 用独立超时落库冷却；调用方取消（客户端断开）不影响写入。
@@ -336,20 +389,19 @@ func fishDailyImageResetAt(ctx context.Context, account *Account, now time.Time)
 	return resetAt, ok, nil
 }
 
-// fishDailyResetFromQuota 在每日出图窗口耗尽时返回未来的 resetAt。
+// fishDailyResetFromQuota 在每日出图窗口耗尽时返回冷却截止：resetAt 有效且
+// 在未来时用 resetAt；缺失或已过期时回落到下一个 UTC 零点（日窗口按 UTC 天
+// 重置，耗尽是事实，重置时刻兜底到零点比 2h 反复探测更省）。
 func fishDailyResetFromQuota(daily *fish.DailyImageQuota, now time.Time) (time.Time, bool) {
 	if !fishDailyImageExhausted(daily) {
 		return time.Time{}, false
 	}
-	resetAt := strings.TrimSpace(daily.ResetAt)
-	if resetAt == "" {
-		return time.Time{}, false
+	if resetAt := strings.TrimSpace(daily.ResetAt); resetAt != "" {
+		if parsed, err := time.Parse(time.RFC3339, resetAt); err == nil && parsed.After(now) {
+			return parsed, true
+		}
 	}
-	parsed, err := time.Parse(time.RFC3339, resetAt)
-	if err != nil || !parsed.After(now) {
-		return time.Time{}, false
-	}
-	return parsed, true
+	return nextUTCMidnight(now), true
 }
 
 // fishDailyImageExhausted 要求 used 已达 limit：remaining 缺失会被解成 0，
