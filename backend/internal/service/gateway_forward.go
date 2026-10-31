@@ -104,11 +104,9 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 			validationModel = account.GetMappedModel(validationModel)
 		}
 	}
-	if account != nil && account.Platform == PlatformAnthropic {
-		if err := validateClaude55Request(parsed.Body.Bytes(), validationModel); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"type": "error", "error": gin.H{"type": "invalid_request_error", "message": err.Error()}})
-			return nil, err
-		}
+	if err := validateClaude55RequestForAccount(parsed.Body.Bytes(), account, validationModel); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"type": "error", "error": gin.H{"type": "invalid_request_error", "message": err.Error()}})
+		return nil, err
 	}
 	// Anthropic Fast is requested with speed=fast rather than OpenAI's
 	// service_tier. Attach it at this shared boundary so passthrough, OAuth and

@@ -701,6 +701,17 @@ func validateClaude55Request(body []byte, model string) error {
 	return nil
 }
 
+// validateClaude55RequestForAccount applies Anthropic's Claude 5.5 request
+// restrictions only on the official Anthropic channel. Kiro accepts the
+// client-facing thinking forms and translates them to its adaptive payload
+// during the direct Kiro request build.
+func validateClaude55RequestForAccount(body []byte, account *Account, model string) error {
+	if account == nil || account.Platform != PlatformAnthropic {
+		return nil
+	}
+	return validateClaude55Request(body, model)
+}
+
 // FilterThinkingBlocks removes thinking blocks from request body
 // Returns filtered body or original body if filtering fails (fail-safe)
 // This prevents 400 errors from invalid thinking block signatures.
