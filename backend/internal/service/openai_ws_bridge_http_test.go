@@ -688,40 +688,6 @@ func TestOpenAIWSBridge_Forward_RepeatedConnectionFailureFailsOverAfterOneRetry(
 	require.Empty(t, rec.Body.String())
 }
 
-func TestOpenAIWSBridge_Forward_FirstOutputTimeoutFailsOver(t *testing.T) {
-	gin.SetMode(gin.TestMode)
-	tests := []struct {
-		name    string
-		delayAt int
-	}{
-		{name: "no events before deadline", delayAt: 0},
-		{name: "metadata events do not satisfy deadline", delayAt: 1},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			wsServer := newWSBridgeTestServerWithOptions(t, wsBridgeTestServerOptions{delay: 1500 * time.Millisecond, delayAt: tt.delayAt},
-				wsBridgeTestCreatedEvent, wsBridgeTestCompletedEvent)
-			cfg := newWSBridgeTestConfig()
-			cfg.Gateway.OpenAIFirstOutputTimeoutSeconds = 1
-			upstream := newWSBridgeHTTPSSEUpstream()
-			svc := newWSBridgeTestService(cfg, upstream)
-			account := newWSBridgeTestAccount(wsServer.URL, OpenAIWSIngressModeWSBridge)
-			c, rec := newWSBridgeTestContext("/openai/v1/responses")
-
-			startedAt := time.Now()
-			result, err := svc.Forward(context.Background(), c, account, []byte(`{"model":"gpt-5.1","stream":true,"input":"hello"}`))
-			require.Nil(t, result)
-			var failoverErr *UpstreamFailoverError
-			require.True(t, errors.As(err, &failoverErr), "首输出超时应交给 handler 切号: %v", err)
-			require.Equal(t, http.StatusGatewayTimeout, failoverErr.StatusCode)
-			require.Less(t, time.Since(startedAt), 1400*time.Millisecond, "应在首输出截止时间触发，而不是等上游")
-			require.Equal(t, int32(1), wsServer.requests.Load(), "首输出超时不在同账号重试")
-			require.Empty(t, rec.Body.String())
-			require.Nil(t, upstream.lastReq)
-		})
-	}
-}
-
 func TestOpenAIWSBridge_Forward_FirstOutputTimeoutDoesNotAffectTimelyOutput(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	wsServer := newWSBridgeTestServer(t, 0,

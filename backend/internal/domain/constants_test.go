@@ -54,10 +54,13 @@ func TestDefaultKiroModelMapping_MatchesKiroReferenceModels(t *testing.T) {
 		"claude-sonnet-4-5-20250929-thinking": "claude-sonnet-4.5",
 		"claude-haiku-4-5-20251001":           "claude-haiku-4.5",
 		"claude-haiku-4-5-20251001-thinking":  "claude-haiku-4.5",
+		"claude-haiku-5-5":                    "claude-haiku-5.5",
+		"claude-haiku-5-5-thinking":           "claude-haiku-5.5",
 		"gpt-5.6-sol":                         "gpt-5.6-sol",
 		"gpt-5.6-terra":                       "gpt-5.6-terra",
 		"gpt-5.6-luna":                        "gpt-5.6-luna",
 		"codex-auto-review":                   "gpt-5.6-luna",
+		"kimi-k3":                             "kimi-k3",
 	}
 
 	if len(DefaultKiroModelMapping) != len(expected) {

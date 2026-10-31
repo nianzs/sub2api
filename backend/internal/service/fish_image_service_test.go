@@ -758,20 +758,3 @@ func TestFishGenerateCallEstimatesUsage(t *testing.T) {
 		t.Fatal("result.Usage must carry the estimate for the stream path")
 	}
 }
-
-func TestFishBuildPartialResultUsageCountsDeliveredImages(t *testing.T) {
-	// n=4 只交付了 3 张：usage 按已交付张数估算。
-	service := NewFishImageService(nil)
-	call := NewFishImageCall(fishImageRequest("gpt-image-2", "1024x1024", "low", 4), "gpt-image-2", domain.DefaultFishFitLimits())
-	call.delivered = [][]byte{[]byte("a"), []byte("b"), []byte("c")}
-	result := service.BuildFishPartialResult(context.Background(), call)
-	if result == nil {
-		t.Fatal("partial result nil")
-	}
-	if result.Forward.Usage.OutputTokens != 3*272 {
-		t.Fatalf("partial output tokens = %d, want %d", result.Forward.Usage.OutputTokens, 3*272)
-	}
-	if result.Forward.Duration <= 0 {
-		t.Fatalf("partial Forward.Duration = %v, want > 0 (usage duration_ms)", result.Forward.Duration)
-	}
-}

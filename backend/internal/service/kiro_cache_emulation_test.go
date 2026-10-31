@@ -724,6 +724,7 @@ func TestKiroMinimumCacheableTokens(t *testing.T) {
 		"gpt-5.6-sol":                         1024,
 		"gpt-5.6-terra":                       1024,
 		"gpt-5.6-luna":                        1024,
+		"kimi-k3":                             1024,
 		"claude-opus-4-8":                     4096,
 		"claude-opus-4-8-thinking":            4096,
 		"claude-opus-4-7":                     4096,
@@ -746,6 +747,8 @@ func TestKiroMinimumCacheableTokens(t *testing.T) {
 		"claude-sonnet-4-5-20250929-thinking": 1024,
 		"claude-haiku-4-5-20251001":           1024,
 		"claude-haiku-4-5-20251001-thinking":  1024,
+		"claude-haiku-5-5":                    1024,
+		"claude-haiku-5-5-thinking":           1024,
 	}
 	for _, model := range kiropkg.DefaultModels {
 		want, ok := expected[model.ID]

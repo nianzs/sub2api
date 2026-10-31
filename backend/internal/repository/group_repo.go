@@ -109,6 +109,7 @@ func createGroupRecord(ctx context.Context, client *dbent.Client, groupIn *servi
 		SetNillableMonthlyLimitUsd(groupIn.MonthlyLimitUSD).
 		SetAllowImageGeneration(groupIn.AllowImageGeneration).
 		SetAllowBatchImageGeneration(groupIn.AllowBatchImageGeneration).
+		SetImageCountBilling(groupIn.ImageCountBilling).
 		SetImageRateIndependent(groupIn.ImageRateIndependent).
 		SetImageRateMultiplier(groupIn.ImageRateMultiplier).
 		SetNillableImagePrice1k(groupIn.ImagePrice1K).
@@ -309,6 +310,7 @@ func (r *groupRepository) Update(ctx context.Context, groupIn *service.Group) er
 		SetNillableMonthlyLimitUsd(groupIn.MonthlyLimitUSD).
 		SetAllowImageGeneration(groupIn.AllowImageGeneration).
 		SetAllowBatchImageGeneration(groupIn.AllowBatchImageGeneration).
+		SetImageCountBilling(groupIn.ImageCountBilling).
 		SetImageRateIndependent(groupIn.ImageRateIndependent).
 		SetImageRateMultiplier(groupIn.ImageRateMultiplier).
 		SetNillableImagePrice1k(groupIn.ImagePrice1K).
