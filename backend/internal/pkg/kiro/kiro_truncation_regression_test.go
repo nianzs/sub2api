@@ -2,6 +2,7 @@ package kiro
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
@@ -392,10 +393,31 @@ func TestKiroOversizedToolInputLimit(t *testing.T) {
 		t.Fatalf("Unexpected error: %v", err)
 	}
 
+	var tooLarge *PayloadTooLargeError
+	if !errors.As(err, &tooLarge) || tooLarge.LimitBytes != kiroMaxPayloadBytes {
+		t.Fatalf("expected *PayloadTooLargeError with limit %d, got %#v", kiroMaxPayloadBytes, err)
+	}
+
 	if len(p.ConversationState.History) != originalHistoryCount {
 		t.Fatalf("Recent history was unexpectedly discarded")
 	}
 
 	t.Logf("Oversized request safely rejected: %v", err)
 
+}
+
+// 最近几轮里的用户正文无法裁剪也无法缩短时，构建应返回带类型的超限错误，
+// 供服务层映射成 400 上下文超限，而不是 502。
+func TestBuildKiroPayloadReturnsTypedErrorWhenRecentHistoryTooLarge(t *testing.T) {
+	body := []byte(`{"model":"claude-sonnet-4-5","max_tokens":1024,"messages":[` +
+		`{"role":"user","content":"` + strings.Repeat("X", kiroMaxPayloadBytes+1024) + `"},` +
+		`{"role":"assistant","content":"ok"},` +
+		`{"role":"user","content":"continue"}]}`)
+
+	_, err := BuildKiroPayloadWithContext(body, "claude-sonnet-4.5", "", "AI_EDITOR", nil)
+
+	var tooLarge *PayloadTooLargeError
+	if !errors.As(err, &tooLarge) || tooLarge.LimitBytes != kiroMaxPayloadBytes {
+		t.Fatalf("expected *PayloadTooLargeError with limit %d, got %v", kiroMaxPayloadBytes, err)
+	}
 }

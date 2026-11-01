@@ -174,7 +174,11 @@ func (s *GatewayService) ForwardAsResponses(
 				Kind:               "request_error",
 				Message:            safeErr,
 			})
-			writeResponsesError(c, http.StatusBadGateway, "server_error", "Upstream request failed")
+			if msg, ok := kiroPayloadTooLargeMessage(err); ok {
+				writeResponsesError(c, http.StatusBadRequest, "context_length_exceeded", msg)
+			} else {
+				writeResponsesError(c, http.StatusBadGateway, "server_error", "Upstream request failed")
+			}
 			return nil, fmt.Errorf("upstream request failed: %s", safeErr)
 		}
 	} else {

@@ -66,6 +66,44 @@ func resolveKiroUpstreamModel(mappedModel string) string {
 	return upstreamModel
 }
 
+// kiroPayloadTooLargeMessage 判断 err 是否为「裁掉旧历史后仍超过 Kiro 体积上限」，
+// 并给出面向客户端的错误文案。文案以 Anthropic 上下文超限错误的 "prompt is too long"
+// 开头，让 Claude Code 等客户端按上下文问题处理（压缩），而不是把它当 5xx 原样重试。
+func kiroPayloadTooLargeMessage(err error) (string, bool) {
+	var tooLarge *kiropkg.PayloadTooLargeError
+	if !errors.As(err, &tooLarge) {
+		return "", false
+	}
+	return fmt.Sprintf("prompt is too long: request exceeds the Kiro upstream limit of %d bytes even after trimming old history", tooLarge.LimitBytes), true
+}
+
+// logKiroStreamInterrupted 记录 Kiro 流转换中途失败的真实原因。客户端只收到
+// "stream interrupted"，网关侧只看到 "missing terminal event"，不记这里就无从排查。
+func logKiroStreamInterrupted(ctx context.Context, account *Account, mappedModel, requestModel string, err error) {
+	logger.FromContext(ctx).Warn("kiro.stream_interrupted",
+		zap.Int64("account_id", account.ID),
+		zap.String("account_name", account.Name),
+		zap.String("mapped_model", mappedModel),
+		zap.String("requested_model", requestModel),
+		zap.Error(err),
+	)
+}
+
+// writeKiroMessagesRequestError 写 Messages 协议的请求失败响应：请求体超限返回 400，其余保持 502。
+func writeKiroMessagesRequestError(c *gin.Context, err error) {
+	status, errType, message := http.StatusBadGateway, "api_error", "Upstream request failed"
+	if msg, ok := kiroPayloadTooLargeMessage(err); ok {
+		status, errType, message = http.StatusBadRequest, "invalid_request_error", msg
+	}
+	c.JSON(status, gin.H{
+		"type": "error",
+		"error": gin.H{
+			"type":    errType,
+			"message": message,
+		},
+	})
+}
+
 func (s *GatewayService) forwardKiroMessages(ctx context.Context, c *gin.Context, account *Account, parsed *ParsedRequest, startTime time.Time) (*ForwardResult, error) {
 	if account == nil || parsed == nil {
 		return nil, fmt.Errorf("kiro forward: missing account or request")
@@ -122,13 +160,7 @@ func (s *GatewayService) forwardKiroMessages(ctx context.Context, c *gin.Context
 				Kind:               "request_error",
 				Message:            safeErr,
 			})
-			c.JSON(http.StatusBadGateway, gin.H{
-				"type": "error",
-				"error": gin.H{
-					"type":    "api_error",
-					"message": "Upstream request failed",
-				},
-			})
+			writeKiroMessagesRequestError(c, err)
 			return nil, fmt.Errorf("kiro upstream request failed: %s", safeErr)
 		}
 		defer func() { _ = resp.Body.Close() }()
@@ -200,13 +232,7 @@ func (s *GatewayService) forwardKiroMessages(ctx context.Context, c *gin.Context
 				return nil, failoverErr
 			}
 			safeErr := sanitizeUpstreamErrorMessage(webSearchErr.Error())
-			c.JSON(http.StatusBadGateway, gin.H{
-				"type": "error",
-				"error": gin.H{
-					"type":    "api_error",
-					"message": "Upstream request failed",
-				},
-			})
+			writeKiroMessagesRequestError(c, webSearchErr)
 			return nil, fmt.Errorf("kiro upstream request failed: %s", safeErr)
 		}
 	}
@@ -227,13 +253,7 @@ func (s *GatewayService) forwardKiroMessages(ctx context.Context, c *gin.Context
 			return nil, failoverErr
 		}
 		safeErr := sanitizeUpstreamErrorMessage(err.Error())
-		c.JSON(http.StatusBadGateway, gin.H{
-			"type": "error",
-			"error": gin.H{
-				"type":    "api_error",
-				"message": "Upstream request failed",
-			},
-		})
+		writeKiroMessagesRequestError(c, err)
 		return nil, fmt.Errorf("kiro upstream request failed: %s", safeErr)
 	}
 	defer func() { _ = resp.Body.Close() }()
@@ -304,6 +324,7 @@ func (s *GatewayService) openKiroAnthropicStreamResponse(ctx context.Context, ac
 		go func() {
 			streamErr := s.streamKiroWebSearchAsAnthropic(upstreamCtx, account, anthropicBody, mappedModel, requestModel, token, inputTokens, headers, pw, plan)
 			if streamErr != nil {
+				logKiroStreamInterrupted(upstreamCtx, account, mappedModel, requestModel, streamErr)
 				_ = pw.CloseWithError(streamErr)
 				return
 			}
@@ -347,6 +368,7 @@ func (s *GatewayService) openKiroAnthropicStreamResponse(ctx context.Context, ac
 		defer func() { _ = resp.Body.Close() }()
 		_, streamErr := kiropkg.StreamEventStreamAsAnthropicWithContext(upstreamCtx, resp.Body, pw, requestModel, inputTokens, requestCtx)
 		if streamErr != nil {
+			logKiroStreamInterrupted(upstreamCtx, account, mappedModel, requestModel, streamErr)
 			_, _ = io.WriteString(pw, "event: error\ndata: {\"type\":\"error\",\"error\":{\"type\":\"api_error\",\"message\":\"stream interrupted\"}}\n\n")
 			_ = pw.CloseWithError(streamErr)
 			return

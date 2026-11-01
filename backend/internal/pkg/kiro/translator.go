@@ -2013,6 +2013,16 @@ func truncateUTF8(s string, limit int) string {
 	return s[:limit]
 }
 
+// PayloadTooLargeError 表示丢掉可裁剪的旧历史后 payload 仍超过 Kiro 上限。
+// 同一请求重试必然失败，调用方应按上下文超限（400）报给客户端，而不是 5xx。
+type PayloadTooLargeError struct {
+	LimitBytes int
+}
+
+func (e *PayloadTooLargeError) Error() string {
+	return fmt.Sprintf("kiro payload exceeds %d bytes without a safe history cut", e.LimitBytes)
+}
+
 // truncateKiroPayloadToLimit 在序列化体积超过 kiroMaxPayloadBytes 时丢掉最旧历史。
 // 系统提示对、最近若干轮和当前消息保留。只有确实丢掉旧轮次时才插入一次占位。
 // 丢掉之后仍然超限，则静默缩短当前消息正文和仍保留的工具结果，不附加截断说明。
@@ -2110,10 +2120,7 @@ func truncateKiroPayloadToLimit(payload *KiroPayload, hasPriming bool) error {
 		}
 	}
 
-	return fmt.Errorf(
-		"kiro payload exceeds %d bytes without a safe history cut",
-		kiroMaxPayloadBytes,
-	)
+	return &PayloadTooLargeError{LimitBytes: kiroMaxPayloadBytes}
 }
 
 func dropLeadingKiroAssistantHistory(tail []KiroHistoryMessage) []KiroHistoryMessage {
