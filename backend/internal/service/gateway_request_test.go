@@ -34,6 +34,14 @@ func TestParseGatewayRequest_ThinkingEnabled(t *testing.T) {
 	require.True(t, parsed.ThinkingEnabled)
 }
 
+func TestValidateClaude55RequestForAccountSkipsKiro(t *testing.T) {
+	body := []byte(`{"model":"claude-opus-5-5","thinking":{"type":"enabled"},"messages":[{"role":"user","content":"hi"}]}`)
+
+	require.Error(t, validateClaude55Request(body, "claude-opus-5-5"))
+	require.NoError(t, validateClaude55RequestForAccount(body, &Account{Platform: PlatformKiro}, "claude-opus-5-5"))
+	require.Error(t, validateClaude55RequestForAccount(body, &Account{Platform: PlatformAnthropic}, "claude-opus-5-5"))
+}
+
 func TestParseGatewayRequest_ThinkingAdaptiveEnabled(t *testing.T) {
 	body := []byte(`{"model":"claude-sonnet-4-5","thinking":{"type":"adaptive"},"messages":[{"content":"hi"}]}`)
 	parsed, err := ParseGatewayRequest(NewRequestBodyRef(body), "")

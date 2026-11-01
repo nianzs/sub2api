@@ -775,3 +775,81 @@ func TestClaude55BridgeUsesMappedModelBeforeThinkingConversion(t *testing.T) {
 		}
 	}
 }
+
+// Kiro 直连会把客户端的 thinking.enabled/disabled 改写成自己的 adaptive 载荷，
+// 所以 chat/responses 兼容入口只对 Anthropic 官方账号执行 Claude 5.5 校验。
+func TestClaude55BridgeValidatesThinkingOnlyForAnthropic(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	thinkingFields := map[string]string{
+		"enabled":  `"thinking":{"type":"enabled","budget_tokens":16000}`,
+		"disabled": `"thinking":{"type":"disabled"}`,
+	}
+	for _, platform := range []string{PlatformKiro, PlatformAnthropic} {
+		for thinkingType, thinkingField := range thinkingFields {
+			for _, chat := range []bool{false, true} {
+				endpoint := "responses"
+				if chat {
+					endpoint = "chat"
+				}
+				t.Run(platform+"/"+thinkingType+"/"+endpoint, func(t *testing.T) {
+					path := "/v1/responses"
+					body := `{"model":"public-claude","input":"hello",` + thinkingField + `}`
+					if chat {
+						path = "/v1/chat/completions"
+						body = `{"model":"public-claude","messages":[{"role":"user","content":"hello"}],` + thinkingField + `}`
+					}
+					rec := httptest.NewRecorder()
+					c, _ := gin.CreateTestContext(rec)
+					c.Request = httptest.NewRequest(http.MethodPost, path, strings.NewReader(body))
+					c.Request.Header.Set("Content-Type", "application/json")
+
+					upstream := &httpUpstreamRecorder{resp: &http.Response{
+						StatusCode: http.StatusOK,
+						Header:     http.Header{"Content-Type": []string{"application/vnd.amazon.eventstream"}},
+						Body:       io.NopCloser(bytes.NewReader(kiroChatTestEventStream(t, "ok", 10, 2))),
+					}}
+					svc := &GatewayService{
+						cfg: &config.Config{Gateway: config.GatewayConfig{
+							MaxLineSize: defaultMaxLineSize,
+						}},
+						httpUpstream:        upstream,
+						kiroCooldownStore:   noopKiroChatCooldownStore{},
+						tlsFPProfileService: &TLSFingerprintProfileService{},
+					}
+					account := &Account{
+						ID:          802,
+						Name:        "claude55-bridge",
+						Platform:    platform,
+						Type:        AccountTypeAPIKey,
+						Concurrency: 1,
+						Credentials: map[string]any{
+							"api_key":       "ksk_test",
+							"model_mapping": map[string]any{"public-claude": "claude-opus-5-5"},
+						},
+					}
+
+					var err error
+					if chat {
+						_, err = svc.ForwardAsChatCompletions(context.Background(), c, account, []byte(body), &ParsedRequest{})
+					} else {
+						_, err = svc.ForwardAsResponses(context.Background(), c, account, []byte(body), &ParsedRequest{})
+					}
+
+					if platform == PlatformAnthropic {
+						require.Error(t, err)
+						require.Equal(t, http.StatusBadRequest, rec.Code)
+						require.Contains(t, rec.Body.String(), "claude-opus-5-5 requires adaptive thinking")
+						require.Nil(t, upstream.lastReq)
+						return
+					}
+					require.NoError(t, err)
+					require.Equal(t, http.StatusOK, rec.Code)
+					require.Len(t, upstream.requests, 1)
+					require.Equal(t, "claude-opus-5.5", gjson.GetBytes(upstream.lastBody, "conversationState.currentMessage.userInputMessage.modelId").String())
+					require.Equal(t, "adaptive", gjson.GetBytes(upstream.lastBody, "additionalModelRequestFields.thinking.type").String())
+					require.NotEmpty(t, gjson.GetBytes(upstream.lastBody, "additionalModelRequestFields.output_config.effort").String())
+				})
+			}
+		}
+	}
+}
