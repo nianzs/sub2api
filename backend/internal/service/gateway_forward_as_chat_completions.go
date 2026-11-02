@@ -135,11 +135,7 @@ func (s *GatewayService) ForwardAsChatCompletions(
 				Kind:               "request_error",
 				Message:            safeErr,
 			})
-			if msg, ok := kiroPayloadTooLargeMessage(err); ok {
-				writeGatewayCCError(c, http.StatusBadRequest, "invalid_request_error", msg)
-			} else {
-				writeGatewayCCError(c, http.StatusBadGateway, "server_error", "Upstream request failed")
-			}
+			writeGatewayCCError(c, http.StatusBadGateway, "server_error", "Upstream request failed")
 			return nil, fmt.Errorf("upstream request failed: %s", safeErr)
 		}
 	} else {
@@ -210,6 +206,12 @@ func (s *GatewayService) ForwardAsChatCompletions(
 			}
 		}
 
+		if account.Platform == PlatformKiro {
+			if fixed, ok := kiroContextLengthClientMessage(resp.StatusCode, respBody); ok {
+				writeGatewayCCError(c, http.StatusBadRequest, "invalid_request_error", fixed)
+				return nil, fmt.Errorf("upstream error: %d %s", resp.StatusCode, upstreamMsg)
+			}
+		}
 		writeGatewayCCError(c, mapUpstreamStatusCode(resp.StatusCode), "server_error", upstreamMsg)
 		return nil, fmt.Errorf("upstream error: %d %s", resp.StatusCode, upstreamMsg)
 	}

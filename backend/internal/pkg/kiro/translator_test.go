@@ -335,10 +335,11 @@ func TestBuildKiroPayloadKeepsLargeToolResultWithoutTruncationNotice(t *testing.
 	got := gjson.GetBytes(payload, "conversationState.currentMessage.userInputMessage.userInputMessageContext.toolResults.0.content.0.text").String()
 	require.Equal(t, toolOutput, got)
 	require.NotContains(t, string(payload), "Output truncated for Kiro context")
-	require.NotContains(t, string(payload), kiroHistoryTruncationPlaceholder)
+	require.NotContains(t, string(payload), "truncated")
 }
 
-func TestBuildKiroPayloadDropsOldestHistoryWhenPayloadExceedsLimit(t *testing.T) {
+// 本地不裁历史：超大请求原样发给 Kiro，由上游判定是否太长。
+func TestBuildKiroPayloadKeepsAllHistoryWhenPayloadIsLarge(t *testing.T) {
 	chunk := strings.Repeat("x", 180*1024)
 	messages := []map[string]any{
 		{"role": "user", "content": "EARLY_MARKER"},
@@ -361,16 +362,17 @@ func TestBuildKiroPayloadDropsOldestHistoryWhenPayloadExceedsLimit(t *testing.T)
 	require.NoError(t, err)
 	payload := kiroBuildResult.Payload
 
-	require.LessOrEqual(t, len(payload), kiroMaxPayloadBytes)
+	require.Greater(t, len(payload), 8*180*1024)
 	require.Equal(t, "CURRENT_MARKER", gjson.GetBytes(payload, "conversationState.currentMessage.userInputMessage.content").String())
 	require.Contains(t, gjson.GetBytes(payload, "conversationState.history.0.userInputMessage.content").String(), "You must never say that you are Kiro")
 	require.Equal(t, "I will follow these instructions.", gjson.GetBytes(payload, "conversationState.history.1.assistantResponseMessage.content").String())
-	require.Equal(t, 1, strings.Count(string(payload), kiroHistoryTruncationPlaceholder))
-	require.NotContains(t, string(payload), "EARLY_MARKER")
+	require.Equal(t, "EARLY_MARKER", gjson.GetBytes(payload, "conversationState.history.2.userInputMessage.content").String())
+	require.Len(t, gjson.GetBytes(payload, "conversationState.history").Array(), 2+2+8*2)
+	require.NotContains(t, string(payload), "truncated")
 }
 
-func TestBuildKiroPayloadSilentlyShrinksOversizedCurrentToolResult(t *testing.T) {
-	toolOutput := strings.Repeat("z", kiroMaxPayloadBytes+64*1024)
+func TestBuildKiroPayloadKeepsOversizedCurrentToolResult(t *testing.T) {
+	toolOutput := strings.Repeat("z", 1000*1024)
 	body := []byte(fmt.Sprintf(`{
 		"model":"claude-sonnet-4-5",
 		"messages":[
@@ -384,12 +386,9 @@ func TestBuildKiroPayloadSilentlyShrinksOversizedCurrentToolResult(t *testing.T)
 	require.NoError(t, err)
 	payload := kiroBuildResult.Payload
 
-	require.LessOrEqual(t, len(payload), kiroMaxPayloadBytes)
 	got := gjson.GetBytes(payload, "conversationState.currentMessage.userInputMessage.userInputMessageContext.toolResults.0.content.0.text").String()
-	require.NotEmpty(t, got)
-	require.Less(t, len(got), len(toolOutput))
-	require.NotContains(t, got, "Output truncated for Kiro context")
-	require.NotContains(t, string(payload), kiroHistoryTruncationPlaceholder)
+	require.Equal(t, toolOutput, got)
+	require.NotContains(t, string(payload), "truncated")
 }
 
 func TestBuildKiroPayloadInjectsChunkedWritePolicyIntoSystemPrompt(t *testing.T) {
@@ -2399,7 +2398,7 @@ func TestBuildKiroPayloadKeepsToolPairsReusingSameID(t *testing.T) {
 	require.Equal(t, "SECOND_OUTPUT", gjson.GetBytes(payload, "conversationState.currentMessage.userInputMessage.userInputMessageContext.toolResults.0.content.0.text").String())
 }
 
-func TestBuildKiroPayloadKeepsToolPairingWhenHistoryIsTruncated(t *testing.T) {
+func TestBuildKiroPayloadKeepsAllToolPairsForLargeHistory(t *testing.T) {
 	toolOutput := strings.Repeat("x", 120*1024)
 	messages := []map[string]any{{"role": "user", "content": "EARLY_MARKER"}}
 	const rounds = 12
@@ -2424,45 +2423,14 @@ func TestBuildKiroPayloadKeepsToolPairingWhenHistoryIsTruncated(t *testing.T) {
 	require.NoError(t, err)
 	payload := kiroBuildResult.Payload
 
-	require.LessOrEqual(t, len(payload), kiroMaxPayloadBytes)
-	require.Equal(t, 1, strings.Count(string(payload), kiroHistoryTruncationPlaceholder))
-	require.NotContains(t, string(payload), "EARLY_MARKER")
+	require.Contains(t, string(payload), "EARLY_MARKER")
+	require.NotContains(t, string(payload), "truncated")
 	requireKiroToolPairing(t, payload)
+	require.Equal(t, rounds, strings.Count(string(payload), `"toolResults"`))
 
-	// 截断只丢最旧的轮次：最近的配对仍然完整保留。
 	lastID := fmt.Sprintf("call_%024d", rounds-1)
 	require.Equal(t, lastID, gjson.GetBytes(payload, "conversationState.currentMessage.userInputMessage.userInputMessageContext.toolResults.0.toolUseId").String())
 	require.Equal(t, toolOutput, gjson.GetBytes(payload, "conversationState.currentMessage.userInputMessage.userInputMessageContext.toolResults.0.content.0.text").String())
-	require.GreaterOrEqual(t, strings.Count(string(payload), `"toolResults"`), 2)
-}
-
-func TestTruncateKiroPayloadToLimitKeepsCurrentToolPairWhenHistoryStartsWithAssistant(t *testing.T) {
-	payload := &KiroPayload{ConversationState: KiroConversationState{
-		History: []KiroHistoryMessage{{
-			AssistantResponseMessage: &KiroAssistantResponseMessage{
-				Content:  " ",
-				ToolUses: []KiroToolUse{{ToolUseID: "toolu_1", Name: "read_file", Input: map[string]any{}}},
-			},
-		}},
-		CurrentMessage: KiroCurrentMessage{UserInputMessage: KiroUserInputMessage{
-			Content: "Tool results provided.",
-			UserInputMessageContext: &KiroUserInputMessageContext{ToolResults: []KiroToolResult{{
-				ToolUseID: "toolu_1",
-				Status:    "success",
-				Content:   []KiroTextContent{{Text: strings.Repeat("z", kiroMaxPayloadBytes+1024)}},
-			}}},
-		}},
-	}}
-
-	require.NoError(t, truncateKiroPayloadToLimit(payload, false))
-
-	raw, err := json.Marshal(payload)
-	require.NoError(t, err)
-	require.LessOrEqual(t, len(raw), kiroMaxPayloadBytes)
-	requireKiroToolPairing(t, raw)
-	// 开头的 assistant 不能被丢：它带着当前消息 toolResult 对应的 toolUse。
-	require.Equal(t, "toolu_1", gjson.GetBytes(raw, "conversationState.history.0.assistantResponseMessage.toolUses.0.toolUseId").String())
-	require.NotEmpty(t, gjson.GetBytes(raw, "conversationState.currentMessage.userInputMessage.userInputMessageContext.toolResults.0.content.0.text").String())
 }
 
 func TestMergeAdjacentMessagesUsesDoubleNewline(t *testing.T) {

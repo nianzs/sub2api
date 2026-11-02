@@ -5,6 +5,7 @@ package service
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -53,17 +54,19 @@ func forwardKiroMessagesForTest(t *testing.T, svc *GatewayService, c *gin.Contex
 	return err
 }
 
-// 最近几轮里的用户正文裁不掉也缩不短时，Kiro 各入口都应返回 400 上下文超限，
-// 不发上游请求，也不再返回会被客户端原样重试的 502。
-func TestKiroOversizeRequestReturnsContextLengthError(t *testing.T) {
+// 本地不做体积预检、不裁历史，超大请求原样发给 Kiro；上游以 400 报「输入太长」时，
+// 各入口返回 400（不是会被原样重试的 502）和固定文案，不回显上游原文（与 kiro.rs 一致）。
+// 客户端是否压缩靠 usage 上报（contextUsageEvent 换算的 input_tokens），不靠这里的错误文案。
+func TestKiroOversizeRequestPassesThroughToUpstream(t *testing.T) {
 	gin.SetMode(gin.TestMode)
-	big := strings.Repeat("X", 900*1024+1024)
+	big := strings.Repeat("X", 1200*1024)
 	chatHistory := `{"role":"user","content":"` + big + `"},{"role":"assistant","content":"ok"},{"role":"user","content":"continue"}`
+	upstreamBody := `{"message":"Input is too long.","reason":"CONTENT_LENGTH_EXCEEDS_THRESHOLD"}`
 
 	anthropicError := func(t *testing.T, body string) {
 		require.Equal(t, "error", gjson.Get(body, "type").String())
 		require.Equal(t, "invalid_request_error", gjson.Get(body, "error.type").String())
-		require.True(t, strings.HasPrefix(gjson.Get(body, "error.message").String(), "prompt is too long"), body)
+		require.Equal(t, kiroContextWindowFullMessage, gjson.Get(body, "error.message").String(), body)
 	}
 	cases := []struct {
 		name    string
@@ -96,7 +99,7 @@ func TestKiroOversizeRequestReturnsContextLengthError(t *testing.T) {
 			},
 			check: func(t *testing.T, body string) {
 				require.Equal(t, "invalid_request_error", gjson.Get(body, "error.type").String())
-				require.True(t, strings.HasPrefix(gjson.Get(body, "error.message").String(), "prompt is too long"), body)
+				require.Equal(t, kiroContextWindowFullMessage, gjson.Get(body, "error.message").String(), body)
 			},
 		},
 		{
@@ -111,14 +114,18 @@ func TestKiroOversizeRequestReturnsContextLengthError(t *testing.T) {
 				return err
 			},
 			check: func(t *testing.T, body string) {
-				require.Equal(t, "context_length_exceeded", gjson.Get(body, "error.code").String())
-				require.True(t, strings.HasPrefix(gjson.Get(body, "error.message").String(), "prompt is too long"), body)
+				require.Equal(t, "invalid_request_error", gjson.Get(body, "error.code").String())
+				require.Equal(t, kiroContextWindowFullMessage, gjson.Get(body, "error.message").String(), body)
 			},
 		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			upstream := &httpUpstreamRecorder{}
+			upstream := &httpUpstreamRecorder{resp: &http.Response{
+				StatusCode: http.StatusBadRequest,
+				Header:     http.Header{"Content-Type": []string{"application/json"}},
+				Body:       io.NopCloser(strings.NewReader(upstreamBody)),
+			}}
 			svc := newKiroErrorReportingTestService(upstream)
 			body := []byte(tc.body)
 			c, rec := newKiroErrorReportingTestContext(tc.path, body)
@@ -126,9 +133,10 @@ func TestKiroOversizeRequestReturnsContextLengthError(t *testing.T) {
 			err := tc.forward(t, svc, c, newKiroErrorReportingTestAccount(), body)
 
 			require.Error(t, err)
+			require.NotNil(t, upstream.lastReq, "oversize request must be sent to the upstream")
+			require.Contains(t, string(upstream.lastBody), big, "request must reach the upstream untrimmed")
 			require.Equal(t, http.StatusBadRequest, rec.Code, rec.Body.String())
 			tc.check(t, rec.Body.String())
-			require.Nil(t, upstream.lastReq, "oversize request must not reach the upstream")
 		})
 	}
 }
@@ -161,4 +169,70 @@ func TestKiroStreamInterruptionIsLogged(t *testing.T) {
 	require.True(t, logs.ContainsMessage("kiro.stream_interrupted"), "stream conversion error was not logged")
 	require.True(t, logs.ContainsFieldValue("account_id", "803"))
 	require.True(t, logs.ContainsFieldValue("error", "unexpected EOF"))
+}
+
+func kiroCompactionRequestBody(toolOutput string) []byte {
+	output, _ := json.Marshal(toolOutput)
+	return []byte(`{"model":"claude-sonnet-4-5","stream":true,"input":[` +
+		`{"type":"message","role":"user","content":"start"},` +
+		`{"type":"function_call","call_id":"call_1","name":"exec","arguments":"{}"},` +
+		`{"type":"function_call_output","call_id":"call_1","output":` + string(output) + `},` +
+		`{"type":"compaction_trigger"}]}`)
+}
+
+func kiroContextLengthUpstreamResponse() *http.Response {
+	return &http.Response{
+		StatusCode: http.StatusBadRequest,
+		Header:     http.Header{"Content-Type": []string{"application/json"}},
+		Body:       io.NopCloser(strings.NewReader(`{"message":"Input is too long.","reason":"CONTENT_LENGTH_EXCEEDS_THRESHOLD"}`)),
+	}
+}
+
+// Codex 压缩请求被 Kiro 以超限拒绝时，截断工具输出重试一次（与 kiro.rs 一致），成功则返回 compaction 项。
+func TestKiroCompactionRetriesWithBoundedToolOutputs(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	summary := kiroChatTestEventStreamFrame(t, "assistantResponseEvent", map[string]any{
+		"assistantResponseEvent": map[string]any{"content": "<summary>ok</summary>"},
+	})
+	upstream := &httpUpstreamRecorder{responses: []*http.Response{
+		kiroContextLengthUpstreamResponse(),
+		{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"application/vnd.amazon.eventstream"}},
+			Body:       io.NopCloser(bytes.NewReader(summary)),
+		},
+	}}
+	svc := newKiroErrorReportingTestService(upstream)
+	body := kiroCompactionRequestBody(strings.Repeat("R", 60*1024))
+	c, rec := newKiroErrorReportingTestContext("/v1/responses", body)
+
+	_, err := svc.ForwardAsResponses(context.Background(), c, newKiroErrorReportingTestAccount(), body, &ParsedRequest{})
+
+	require.NoError(t, err)
+	require.Len(t, upstream.bodies, 2)
+	require.NotContains(t, string(upstream.bodies[0]), "tool output truncated for compaction retry")
+	require.Contains(t, string(upstream.bodies[1]), "tool output truncated for compaction retry")
+	require.Contains(t, rec.Body.String(), `"type":"compaction"`)
+	require.Contains(t, rec.Body.String(), "response.completed")
+}
+
+// 重试后仍超限：以 response.failed + context_length_exceeded 结束，不再发第三次。
+func TestKiroCompactionFailsWhenRetryStillOverflows(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	upstream := &httpUpstreamRecorder{responses: []*http.Response{
+		kiroContextLengthUpstreamResponse(),
+		kiroContextLengthUpstreamResponse(),
+	}}
+	svc := newKiroErrorReportingTestService(upstream)
+	body := kiroCompactionRequestBody(strings.Repeat("R", 60*1024))
+	c, rec := newKiroErrorReportingTestContext("/v1/responses", body)
+
+	_, err := svc.ForwardAsResponses(context.Background(), c, newKiroErrorReportingTestAccount(), body, &ParsedRequest{})
+
+	require.Error(t, err)
+	require.Len(t, upstream.bodies, 2)
+	out := rec.Body.String()
+	require.Contains(t, out, "response.failed")
+	require.Contains(t, out, `"code":"context_length_exceeded"`)
+	require.NotContains(t, out, "Input is too long")
 }

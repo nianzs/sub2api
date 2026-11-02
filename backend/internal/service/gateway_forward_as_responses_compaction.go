@@ -2,7 +2,9 @@ package service
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"strings"
 	"time"
@@ -46,6 +48,25 @@ func (s *GatewayService) handleResponsesCompactionResponse(
 	startTime time.Time,
 	clientStream bool,
 ) (*ForwardResult, error) {
+	return s.handleResponsesCompactionResponseWithRetry(resp, c, originalModel, mappedModel, reasoningEffort, startTime, clientStream, nil)
+}
+
+// handleResponsesCompactionResponseWithRetry 同 handleResponsesCompactionResponse，另外按
+// 摘要的结束原因定终态（与 kiro.rs responses_compaction.rs 的 validate 一致）：
+//   - max_tokens：摘要被截断，不当成功，返回 incomplete；
+//   - model_context_window_exceeded：上下文已满。retry 非空（Kiro）时截断工具输出重试一次，
+//     否则返回 failed / context_length_exceeded；
+//   - refusal：返回 failed / content_filter。
+func (s *GatewayService) handleResponsesCompactionResponseWithRetry(
+	resp *http.Response,
+	c *gin.Context,
+	originalModel string,
+	mappedModel string,
+	reasoningEffort *string,
+	startTime time.Time,
+	clientStream bool,
+	retry func() (*http.Response, error),
+) (*ForwardResult, error) {
 	requestID := resp.Header.Get("x-request-id")
 
 	// 大上下文摘要期间上游可能长时间不产出可见内容，而下游在拿到终态事件前收不到
@@ -59,9 +80,59 @@ func (s *GatewayService) handleResponsesCompactionResponse(
 	}
 
 	finalResp, usage := s.collectAnthropicResponseFromSSE(resp.Body, requestID, heartbeat)
+	if finalResp != nil && retry != nil &&
+		apicompat.AnthropicStopReasonString(finalResp.StopReason) == compactionStopContextWindowExceeded {
+		retryResp, err := retry()
+		switch {
+		case errors.Is(err, errKiroCompactionNoRetry):
+			// 没有可截的工具输出：保留首轮结果，下面按上下文已满失败。
+		case err != nil:
+			return nil, s.failCompaction(c, clientStream, http.StatusBadGateway, "Upstream request failed", requestID)
+		default:
+			defer func() { _ = retryResp.Body.Close() }()
+			if retryResp.StatusCode >= 400 {
+				body, _ := io.ReadAll(io.LimitReader(retryResp.Body, 2<<20))
+				if _, ok := kiroContextLengthClientMessage(retryResp.StatusCode, body); ok {
+					return nil, s.failCompactionWithCode(c, clientStream, http.StatusBadRequest,
+						"context_length_exceeded", kiroCompactionOverflowMessage, requestID)
+				}
+				return nil, s.failCompaction(c, clientStream, mapUpstreamStatusCode(retryResp.StatusCode), "Upstream request failed", requestID)
+			}
+			retryFinal, retryUsage := s.collectAnthropicResponseFromSSE(retryResp.Body, requestID, heartbeat)
+			usage = addClaudeUsage(usage, retryUsage)
+			finalResp = retryFinal
+		}
+	}
 	if finalResp == nil {
 		return nil, s.failCompaction(c, clientStream, http.StatusBadGateway,
 			"Upstream stream ended without a response", requestID)
+	}
+
+	switch apicompat.AnthropicStopReasonString(finalResp.StopReason) {
+	case "max_tokens":
+		if err := writeCompactionIncomplete(c, clientStream, originalModel, usage); err != nil {
+			return nil, s.failCompaction(c, clientStream, http.StatusBadGateway,
+				"Failed to build compaction response", requestID)
+		}
+		logger.L().Warn("forward_as_responses compaction: summary hit max_tokens, reported as incomplete",
+			zap.String("request_id", requestID),
+			zap.String("model", mappedModel),
+		)
+		return &ForwardResult{
+			RequestID:       requestID,
+			Usage:           usage,
+			Model:           originalModel,
+			UpstreamModel:   mappedModel,
+			ReasoningEffort: reasoningEffort,
+			Stream:          clientStream,
+			Duration:        time.Since(startTime),
+		}, nil
+	case compactionStopContextWindowExceeded:
+		return nil, s.failCompactionWithCode(c, clientStream, http.StatusBadRequest,
+			"context_length_exceeded", kiroCompactionOverflowMessage, requestID)
+	case "refusal":
+		return nil, s.failCompactionWithCode(c, clientStream, http.StatusBadRequest,
+			"content_filter", "upstream content filter refused the compaction request", requestID)
 	}
 
 	summary := anthropicResponseText(finalResp)
@@ -129,17 +200,76 @@ func (s *GatewayService) failCompaction(
 	message string,
 	requestID string,
 ) error {
+	return s.failCompactionWithCode(c, clientStream, statusCode, "", message, requestID)
+}
+
+// failCompactionWithCode 同 failCompaction，但用指定的错误码（如 context_length_exceeded、
+// content_filter）。code 为空时沿用默认：流式 upstream_error，非流式 server_error。
+func (s *GatewayService) failCompactionWithCode(
+	c *gin.Context,
+	clientStream bool,
+	statusCode int,
+	code string,
+	message string,
+	requestID string,
+) error {
 	logger.L().Warn("forward_as_responses compaction: failed",
 		zap.String("request_id", requestID),
+		zap.String("code", code),
 		zap.String("message", message),
 	)
 	if clientStream {
+		if code == "" {
+			code = "upstream_error"
+		}
 		writeCompactionSSEHeaders(c)
-		writeOpenAICompactSSEFailureMessage(c, statusCode, "upstream_error", message)
+		writeOpenAICompactSSEFailureMessage(c, statusCode, code, message)
 	} else {
-		writeResponsesError(c, statusCode, "server_error", message)
+		if code == "" {
+			code = "server_error"
+		}
+		writeResponsesError(c, statusCode, code, message)
 	}
 	return fmt.Errorf("compaction failed: %s", message)
+}
+
+// compactionStopContextWindowExceeded 是上游上下文已满时的 stop_reason。
+const compactionStopContextWindowExceeded = "model_context_window_exceeded"
+
+// writeCompactionIncomplete 在摘要被 max_tokens 截断时回写 incomplete 终态（无 output），
+// 让 Codex 走它自己的压缩未完成分支，而不是拿残缺摘要替换前文。与 kiro.rs 一致。
+func writeCompactionIncomplete(c *gin.Context, clientStream bool, model string, usage ClaudeUsage) error {
+	inputTokens := usage.InputTokens + usage.CacheCreationInputTokens + usage.CacheReadInputTokens
+	response := map[string]any{
+		"id":                 "resp_" + strings.ReplaceAll(uuid.NewString(), "-", ""),
+		"object":             "response",
+		"created_at":         time.Now().Unix(),
+		"model":              model,
+		"status":             "incomplete",
+		"incomplete_details": map[string]any{"reason": "max_output_tokens"},
+		"output":             []any{},
+		"usage": map[string]any{
+			"input_tokens":  inputTokens,
+			"output_tokens": usage.OutputTokens,
+			"total_tokens":  inputTokens + usage.OutputTokens,
+		},
+	}
+	if !clientStream {
+		c.JSON(http.StatusOK, response)
+		return nil
+	}
+	payload, err := json.Marshal(map[string]any{
+		"type":            "response.incomplete",
+		"sequence_number": 0,
+		"response":        response,
+	})
+	if err != nil {
+		return err
+	}
+	writeCompactionSSEHeaders(c)
+	_, _ = c.Writer.Write([]byte("event: response.incomplete\ndata: " + string(payload) + "\n\n"))
+	c.Writer.Flush()
+	return nil
 }
 
 func writeCompactionSSEHeaders(c *gin.Context) {

@@ -23,8 +23,11 @@ const (
 	kiroErrorBadRequestInvalidModel = "bad_request_invalid_model"
 	kiroErrorBadRequestAuth         = "bad_request_auth"
 	kiroErrorBadRequestQuota        = "bad_request_quota"
-	kiroErrorBadRequestUnknown      = "bad_request_unknown"
-	kiroErrorRefreshTokenInvalid    = "refresh_token_invalid"
+	// kiroErrorBadRequestContextLength 是上游的「输入太长」：单字段超限报
+	// CONTENT_LENGTH_EXCEEDS_THRESHOLD，整体超限报 "Input is too long"。
+	kiroErrorBadRequestContextLength = "bad_request_context_length"
+	kiroErrorBadRequestUnknown       = "bad_request_unknown"
+	kiroErrorRefreshTokenInvalid     = "refresh_token_invalid"
 
 	kiroQuotaStateNormal           = "normal"
 	kiroQuotaStateCreditsExhausted = "credits_exhausted"
@@ -98,6 +101,8 @@ func classifyKiroError(err error) kiroErrorClassification {
 
 func classifyKiroBadRequest(trimmed, lower string) kiroErrorClassification {
 	switch {
+	case looksLikeKiroContextLengthError(lower):
+		return kiroErrorClassification{Category: kiroErrorBadRequestContextLength, StatusCode: http.StatusBadRequest, Message: trimmed}
 	case looksLikeKiroBadRequestSchemaError(lower):
 		return kiroErrorClassification{Category: kiroErrorBadRequestSchema, StatusCode: http.StatusBadRequest, Message: trimmed}
 	case looksLikeKiroBadRequestToolPairingError(lower):
@@ -111,6 +116,11 @@ func classifyKiroBadRequest(trimmed, lower string) kiroErrorClassification {
 	default:
 		return kiroErrorClassification{Category: kiroErrorBadRequestUnknown, StatusCode: http.StatusBadRequest, Message: trimmed}
 	}
+}
+
+func looksLikeKiroContextLengthError(lower string) bool {
+	return strings.Contains(lower, "content_length_exceeds_threshold") ||
+		strings.Contains(lower, "input is too long")
 }
 
 func looksLikeKiroBadRequestSchemaError(lower string) bool {

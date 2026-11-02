@@ -66,15 +66,24 @@ func resolveKiroUpstreamModel(mappedModel string) string {
 	return upstreamModel
 }
 
-// kiroPayloadTooLargeMessage 判断 err 是否为「裁掉旧历史后仍超过 Kiro 体积上限」，
-// 并给出面向客户端的错误文案。文案以 Anthropic 上下文超限错误的 "prompt is too long"
-// 开头，让 Claude Code 等客户端按上下文问题处理（压缩），而不是把它当 5xx 原样重试。
-func kiroPayloadTooLargeMessage(err error) (string, bool) {
-	var tooLarge *kiropkg.PayloadTooLargeError
-	if !errors.As(err, &tooLarge) {
+// Kiro 上游「输入太长」时返回给客户端的固定文案，与 kiro.rs map_provider_error 一致。
+// 不回显上游原文（可能带 request ID 等内部细节），原文只进日志。
+const (
+	kiroContextWindowFullMessage = "Context window is full. Reduce conversation history, system prompt, or tools."
+	kiroInputTooLongMessage      = "Input is too long. Reduce the size of your messages."
+)
+
+// kiroContextLengthClientMessage 判断 Kiro 上游 400 是否为「输入太长」，是则返回固定文案：
+// CONTENT_LENGTH_EXCEEDS_THRESHOLD 视为上下文窗口已满，其余 "Input is too long" 视为单次输入太长。
+func kiroContextLengthClientMessage(statusCode int, body []byte) (string, bool) {
+	if statusCode != http.StatusBadRequest ||
+		classifyKiroHTTPError(statusCode, string(body)).Category != kiroErrorBadRequestContextLength {
 		return "", false
 	}
-	return fmt.Sprintf("prompt is too long: request exceeds the Kiro upstream limit of %d bytes even after trimming old history", tooLarge.LimitBytes), true
+	if strings.Contains(strings.ToLower(string(body)), "content_length_exceeds_threshold") {
+		return kiroContextWindowFullMessage, true
+	}
+	return kiroInputTooLongMessage, true
 }
 
 // logKiroStreamInterrupted 记录 Kiro 流转换中途失败的真实原因。客户端只收到
@@ -89,17 +98,13 @@ func logKiroStreamInterrupted(ctx context.Context, account *Account, mappedModel
 	)
 }
 
-// writeKiroMessagesRequestError 写 Messages 协议的请求失败响应：请求体超限返回 400，其余保持 502。
-func writeKiroMessagesRequestError(c *gin.Context, err error) {
-	status, errType, message := http.StatusBadGateway, "api_error", "Upstream request failed"
-	if msg, ok := kiroPayloadTooLargeMessage(err); ok {
-		status, errType, message = http.StatusBadRequest, "invalid_request_error", msg
-	}
-	c.JSON(status, gin.H{
+// writeKiroMessagesRequestError 写 Messages 协议的请求失败响应（502）。
+func writeKiroMessagesRequestError(c *gin.Context) {
+	c.JSON(http.StatusBadGateway, gin.H{
 		"type": "error",
 		"error": gin.H{
-			"type":    errType,
-			"message": message,
+			"type":    "api_error",
+			"message": "Upstream request failed",
 		},
 	})
 }
@@ -160,7 +165,7 @@ func (s *GatewayService) forwardKiroMessages(ctx context.Context, c *gin.Context
 				Kind:               "request_error",
 				Message:            safeErr,
 			})
-			writeKiroMessagesRequestError(c, err)
+			writeKiroMessagesRequestError(c)
 			return nil, fmt.Errorf("kiro upstream request failed: %s", safeErr)
 		}
 		defer func() { _ = resp.Body.Close() }()
@@ -232,7 +237,7 @@ func (s *GatewayService) forwardKiroMessages(ctx context.Context, c *gin.Context
 				return nil, failoverErr
 			}
 			safeErr := sanitizeUpstreamErrorMessage(webSearchErr.Error())
-			writeKiroMessagesRequestError(c, webSearchErr)
+			writeKiroMessagesRequestError(c)
 			return nil, fmt.Errorf("kiro upstream request failed: %s", safeErr)
 		}
 	}
@@ -253,7 +258,7 @@ func (s *GatewayService) forwardKiroMessages(ctx context.Context, c *gin.Context
 			return nil, failoverErr
 		}
 		safeErr := sanitizeUpstreamErrorMessage(err.Error())
-		writeKiroMessagesRequestError(c, err)
+		writeKiroMessagesRequestError(c)
 		return nil, fmt.Errorf("kiro upstream request failed: %s", safeErr)
 	}
 	defer func() { _ = resp.Body.Close() }()
@@ -913,11 +918,15 @@ func (s *GatewayService) handleKiroHTTPError(ctx context.Context, resp *http.Res
 		Kind:               "http_error",
 		Message:            upstreamMsg,
 	})
+	message := coalesceKiroErrorMessage(resp.StatusCode, upstreamMsg)
+	if fixed, ok := kiroContextLengthClientMessage(resp.StatusCode, respBody); ok {
+		message = fixed
+	}
 	c.JSON(mapUpstreamStatusCode(resp.StatusCode), gin.H{
 		"type": "error",
 		"error": gin.H{
 			"type":    claudeErrorType(resp.StatusCode),
-			"message": coalesceKiroErrorMessage(resp.StatusCode, upstreamMsg),
+			"message": message,
 		},
 	})
 	return fmt.Errorf("kiro upstream error: %d %s", resp.StatusCode, upstreamMsg)
