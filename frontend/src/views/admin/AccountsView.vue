@@ -263,6 +263,7 @@
                   :type="row.type"
                   :auth-mode="getOpenAIAuthMode(row)"
                   :plan-type="getAccountPlanType(row)"
+                  :overages-enabled="isKiroOveragesEnabled(row)"
                   :privacy-mode="row.extra?.privacy_mode || row.parent_privacy_mode"
                   :subscription-expires-at="row.credentials?.subscription_expires_at || row.parent_subscription_expires_at"
                   :telemetry-enabled="row.extra?.codex_telemetry_enabled === true"
@@ -1496,12 +1497,18 @@ const shouldReplaceAutoRefreshRow = (current: Account, next: Account) => {
 
 // Kiro / Leonardo 的套餐来自用量接口，合并进内存态 credentials.plan_type，
 // 供「平台/类型」列的 PlatformTypeBadge 渲染（不落库，刷新后由用量重新回填）。
-const handleUsagePlanMeta = (account: Account, meta: { plan_type?: string }) => {
+// Kiro 同时回填 overage 开关，Badge 据此展示「超量」标记。
+const handleUsagePlanMeta = (account: Account, meta: { plan_type?: string; kiro_overages_enabled?: boolean }) => {
   if (account.platform !== 'kiro' && account.platform !== 'leonardo') return
   account.credentials = {
     ...(account.credentials || {}),
-    ...(meta.plan_type ? { plan_type: meta.plan_type } : {})
+    ...(meta.plan_type ? { plan_type: meta.plan_type } : {}),
+    ...(account.platform === 'kiro' ? { kiro_overages_enabled: meta.kiro_overages_enabled === true } : {})
   }
+}
+
+const isKiroOveragesEnabled = (account: Account) => {
+  return account.platform === 'kiro' && account.credentials?.kiro_overages_enabled === true
 }
 
 const handleFishUsageMeta = (account: Account, meta: { plan_type?: string }) => {

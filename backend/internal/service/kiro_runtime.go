@@ -489,8 +489,8 @@ func (s *GatewayService) executeKiroUpstreamWithParsed(ctx context.Context, acco
 					return nil, requestCtx, readErr
 				}
 				classification := classifyKiroHTTPError(resp.StatusCode, string(respBody))
-				if classification.Category == kiroErrorMonthlyRequest {
-					s.markKiroMonthlyRequestCountRateLimited(ctx, account, string(respBody))
+				if kiroQuotaExhausted(classification) {
+					s.markKiroQuotaExhaustedRateLimited(ctx, account, classification.Category, string(respBody))
 				}
 				return nil, requestCtx, &UpstreamFailoverError{
 					StatusCode:      resp.StatusCode,
@@ -760,24 +760,42 @@ func (s *GatewayService) markKiroAuthTemporarilyUnavailable(ctx context.Context,
 	_ = s.accountRepo.SetTempUnschedulable(ctx, account.ID, until, reason)
 }
 
-func (s *GatewayService) markKiroMonthlyRequestCountRateLimited(ctx context.Context, account *Account, body string) {
+// kiroQuotaExhausted 判断上游错误是否表示本计费周期额度已用尽：月度请求额度用尽，
+// 或超刷（overage）额度也用尽（402 OVERAGE_REQUEST_LIMIT_EXCEEDED）。与 kiro.rs 一致，
+// 两者都让账号停到月度重置。超刷只认 402：overage 关键词匹配不区分状态码，429 不能停到月底。
+func kiroQuotaExhausted(c kiroErrorClassification) bool {
+	switch c.Category {
+	case kiroErrorMonthlyRequest:
+		return true
+	case kiroErrorOverageExhausted:
+		return c.StatusCode == http.StatusPaymentRequired
+	default:
+		return false
+	}
+}
+
+// markKiroQuotaExhaustedRateLimited 把额度用尽的账号限流到下个月度重置。
+func (s *GatewayService) markKiroQuotaExhaustedRateLimited(ctx context.Context, account *Account, category, body string) {
 	if s == nil || s.accountRepo == nil || account == nil {
 		return
 	}
+	subject, reason := "kiro monthly request count", "kiro monthly request count exhausted (402): MONTHLY_REQUEST_COUNT"
+	if category == kiroErrorOverageExhausted {
+		subject, reason = "kiro overage limit", "kiro overage limit exhausted (402): OVERAGE_REQUEST_LIMIT_EXCEEDED"
+	}
 	resetAt := nextKiroMonthlyResetUTC(time.Now())
 	if err := s.accountRepo.SetRateLimited(ctx, account.ID, resetAt); err != nil {
-		logger.L().Warn("kiro monthly request count rate-limit failed",
+		logger.L().Warn(subject+" rate-limit failed",
 			zap.Int64("account_id", account.ID),
 			zap.Time("reset_at", resetAt),
 			zap.Error(err),
 		)
 		return
 	}
-	reason := "kiro monthly request count exhausted (402): MONTHLY_REQUEST_COUNT"
 	if trimmed := strings.TrimSpace(body); trimmed != "" {
 		reason = fmt.Sprintf("%s body=%s", reason, truncateForLog([]byte(trimmed), 512))
 	}
-	logger.L().Warn("kiro monthly request count rate-limited",
+	logger.L().Warn(subject+" rate-limited",
 		zap.Int64("account_id", account.ID),
 		zap.Time("reset_at", resetAt),
 		zap.String("reason", reason),
@@ -870,8 +888,8 @@ func (s *GatewayService) handleKiroHTTPError(ctx context.Context, resp *http.Res
 	if resp.StatusCode == http.StatusBadRequest {
 		logKiroBadRequestClassification(classification, account, "", resp.Header, respBody)
 	}
-	if classification.Category == kiroErrorMonthlyRequest {
-		s.markKiroMonthlyRequestCountRateLimited(ctx, account, string(respBody))
+	if kiroQuotaExhausted(classification) {
+		s.markKiroQuotaExhaustedRateLimited(ctx, account, classification.Category, string(respBody))
 	}
 	if classification.Category == kiroErrorBadRequestInvalidModel && account != nil && account.Type == AccountTypeOAuth {
 		s.markKiroInvalidModelRateLimited(ctx, account, mappedModel)

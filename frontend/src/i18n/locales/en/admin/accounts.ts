@@ -287,6 +287,9 @@ export default {
         modelCreditOveragesUntil: '{model} using AI Credits until {time}',
         creditsExhausted: 'Credits Exhausted',
         creditsExhaustedUntil: 'AI Credits exhausted, expected recovery at {time}',
+        overageActive: 'Overage',
+        overageExhausted: 'Overage Exhausted',
+        overageExhaustedUntil: 'Overage exhausted, expected recovery at {time}',
         overloadedUntil: 'Overloaded until {time}',
         viewTempUnschedDetails: 'View temp unschedulable details',
         tempUnschedulableUntil: 'Resumes {time}'
@@ -1905,6 +1908,7 @@ export default {
         kiroExpires: 'Expires',
         kiroReset: 'Reset',
         kiroBonusGift: 'Bonus credits',
+        kiroOverage: 'Overage',
         estimatedTotalCost: 'Est. total ${cost}',
         estimatedTotalCostTooltip: 'Estimated total cost at 100% utilization, based on current window cost and utilization'
       },

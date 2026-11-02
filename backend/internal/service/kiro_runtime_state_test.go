@@ -759,6 +759,48 @@ func TestExecuteKiroUpstreamMonthlyRequestCountRateLimitsUntilNextMonthAndFailov
 	require.Equal(t, nextKiroMonthlyResetUTC(time.Now()), repo.rateLimitReset)
 }
 
+// 超刷额度也用尽（402 OVERAGE_REQUEST_LIMIT_EXCEEDED）：和月度额度用尽一样停到月度重置并切号，
+// 否则开了超刷的号打满后仍会被调度，每个请求都先 402 一次。
+func TestExecuteKiroUpstreamOverageLimitRateLimitsUntilNextMonthAndFailovers(t *testing.T) {
+	account := &Account{
+		ID:          42,
+		Platform:    PlatformKiro,
+		Type:        AccountTypeOAuth,
+		Status:      StatusActive,
+		Schedulable: true,
+		Concurrency: 1,
+	}
+	repo := &recordingKiroTempUnschedRepo{}
+	upstream := &queuedHTTPUpstream{
+		responses: []*http.Response{
+			newJSONResponse(http.StatusPaymentRequired, `{"message":"You have reached the limit for overages.","reason":"OVERAGE_REQUEST_LIMIT_EXCEEDED"}`),
+		},
+	}
+	svc := &GatewayService{
+		accountRepo:         repo,
+		httpUpstream:        upstream,
+		kiroCooldownStore:   &stubKiroCooldownStore{},
+		tlsFPProfileService: &TLSFingerprintProfileService{},
+	}
+
+	payload, err := createTestPayload("claude-sonnet-4-6")
+	require.NoError(t, err)
+	payloadBytes, err := json.Marshal(payload)
+	require.NoError(t, err)
+
+	_, _, err = svc.executeKiroUpstream(context.Background(), account, payloadBytes, "claude-sonnet-4-6", "claude-sonnet-4-6", "test-token", nil)
+	require.Error(t, err)
+
+	var failoverErr *UpstreamFailoverError
+	require.ErrorAs(t, err, &failoverErr)
+	require.Equal(t, http.StatusPaymentRequired, failoverErr.StatusCode)
+	require.Contains(t, string(failoverErr.ResponseBody), "OVERAGE_REQUEST_LIMIT_EXCEEDED")
+	require.False(t, repo.called)
+	require.True(t, repo.rateCalled)
+	require.Equal(t, account.ID, repo.rateID)
+	require.Equal(t, nextKiroMonthlyResetUTC(time.Now()), repo.rateLimitReset)
+}
+
 func TestExecuteKiroUpstreamPlain402FailoversWithoutTempUnschedule(t *testing.T) {
 	account := &Account{
 		ID:          42,

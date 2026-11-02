@@ -103,4 +103,32 @@ describe('PlatformTypeBadge', () => {
     expect(wrapper.html()).toContain('bg-gray-100')
     expect(wrapper.html()).not.toContain('bg-indigo-100')
   })
+
+  it('shows Kiro overages tag next to the plan tag when enabled', () => {
+    const wrapper = mount(PlatformTypeBadge, {
+      props: {
+        platform: 'kiro',
+        type: 'oauth',
+        planType: 'KIRO PRO+',
+        overagesEnabled: true
+      }
+    })
+
+    expect(wrapper.text()).toContain('KIRO PRO+')
+    expect(wrapper.text()).toContain('admin.accounts.status.overageActive')
+    expect(wrapper.html()).toContain('bg-amber-100')
+  })
+
+  it('does not show overages tag for non-Kiro accounts', () => {
+    const wrapper = mount(PlatformTypeBadge, {
+      props: {
+        platform: 'openai',
+        type: 'oauth',
+        planType: 'Pro',
+        overagesEnabled: true
+      }
+    })
+
+    expect(wrapper.text()).not.toContain('admin.accounts.status.overageActive')
+  })
 })

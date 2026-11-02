@@ -226,6 +226,14 @@ type KiroBonusProgress struct {
 	RedeemedAt     *time.Time `json:"redeemed_at,omitempty"`
 }
 
+// KiroOverageInfo 表示 Kiro 账号的超刷(overage)状态:超额用量与产生的费用。
+type KiroOverageInfo struct {
+	CurrentOverages float64 `json:"current_overages"`
+	OverageCharges  float64 `json:"overage_charges"`
+	CurrencyCode    string  `json:"currency_code,omitempty"`
+	CurrencySymbol  string  `json:"currency_symbol,omitempty"`
+}
+
 // UsageInfo 账号使用量信息
 type UsageInfo struct {
 	Source             string         `json:"source,omitempty"`               // "passive" or "active"
@@ -272,13 +280,15 @@ type UsageInfo struct {
 	// Antigravity AI Credits 余额
 	AICredits []AICredit `json:"ai_credits,omitempty"`
 
-	// Kiro Credits 额度信息
+	// Kiro Credits 额度信息(含超刷 overage)
 	KiroSubscriptionName string               `json:"kiro_subscription_name,omitempty"`
 	KiroSubscriptionType string               `json:"kiro_subscription_type,omitempty"`
 	KiroResetAt          *time.Time           `json:"kiro_reset_at,omitempty"`
+	KiroOveragesEnabled  bool                 `json:"kiro_overages_enabled,omitempty"`
 	KiroCredit           *KiroCreditProgress  `json:"kiro_credit,omitempty"`
 	KiroBonus            *KiroCreditProgress  `json:"kiro_bonus,omitempty"`
 	KiroBonuses          []*KiroBonusProgress `json:"kiro_bonuses,omitempty"`
+	KiroOverage          *KiroOverageInfo     `json:"kiro_overage,omitempty"`
 	KiroQuotaState       string               `json:"kiro_quota_state,omitempty"`
 	KiroQuotaReason      string               `json:"kiro_quota_reason,omitempty"`
 	KiroQuotaResetAt     *time.Time           `json:"kiro_quota_reset_at,omitempty"`

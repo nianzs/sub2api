@@ -295,11 +295,23 @@ func (f *ChannelMonitorQuotaFetcher) fetchUsage(ctx context.Context, account *Ac
 		PlanLevel: usage.SubscriptionTier,
 		Tiers:     usageQuotaTiers(usage),
 		FetchedAt: now,
+		// Kiro 超刷开启的账号额度池打满后仍可继续请求，监控不能凭 tier 判耗尽。
+		OverageEnabled: usage.KiroOveragesEnabled,
+		QuotaExhausted: kiroRateLimitedUntilMonthlyReset(account, now),
 	}
 	if snapshot.PlanLevel == "" {
 		snapshot.PlanLevel = usage.SubscriptionTierRaw
 	}
 	return snapshot
+}
+
+// kiroRateLimitedUntilMonthlyReset 判断 Kiro 账号是否因额度用尽被限流到月度重置
+// （markKiroQuotaExhaustedRateLimited 打的标记）。429 退避只有几分钟，不会命中。
+func kiroRateLimitedUntilMonthlyReset(account *Account, now time.Time) bool {
+	if account == nil || account.Platform != domain.PlatformKiro || account.RateLimitResetAt == nil {
+		return false
+	}
+	return !account.RateLimitResetAt.Before(nextKiroMonthlyResetUTC(now))
 }
 
 // usageQuotaTiers 把 UsageInfo 的各平台窗口归一为 tier 列表（无数据的窗口跳过）。
@@ -640,6 +652,9 @@ func isMonitorQuotaConfigError(msg string) bool {
 // quotaDegradedHint 生成 degraded 的 message（指出触发告警的窗口/余额）；
 // 空串表示无告警。
 func quotaDegradedHint(snapshot *domain.MonitorQuotaSnapshot) string {
+	if snapshot.QuotaExhausted {
+		return "quota exhausted: rate-limited until monthly reset"
+	}
 	for _, tier := range snapshot.Tiers {
 		if tier.UsedPercent >= monitorQuotaDegradedUsedPercent {
 			name := tier.Window

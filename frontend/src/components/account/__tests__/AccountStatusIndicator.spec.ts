@@ -289,4 +289,42 @@ describe('AccountStatusIndicator', () => {
     expect(wrapper.text()).toContain('admin.accounts.forbidden')
   })
 
+  it('Kiro 超刷状态显示 overage 徽标（active 警示 / exhausted 危险）', () => {
+    const active = mount(AccountStatusIndicator, {
+      props: {
+        account: makeAccount({
+          id: 7,
+          name: 'kiro-overage-active',
+          platform: 'kiro',
+          kiro_quota_state: 'overage_active'
+        })
+      },
+      global: {
+        stubs: {
+          Icon: true
+        }
+      }
+    })
+    expect(active.text()).toContain('admin.accounts.status.overageActive')
+
+    const exhausted = mount(AccountStatusIndicator, {
+      props: {
+        account: makeAccount({
+          id: 8,
+          name: 'kiro-overage-exhausted',
+          platform: 'kiro',
+          kiro_quota_state: 'overage_exhausted',
+          kiro_quota_reset_at: '2099-03-15T00:00:00Z'
+        })
+      },
+      global: {
+        stubs: {
+          Icon: true
+        }
+      }
+    })
+    expect(exhausted.text()).toContain('admin.accounts.status.overageExhausted')
+    expect(exhausted.text()).toContain('admin.accounts.status.overageExhaustedUntil')
+  })
+
 })
