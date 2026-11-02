@@ -49,6 +49,16 @@ func TestClassifyKiroHTTPErrorBadRequestCategories(t *testing.T) {
 			want: kiroErrorBadRequestQuota,
 		},
 		{
+			name: "content length threshold",
+			body: `{"message":"Input is too long.","reason":"CONTENT_LENGTH_EXCEEDS_THRESHOLD"}`,
+			want: kiroErrorBadRequestContextLength,
+		},
+		{
+			name: "input is too long",
+			body: `{"message":"Input is too long for requested model."}`,
+			want: kiroErrorBadRequestContextLength,
+		},
+		{
 			name: "unknown",
 			body: `{"message":"bad request"}`,
 			want: kiroErrorBadRequestUnknown,
@@ -63,4 +73,20 @@ func TestClassifyKiroHTTPErrorBadRequestCategories(t *testing.T) {
 			require.Equal(t, tt.body, classification.Message)
 		})
 	}
+}
+
+// Kiro「输入太长」返回固定文案，不回显上游原文；区分窗口满与单次输入太长（与 kiro.rs 一致）。
+func TestKiroContextLengthClientMessage(t *testing.T) {
+	msg, ok := kiroContextLengthClientMessage(http.StatusBadRequest, []byte(`{"message":"Input is too long. requestId=abc","reason":"CONTENT_LENGTH_EXCEEDS_THRESHOLD"}`))
+	require.True(t, ok)
+	require.Equal(t, kiroContextWindowFullMessage, msg)
+
+	msg, ok = kiroContextLengthClientMessage(http.StatusBadRequest, []byte(`{"message":"Input is too long for requested model. requestId=abc"}`))
+	require.True(t, ok)
+	require.Equal(t, kiroInputTooLongMessage, msg)
+
+	_, ok = kiroContextLengthClientMessage(http.StatusBadRequest, []byte(`{"message":"bad request"}`))
+	require.False(t, ok)
+	_, ok = kiroContextLengthClientMessage(http.StatusInternalServerError, []byte(`{"message":"Input is too long."}`))
+	require.False(t, ok)
 }

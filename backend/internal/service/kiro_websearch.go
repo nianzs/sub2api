@@ -48,9 +48,9 @@ func (w *kiroStreamChunkCollector) Write(p []byte) (int, error) {
 	return len(p), nil
 }
 
-func bufferKiroAnthropicStream(ctx context.Context, body io.Reader, responseModel string, inputTokens int) ([][]byte, *kiropkg.StreamResult, error) {
+func bufferKiroAnthropicStream(ctx context.Context, body io.Reader, responseModel, upstreamModelID string, inputTokens int) ([][]byte, *kiropkg.StreamResult, error) {
 	collector := &kiroStreamChunkCollector{}
-	result, err := kiropkg.StreamEventStreamAsAnthropicWithContext(ctx, body, collector, responseModel, inputTokens, kiropkg.KiroRequestContext{})
+	result, err := kiropkg.StreamEventStreamAsAnthropicWithContext(ctx, body, collector, responseModel, inputTokens, kiropkg.KiroRequestContext{UpstreamModelID: upstreamModelID})
 	if err != nil {
 		return nil, nil, err
 	}
@@ -159,7 +159,7 @@ func (s *GatewayService) streamKiroWebSearchAsAnthropic(
 
 		chunks, _, streamErr := func() ([][]byte, *kiropkg.StreamResult, error) {
 			defer func() { _ = resp.Body.Close() }()
-			return bufferKiroAnthropicStream(ctx, resp.Body, requestModel, inputTokens)
+			return bufferKiroAnthropicStream(ctx, resp.Body, requestModel, resolveKiroUpstreamModel(mappedModel), inputTokens)
 		}()
 		if streamErr != nil {
 			return streamErr
@@ -255,6 +255,7 @@ func (s *GatewayService) executeKiroWebSearch(ctx context.Context, account *Acco
 				CacheEmulationUsage:  cacheUsage.toKiroUsage(),
 				EstimatedInputTokens: inputTokens,
 				TokenizerAlgorithm:   s.kiroMeteringAlgorithm(ctx),
+				UpstreamModelID:      resolveKiroUpstreamModel(mappedModel),
 			})
 		}()
 		if parseErr != nil {

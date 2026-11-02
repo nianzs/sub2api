@@ -156,6 +156,8 @@ func (s *GatewayService) ForwardAsResponses(
 	anthropicBody = enforceCacheControlLimit(anthropicBody)
 
 	var resp *http.Response
+	// compactionRetry 只在 Kiro 压缩请求上设置：上游确认超限后截断工具输出重试一次。
+	var compactionRetry func() (*http.Response, error)
 	if isKiroDirectModeAccount(account) {
 		var group *Group
 		if parsed != nil {
@@ -163,6 +165,13 @@ func (s *GatewayService) ForwardAsResponses(
 		}
 		cachePlan := s.prepareKiroResponsesCacheEmulationUsage(ctx, account, group, body, mappedModel, estimateKiroInputTokens(ctx, s.kiroMeteringAlgorithm(ctx), anthropicBody))
 		resp, _, err = s.openKiroAnthropicStreamResponse(ctx, account, parsed, anthropicBody, mappedModel, originalModel, c.Request.Header, group, cachePlan)
+		if err == nil && isCompact {
+			compactionRetry = newKiroCompactionRetry(anthropicBody, mappedModel, func(retryBody []byte) (*http.Response, error) {
+				retryResp, _, retryErr := s.openKiroAnthropicStreamResponse(ctx, account, parsed, retryBody, mappedModel, originalModel, c.Request.Header, group, cachePlan)
+				return retryResp, retryErr
+			})
+			resp, err = retryKiroCompactionOnContextLength(resp, compactionRetry)
+		}
 		if err != nil {
 			safeErr := sanitizeUpstreamErrorMessage(err.Error())
 			setOpsUpstreamError(c, 0, safeErr, "")
@@ -174,11 +183,7 @@ func (s *GatewayService) ForwardAsResponses(
 				Kind:               "request_error",
 				Message:            safeErr,
 			})
-			if msg, ok := kiroPayloadTooLargeMessage(err); ok {
-				writeResponsesError(c, http.StatusBadRequest, "context_length_exceeded", msg)
-			} else {
-				writeResponsesError(c, http.StatusBadGateway, "server_error", "Upstream request failed")
-			}
+			writeResponsesError(c, http.StatusBadGateway, "server_error", "Upstream request failed")
 			return nil, fmt.Errorf("upstream request failed: %s", safeErr)
 		}
 	} else {
@@ -252,6 +257,16 @@ func (s *GatewayService) ForwardAsResponses(
 		}
 
 		// Non-failover error: return Responses-formatted error to client
+		if account.Platform == PlatformKiro {
+			if fixed, ok := kiroContextLengthClientMessage(resp.StatusCode, respBody); ok {
+				if isCompact {
+					return nil, s.failCompactionWithCode(c, clientStream, http.StatusBadRequest,
+						"context_length_exceeded", kiroCompactionOverflowMessage, resp.Header.Get("x-request-id"))
+				}
+				writeResponsesError(c, http.StatusBadRequest, "invalid_request_error", fixed)
+				return nil, fmt.Errorf("upstream error: %d %s", resp.StatusCode, upstreamMsg)
+			}
+		}
 		writeResponsesError(c, mapUpstreamStatusCode(resp.StatusCode), "server_error", upstreamMsg)
 		return nil, fmt.Errorf("upstream error: %d %s", resp.StatusCode, upstreamMsg)
 	}
@@ -262,7 +277,7 @@ func (s *GatewayService) ForwardAsResponses(
 	if isCompact {
 		// compact 请求必须缓冲：要拿到完整摘要文本才能合成 Codex 要求的单个
 		// compaction item，逐事件透传做不到。
-		result, handleErr = s.handleResponsesCompactionResponse(resp, c, originalModel, mappedModel, reasoningEffort, startTime, clientStream)
+		result, handleErr = s.handleResponsesCompactionResponseWithRetry(resp, c, originalModel, mappedModel, reasoningEffort, startTime, clientStream, compactionRetry)
 	} else if clientStream {
 		writerSizeBeforeStream := c.Writer.Size()
 		result, handleErr = s.handleResponsesStreamingResponse(resp, c, originalModel, mappedModel, reasoningEffort, startTime, clientToolMapping)
