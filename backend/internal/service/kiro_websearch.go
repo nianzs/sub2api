@@ -48,9 +48,9 @@ func (w *kiroStreamChunkCollector) Write(p []byte) (int, error) {
 	return len(p), nil
 }
 
-func bufferKiroAnthropicStream(ctx context.Context, body io.Reader, responseModel, upstreamModelID string, inputTokens int) ([][]byte, *kiropkg.StreamResult, error) {
+func bufferKiroAnthropicStream(ctx context.Context, body io.Reader, responseModel string, inputTokens int, requestCtx kiropkg.KiroRequestContext) ([][]byte, *kiropkg.StreamResult, error) {
 	collector := &kiroStreamChunkCollector{}
-	result, err := kiropkg.StreamEventStreamAsAnthropicWithContext(ctx, body, collector, responseModel, inputTokens, kiropkg.KiroRequestContext{UpstreamModelID: upstreamModelID})
+	result, err := kiropkg.StreamEventStreamAsAnthropicWithContext(ctx, body, collector, responseModel, inputTokens, requestCtx)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -123,6 +123,13 @@ func (s *GatewayService) streamKiroWebSearchAsAnthropic(
 	if err := writeAnthropicMessageStart(w, "", requestModel, inputTokens, plan.result()); err != nil {
 		return err
 	}
+	// 每轮解析都带上与 message_start 相同的缓存模拟用量：最后一轮的 message_delta 会
+	// 覆盖 input_tokens，缓存字段若缺失，网关会沿用 message_start 的缓存数，导致重复计费。
+	streamCtx := kiropkg.KiroRequestContext{
+		UpstreamModelID:     resolveKiroUpstreamModel(mappedModel),
+		CacheEmulationUsage: plan.result().toKiroUsage(),
+		TokenizerAlgorithm:  s.kiroMeteringAlgorithm(ctx),
+	}
 
 	for iteration := 0; iteration < kiroMaxWebSearchIterations; iteration++ {
 		s.prefetchKiroWebSearchDescription(ctx, account, token)
@@ -159,7 +166,7 @@ func (s *GatewayService) streamKiroWebSearchAsAnthropic(
 
 		chunks, _, streamErr := func() ([][]byte, *kiropkg.StreamResult, error) {
 			defer func() { _ = resp.Body.Close() }()
-			return bufferKiroAnthropicStream(ctx, resp.Body, requestModel, resolveKiroUpstreamModel(mappedModel), inputTokens)
+			return bufferKiroAnthropicStream(ctx, resp.Body, requestModel, inputTokens, streamCtx)
 		}()
 		if streamErr != nil {
 			return streamErr

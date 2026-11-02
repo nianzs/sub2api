@@ -167,7 +167,7 @@ func AnalyzeBufferedStream(chunks [][]byte) BufferedStreamResult {
 func FilterChunksForClient(chunks [][]byte, webSearchToolUseIndex, indexOffset int) [][]byte {
 	filtered := make([][]byte, 0, len(chunks))
 	for _, chunk := range chunks {
-		adjusted, shouldForward := filterSSEChunk(chunk, webSearchToolUseIndex, indexOffset)
+		adjusted, shouldForward := filterSSEChunk(chunk, webSearchToolUseIndex, indexOffset, false)
 		if shouldForward {
 			filtered = append(filtered, adjusted)
 		}
@@ -175,8 +175,10 @@ func FilterChunksForClient(chunks [][]byte, webSearchToolUseIndex, indexOffset i
 	return filtered
 }
 
+// AdjustSSEChunk 处理最后一轮的流：message_start 已在开头单独发过，这里去掉；
+// message_delta / message_stop 必须转发，否则客户端收不到结束事件和最终用量。
 func AdjustSSEChunk(chunk []byte, offset int) ([]byte, bool) {
-	return filterSSEChunk(chunk, -1, offset)
+	return filterSSEChunk(chunk, -1, offset, true)
 }
 
 func MaxContentBlockIndex(chunks [][]byte) int {
@@ -206,7 +208,9 @@ func MaxContentBlockIndex(chunks [][]byte) int {
 	return maxIndex
 }
 
-func filterSSEChunk(chunk []byte, webSearchToolUseIndex, indexOffset int) ([]byte, bool) {
+// filterSSEChunk 去掉不该给客户端的事件并平移块下标。keepMessageEnd 为 false 时
+// 连 message_delta / message_stop 一起去掉（中间轮次，消息还没结束）。
+func filterSSEChunk(chunk []byte, webSearchToolUseIndex, indexOffset int, keepMessageEnd bool) ([]byte, bool) {
 	lines := strings.Split(string(chunk), "\n")
 	var builder strings.Builder
 	hasContent := false
@@ -216,7 +220,7 @@ func filterSSEChunk(chunk []byte, webSearchToolUseIndex, indexOffset int) ([]byt
 		if strings.HasPrefix(line, "event: ") {
 			if i+1 < len(lines) && strings.HasPrefix(lines[i+1], "data: ") {
 				payload := strings.TrimSpace(strings.TrimPrefix(lines[i+1], "data: "))
-				if shouldSuppressEventPayload(payload, webSearchToolUseIndex) {
+				if shouldSuppressEventPayload(payload, webSearchToolUseIndex, keepMessageEnd) {
 					i++
 					continue
 				}
@@ -231,7 +235,7 @@ func filterSSEChunk(chunk []byte, webSearchToolUseIndex, indexOffset int) ([]byt
 			if payload == "[DONE]" {
 				continue
 			}
-			if shouldSuppressEventPayload(payload, webSearchToolUseIndex) {
+			if shouldSuppressEventPayload(payload, webSearchToolUseIndex, keepMessageEnd) {
 				continue
 			}
 			adjusted := adjustEventPayload(payload, indexOffset)
@@ -255,7 +259,7 @@ func filterSSEChunk(chunk []byte, webSearchToolUseIndex, indexOffset int) ([]byt
 	return []byte(builder.String()), true
 }
 
-func shouldSuppressEventPayload(payload string, webSearchToolUseIndex int) bool {
+func shouldSuppressEventPayload(payload string, webSearchToolUseIndex int, keepMessageEnd bool) bool {
 	if payload == "" {
 		return false
 	}
@@ -263,9 +267,11 @@ func shouldSuppressEventPayload(payload string, webSearchToolUseIndex int) bool 
 	if err := json.Unmarshal([]byte(payload), &event); err != nil {
 		return false
 	}
-	eventType, _ := event["type"].(string)
-	if eventType == "message_start" || eventType == "message_delta" || eventType == "message_stop" {
+	switch eventType, _ := event["type"].(string); eventType {
+	case "message_start":
 		return true
+	case "message_delta", "message_stop":
+		return !keepMessageEnd
 	}
 	if webSearchToolUseIndex < 0 {
 		return false
