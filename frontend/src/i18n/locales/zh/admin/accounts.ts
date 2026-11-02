@@ -490,6 +490,9 @@ export default {
         modelCreditOveragesUntil: '{model} 正在使用 AI Credits，至 {time}',
         creditsExhausted: '积分已用尽',
         creditsExhaustedUntil: 'AI Credits 已用尽，预计 {time} 恢复',
+        overageActive: '超量',
+        overageExhausted: '超量额度已用尽',
+        overageExhaustedUntil: '超量额度已用尽，预计 {time} 恢复',
         overloadedUntil: '负载过重，重置时间：{time}',
         viewTempUnschedDetails: '查看临时不可调度详情',
         tempUnschedulableUntil: '预计 {time} 恢复'
@@ -608,6 +611,7 @@ export default {
         kiroExpires: '到期',
         kiroReset: '重置',
         kiroBonusGift: '赠送额度',
+        kiroOverage: '超额',
         estimatedTotalCost: '预计总费用 ${cost}',
         estimatedTotalCostTooltip: '根据当前窗口费用和使用率估算达到 100% 使用率时的总费用'
       },

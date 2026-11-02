@@ -1,6 +1,7 @@
 package kiro
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -70,4 +71,20 @@ func TestAdjustSSEChunk_OffsetsIndicesAndDropsMessageStart(t *testing.T) {
 	adjusted, shouldForward := AdjustSSEChunk([]byte("event: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\",\"text\":\"\"}}\n\n"), 3)
 	require.True(t, shouldForward)
 	require.Contains(t, string(adjusted), `"index":3`)
+}
+
+// 最后一轮必须把 message_delta / message_stop 交给客户端，否则流没有结束事件，
+// 网关会判为 "missing terminal event"，最终用量也会丢失。
+func TestAdjustSSEChunk_KeepsMessageEnd(t *testing.T) {
+	delta := "event: message_delta\ndata: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"},\"usage\":{\"output_tokens\":5}}\n\n"
+	stop := "event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n"
+
+	for _, chunk := range []string{delta, stop} {
+		adjusted, shouldForward := AdjustSSEChunk([]byte(chunk), 4)
+		require.True(t, shouldForward, chunk)
+		require.True(t, strings.HasPrefix(string(adjusted), chunk), string(adjusted))
+	}
+
+	// 中间轮次的消息还没结束，结束事件仍要去掉。
+	require.Empty(t, FilterChunksForClient([][]byte{[]byte(delta), []byte(stop)}, -1, 4))
 }

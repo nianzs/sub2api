@@ -60,9 +60,15 @@ type MonitorQuotaSnapshot struct {
 	BalanceLow bool `json:"balance_low,omitempty"`
 	// CredentialInvalid 上游 401/403 鉴权失败（区别于网络/解析错误），
 	// 检测状态据此推导 failed 而非 error。
-	CredentialInvalid bool      `json:"credential_invalid,omitempty"`
-	Error             string    `json:"error,omitempty"` // Success=false 时的错误摘要
-	FetchedAt         time.Time `json:"fetched_at"`
+	CredentialInvalid bool `json:"credential_invalid,omitempty"`
+	// OverageEnabled 账号已开启超刷（Kiro overageStatus=ENABLED）：额度池全部打满后
+	// 仍可按超额计费继续请求，不能凭 tier 打满判账号耗尽。
+	OverageEnabled bool `json:"overage_enabled,omitempty"`
+	// QuotaExhausted 上游已明确报本计费周期额度用尽（Kiro 402 月度额度 / 超刷额度用尽），
+	// 账号已被限流到月度重置。用量接口此时仍正常返回，只能靠这个标记判耗尽。
+	QuotaExhausted bool      `json:"quota_exhausted,omitempty"`
+	Error          string    `json:"error,omitempty"` // Success=false 时的错误摘要
+	FetchedAt      time.Time `json:"fetched_at"`
 
 	// ---- 组级聚合（监控绑定 group 而非单个 account 时填充） ----
 

@@ -166,6 +166,68 @@ func TestQuotaFetcher_ExhaustedKiroAccountIsNotOperational(t *testing.T) {
 	require.Contains(t, res.Message, "quota high")
 }
 
+// 超刷开启的 kiro 账号额度池全部打满也不算耗尽：仍可按超额计费继续请求。
+// 但上游已报额度用尽（QuotaExhausted）时必须判耗尽。
+func TestQuotaFetcher_OverageEnabledKiroAccountExhaustion(t *testing.T) {
+	exhausted := kiroUsage(2000, 2000)
+	exhausted.KiroOveragesEnabled = true
+	exhausted.KiroOverage = &KiroOverageInfo{CurrentOverages: 4, OverageCharges: 0.2}
+
+	require.False(t, monitorAccountQuotaExhausted(&domain.MonitorQuotaSnapshot{
+		Success:        true,
+		OverageEnabled: true,
+		Tiers:          usageQuotaTiers(exhausted),
+	}))
+	require.True(t, monitorAccountQuotaExhausted(&domain.MonitorQuotaSnapshot{
+		Success:        true,
+		OverageEnabled: true,
+		QuotaExhausted: true,
+		Tiers:          usageQuotaTiers(exhausted),
+	}))
+}
+
+// 超刷用尽：用量接口照常返回，账号已被 402 限流到月度重置 → 组聚合计为耗尽；
+// 429 退避只有几分钟，不算额度用尽。
+func TestFetchGroup_OverageEnabledAccountRateLimitedUntilMonthlyResetCountsExhausted(t *testing.T) {
+	now := time.Now()
+	untilMonthlyReset := nextKiroMonthlyResetUTC(now)
+	shortBackoff := now.Add(5 * time.Minute)
+	accounts := kiroGroupAccounts(1, 2)
+	accounts[0].RateLimitResetAt = &untilMonthlyReset
+	accounts[1].RateLimitResetAt = &shortBackoff
+
+	usage := kiroUsage(2000, 2000)
+	usage.KiroOveragesEnabled = true
+	fetcher := newGroupQuotaFetcher(t, accounts, &perAccountUsageSource{
+		byAccount: map[int64]*UsageInfo{1: usage, 2: usage},
+	})
+
+	snapshot := fetcher.FetchGroup(context.Background(), 9)
+	require.True(t, snapshot.Success)
+	require.Equal(t, 1, snapshot.AccountsExhausted)
+	require.Equal(t, 1, snapshot.AccountsHealthy)
+
+	single := fetcher.Fetch(context.Background(), 1)
+	require.True(t, single.QuotaExhausted)
+	res := deriveQuotaCheckResult(single, "quota", now)
+	require.Equal(t, MonitorStatusDegraded, res.Status)
+	require.Contains(t, res.Message, "quota exhausted")
+}
+
+// fetchUsage 会把超刷开关带进快照（OverageEnabled），组聚合时该账号计为健康。
+func TestFetchGroup_OverageEnabledAccountCountsHealthy(t *testing.T) {
+	exhausted := kiroUsage(2000, 2000)
+	exhausted.KiroOveragesEnabled = true
+	fetcher := newGroupQuotaFetcher(t, kiroGroupAccounts(1), &perAccountUsageSource{
+		byAccount: map[int64]*UsageInfo{1: exhausted},
+	})
+
+	snapshot := fetcher.FetchGroup(context.Background(), 9)
+	require.True(t, snapshot.Success)
+	require.Equal(t, 1, snapshot.AccountsHealthy)
+	require.Equal(t, 0, snapshot.AccountsExhausted)
+}
+
 // --- FetchGroup 聚合 ---
 
 func TestFetchGroup_AggregatesCountsAndSumsTiers(t *testing.T) {

@@ -129,7 +129,7 @@ func TestCalculateOpenAIRecordUsageCost_ImageCountBillingIgnoresMixedRequests(t 
 		Model: model, ImageCount: 1, ImageSize: "1K", ImageEndpoint: false,
 	}, apiKey, []string{model}, 1, 1, 1, 1,
 		UsageTokens{InputTokens: 1_000_000, OutputTokens: 10_000},
-		"", nil, false, time.Time{})
+		"", nil, false, time.Time{}, "")
 
 	require.NoError(t, err)
 	require.NotNil(t, cost)

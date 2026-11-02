@@ -218,8 +218,14 @@ func monitorAccountQuotaExhausted(snapshot *domain.MonitorQuotaSnapshot) bool {
 	if snapshot == nil || !snapshot.Success {
 		return false
 	}
-	if snapshot.CredentialInvalid || snapshot.BalanceLow {
+	if snapshot.CredentialInvalid || snapshot.BalanceLow || snapshot.QuotaExhausted {
 		return true
+	}
+	// 超刷（overage）已开启的账号：额度池打满后仍可按超额计费继续请求，
+	// 不能凭 tier 打满判耗尽。超刷本身用尽时生成请求返回 402、账号被限流到
+	// 月度重置，由上面的 QuotaExhausted 判耗尽（用量接口此时照常返回）。
+	if snapshot.OverageEnabled {
+		return false
 	}
 	if len(snapshot.Tiers) == 0 {
 		return false

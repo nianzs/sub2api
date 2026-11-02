@@ -622,7 +622,7 @@
       </div>
     </template>
 
-    <!-- Kiro platform: show credits + welcome bonus + bonuses[] 赠送 (仅直连 AWS;外部中转账号不展示 credits) -->
+    <!-- Kiro platform: show credits + welcome bonus + bonuses[] 赠送 + overage 摘要 (仅直连 AWS;外部中转账号不展示 credits) -->
     <template v-else-if="isKiroUsageAccount">
       <div v-if="loading" class="space-y-1.5">
         <div class="h-4 w-24 animate-pulse rounded bg-gray-200 dark:bg-gray-700"></div>
@@ -696,6 +696,9 @@
           <span v-if="kiroResetDisplay" class="inline-flex items-center gap-1">
             <span class="text-gray-400 dark:text-gray-500">{{ t('admin.accounts.usageWindow.kiroReset') }}</span>
             <span class="font-medium tabular-nums text-gray-600 dark:text-gray-300">{{ kiroResetDisplay }}</span>
+          </span>
+          <span v-if="kiroOverageSummary" class="inline-flex items-center gap-1 font-medium text-amber-700 dark:text-amber-300">
+            {{ kiroOverageSummary }}
           </span>
         </div>
         <div class="flex items-center gap-1.5 mt-0.5">
@@ -1012,7 +1015,7 @@ const props = withDefaults(
 )
 
 const emit = defineEmits<{
-  kiroUsageMeta: [meta: { plan_type?: string }]
+  kiroUsageMeta: [meta: { plan_type?: string; kiro_overages_enabled?: boolean }]
   leonardoUsageMeta: [meta: { plan_type?: string }]
   fishUsageMeta: [meta: { plan_type?: string }]
   'account-updated': [account: Account]
@@ -1818,7 +1821,9 @@ const kiroUsageAvailable = computed(() => {
     usageInfo.value?.kiro_credit ||
     usageInfo.value?.kiro_bonus ||
     usageInfo.value?.kiro_bonuses?.length ||
-    usageInfo.value?.kiro_reset_at
+    usageInfo.value?.kiro_overage ||
+    usageInfo.value?.kiro_reset_at ||
+    usageInfo.value?.kiro_overages_enabled
   )
 })
 
@@ -1832,7 +1837,8 @@ const syncKiroUsageMeta = (info?: AccountUsageInfo | null) => {
   ).trim()
 
   emit('kiroUsageMeta', {
-    ...(planType ? { plan_type: planType } : {})
+    ...(planType ? { plan_type: planType } : {}),
+    kiro_overages_enabled: info?.kiro_overages_enabled === true
   })
 }
 
@@ -1929,6 +1935,25 @@ const kiroBonusMeta = computed(() => kiroProgressMeta(usageInfo.value?.kiro_bonu
 // bonuses[]（兑换/活动赠送）逐条展示。
 const kiroBonusEntries = computed(() => usageInfo.value?.kiro_bonuses ?? [])
 
+// overage（超刷）摘要：有超额用量或费用时展示，如「超额 2 ($0.08)」。
+const kiroOverageSummary = computed(() => {
+  const overage = usageInfo.value?.kiro_overage
+  if (!overage) return ''
+  const hasOverageCount = (overage.current_overages ?? 0) > 0
+  const hasCharges = (overage.overage_charges ?? 0) > 0
+  if (!hasOverageCount && !hasCharges) return ''
+
+  const parts: string[] = [t('admin.accounts.usageWindow.kiroOverage')]
+  if (hasOverageCount) {
+    parts.push(formatKiroAmount(overage.current_overages))
+  }
+  if (hasCharges) {
+    const symbol = overage.currency_symbol || overage.currency_code || ''
+    parts.push(`(${symbol}${(overage.overage_charges ?? 0).toFixed(2)})`)
+  }
+  return parts.join(' ')
+})
+
 const kiroRuntimeResetDisplay = computed(() => {
   const raw = usageInfo.value?.kiro_runtime_reset_at
   if (!raw) return ''
@@ -1968,7 +1993,9 @@ const kiroStatusBadgeLabel = computed(() => {
   if (usageInfo.value?.needs_reauth) return t('admin.accounts.needsReauth')
   if (isKiroProfileError.value) return t('admin.accounts.usageError')
   if (isKiroUsageForbidden.value) return t('admin.accounts.forbidden')
+  if (kiroQuotaState.value === 'overage_active') return t('admin.accounts.status.overageActive')
   if (kiroQuotaState.value === 'credits_exhausted') return t('admin.accounts.status.creditsExhausted')
+  if (kiroQuotaState.value === 'overage_exhausted') return t('admin.accounts.status.overageExhausted')
   return ''
 })
 
@@ -1979,7 +2006,8 @@ const kiroStatusToneClass = computed(() => {
   if (usageInfo.value?.needs_reauth) return 'text-orange-700 dark:text-orange-300'
   if (isKiroProfileError.value) return 'text-yellow-700 dark:text-yellow-300'
   if (isKiroUsageForbidden.value) return 'text-rose-700 dark:text-rose-300'
-  if (kiroQuotaState.value === 'credits_exhausted') {
+  if (kiroQuotaState.value === 'overage_active') return 'text-amber-700 dark:text-amber-300'
+  if (kiroQuotaState.value === 'credits_exhausted' || kiroQuotaState.value === 'overage_exhausted') {
     return 'text-red-700 dark:text-red-300'
   }
   return 'text-gray-600 dark:text-gray-300'
@@ -1992,6 +2020,9 @@ const kiroStatusHint = computed(() => {
   }
   if (kiroQuotaState.value === 'credits_exhausted' && kiroQuotaResetDisplay.value) {
     return t('admin.accounts.status.creditsExhaustedUntil', { time: kiroQuotaResetDisplay.value })
+  }
+  if (kiroQuotaState.value === 'overage_exhausted' && kiroQuotaResetDisplay.value) {
+    return t('admin.accounts.status.overageExhaustedUntil', { time: kiroQuotaResetDisplay.value })
   }
   return ''
 })

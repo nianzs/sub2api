@@ -173,8 +173,11 @@ func TestAccountUsageService_GetUsage_KiroMapsCredits(t *testing.T) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{
 			"nextDateReset": ` + strconv.FormatInt(resetAt, 10) + `,
+			"overageConfiguration": {"overageStatus":"ENABLED"},
 			"subscriptionInfo": {"subscriptionTitle":"KIRO PRO+","type":"Q_DEVELOPER_STANDALONE_PRO_PLUS"},
 			"usageBreakdownList": [{
+				"currency":"USD",
+				"currentOveragesWithPrecision":2,
 				"currentUsageWithPrecision":125,
 				"freeTrialInfo":{
 					"currentUsageWithPrecision":25,
@@ -183,6 +186,7 @@ func TestAccountUsageService_GetUsage_KiroMapsCredits(t *testing.T) {
 					"usageLimitWithPrecision":500
 				},
 				"nextDateReset": ` + strconv.FormatInt(resetAt, 10) + `,
+				"overageCharges":0.08,
 				"resourceType":"CREDIT",
 				"usageLimitWithPrecision":2000
 			}]
@@ -200,6 +204,7 @@ func TestAccountUsageService_GetUsage_KiroMapsCredits(t *testing.T) {
 	require.Equal(t, "active", usage.Source)
 	require.Equal(t, "KIRO PRO+", usage.KiroSubscriptionName)
 	require.Equal(t, "Q_DEVELOPER_STANDALONE_PRO_PLUS", usage.KiroSubscriptionType)
+	require.True(t, usage.KiroOveragesEnabled)
 	require.NotNil(t, usage.KiroCredit)
 	require.Equal(t, 125.0, usage.KiroCredit.CurrentUsage)
 	require.Equal(t, 2000.0, usage.KiroCredit.UsageLimit)
@@ -207,8 +212,16 @@ func TestAccountUsageService_GetUsage_KiroMapsCredits(t *testing.T) {
 	require.NotNil(t, usage.KiroBonus)
 	require.Equal(t, 25.0, usage.KiroBonus.CurrentUsage)
 	require.Equal(t, 500.0, usage.KiroBonus.UsageLimit)
+	require.NotNil(t, usage.KiroOverage)
+	require.Equal(t, "$", usage.KiroOverage.CurrencySymbol)
+	require.Equal(t, "USD", usage.KiroOverage.CurrencyCode)
+	require.Equal(t, 2.0, usage.KiroOverage.CurrentOverages)
+	require.Equal(t, 0.08, usage.KiroOverage.OverageCharges)
 	require.NotNil(t, usage.KiroResetAt)
-	require.Equal(t, kiroQuotaStateNormal, usage.KiroQuotaState)
+	// 超刷已开启且已产生超额用量 → overage_active（主额度未打满也是）。
+	require.Equal(t, kiroQuotaStateOverageActive, usage.KiroQuotaState)
+	require.Equal(t, "overages_enabled", usage.KiroQuotaReason)
+	require.NotNil(t, usage.KiroQuotaResetAt)
 }
 
 func TestAccountUsageService_GetUsage_KiroUsesTokenProviderAccessToken(t *testing.T) {
@@ -717,6 +730,76 @@ func TestMapKiroUsageToInfo_CreditsExhausted(t *testing.T) {
 	require.NotNil(t, info.KiroQuotaResetAt)
 }
 
+func TestBuildKiroDegradedUsage_ClassifiesOverageExhausted(t *testing.T) {
+	info := buildKiroDegradedUsage(&kiroUsageHTTPError{
+		StatusCode: http.StatusTooManyRequests,
+		Body:       `{"message":"overage exhausted for this billing window"}`,
+	})
+
+	require.Equal(t, errorCodeNetworkError, info.ErrorCode)
+	require.Equal(t, kiroQuotaStateOverageExhausted, info.KiroQuotaState)
+	require.Contains(t, info.KiroQuotaReason, "overage exhausted")
+}
+
+// 超刷开启时：额度池全部打满也不再判 credits_exhausted，而是 overage_active；
+// 关闭时维持原判定。已在超刷（有超额用量/费用）则无论打满与否都是 overage_active。
+func TestMapKiroUsageToInfo_OverageStates(t *testing.T) {
+	exhaustedCreditBreakdown := func(mutate func(*kiroUsageBreakdown)) kiroUsageBreakdown {
+		b := kiroUsageBreakdown{
+			ResourceType:              "CREDIT",
+			CurrentUsageWithPrecision: kiroFloatPtr(2000),
+			UsageLimitWithPrecision:   kiroFloatPtr(2000),
+		}
+		if mutate != nil {
+			mutate(&b)
+		}
+		return b
+	}
+
+	// 超刷开启 + 全部池打满（含 EXHAUSTED 赠送）→ overage_active。
+	info := mapKiroUsageToInfo(&kiroUsageLimitsResponse{
+		OverageConfiguration: kiroOverageConfiguration{OverageStatus: "ENABLED"},
+		UsageBreakdownList: []kiroUsageBreakdown{exhaustedCreditBreakdown(func(b *kiroUsageBreakdown) {
+			b.Bonuses = []kiroBonusEntry{{Status: "EXHAUSTED", CurrentUsage: kiroFloatPtr(300), UsageLimit: kiroFloatPtr(300)}}
+		})},
+	})
+	require.Equal(t, kiroQuotaStateOverageActive, info.KiroQuotaState)
+	require.Equal(t, "overages_enabled", info.KiroQuotaReason)
+
+	// 超刷关闭 + 同样打满 → credits_exhausted（维持 bonuses 融合后的判定）。
+	info = mapKiroUsageToInfo(&kiroUsageLimitsResponse{
+		OverageConfiguration: kiroOverageConfiguration{OverageStatus: "DISABLED"},
+		UsageBreakdownList: []kiroUsageBreakdown{exhaustedCreditBreakdown(func(b *kiroUsageBreakdown) {
+			b.Bonuses = []kiroBonusEntry{{Status: "EXHAUSTED", CurrentUsage: kiroFloatPtr(300), UsageLimit: kiroFloatPtr(300)}}
+		})},
+	})
+	require.Equal(t, kiroQuotaStateCreditsExhausted, info.KiroQuotaState)
+
+	// 超刷开启 + 主额度未打满 + 尚无超额用量 → normal（还没进入超刷）。
+	info = mapKiroUsageToInfo(&kiroUsageLimitsResponse{
+		OverageConfiguration: kiroOverageConfiguration{OverageStatus: "ENABLED"},
+		UsageBreakdownList: []kiroUsageBreakdown{{
+			ResourceType:              "CREDIT",
+			CurrentUsageWithPrecision: kiroFloatPtr(100),
+			UsageLimitWithPrecision:   kiroFloatPtr(2000),
+		}},
+	})
+	require.Equal(t, kiroQuotaStateNormal, info.KiroQuotaState)
+
+	// 超刷开启 + 已产生超额费用（主额度未打满也算）→ overage_active。
+	info = mapKiroUsageToInfo(&kiroUsageLimitsResponse{
+		OverageConfiguration: kiroOverageConfiguration{OverageStatus: "ENABLED"},
+		UsageBreakdownList: []kiroUsageBreakdown{{
+			ResourceType:              "CREDIT",
+			CurrentUsageWithPrecision: kiroFloatPtr(100),
+			UsageLimitWithPrecision:   kiroFloatPtr(2000),
+			CurrentOverages:           kiroFloatPtr(3),
+			OverageCharges:            kiroFloatPtr(0.12),
+		}},
+	})
+	require.Equal(t, kiroQuotaStateOverageActive, info.KiroQuotaState)
+}
+
 func TestAccountUsageService_GetUsage_KiroMapsBonuses(t *testing.T) {
 	account := Account{
 		ID:       714,
@@ -892,9 +975,13 @@ func TestAccountUsageService_EnrichAccountWithKiroRuntimeStateIncludesCachedQuot
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{
 			"nextDateReset":"2099-03-13T12:00:00Z",
+			"overageConfiguration":{"overageStatus":"ENABLED"},
 			"subscriptionInfo": {"subscriptionTitle":"KIRO PRO+"},
 			"usageBreakdownList": [{
+				"currency":"USD",
 				"currentUsageWithPrecision":2000,
+				"currentOveragesWithPrecision":4,
+				"overageCharges":0.2,
 				"usageLimitWithPrecision":2000,
 				"resourceType":"CREDIT"
 			}]
@@ -917,7 +1004,8 @@ func TestAccountUsageService_EnrichAccountWithKiroRuntimeStateIncludesCachedQuot
 	}
 	svc.EnrichAccountWithKiroRuntimeState(context.Background(), target)
 
-	require.Equal(t, kiroQuotaStateCreditsExhausted, target.KiroQuotaState)
-	require.Equal(t, "credits_exhausted", target.KiroQuotaReason)
+	// 超刷开启且已产生超额用量：状态透出为 overage_active 而非 credits_exhausted。
+	require.Equal(t, kiroQuotaStateOverageActive, target.KiroQuotaState)
+	require.Equal(t, "overages_enabled", target.KiroQuotaReason)
 	require.NotNil(t, target.KiroQuotaResetAt)
 }

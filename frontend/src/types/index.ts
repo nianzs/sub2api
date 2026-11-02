@@ -1514,6 +1514,14 @@ export interface KiroBonusProgress {
   redeemed_at?: string | null
 }
 
+// Kiro 账号的超刷（overage）状态：超额用量与产生的费用
+export interface KiroOverageInfo {
+  current_overages: number
+  overage_charges: number
+  currency_code?: string
+  currency_symbol?: string
+}
+
 // Leonardo 积分余额快照：上游只给各池剩余量，上限来自套餐常量表（未知套餐时为 0）
 export interface LeonardoCreditsSnapshot {
   total: number
@@ -1608,9 +1616,11 @@ export interface AccountUsageInfo {
   kiro_subscription_name?: string | null
   kiro_subscription_type?: string | null
   kiro_reset_at?: string | null
+  kiro_overages_enabled?: boolean
   kiro_credit?: KiroCreditProgress | null
   kiro_bonus?: KiroCreditProgress | null
   kiro_bonuses?: KiroBonusProgress[] | null
+  kiro_overage?: KiroOverageInfo | null
   kiro_quota_state?: string | null
   kiro_quota_reason?: string | null
   kiro_quota_reset_at?: string | null
