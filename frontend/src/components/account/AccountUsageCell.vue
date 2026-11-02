@@ -622,7 +622,7 @@
       </div>
     </template>
 
-    <!-- Kiro platform: show credits + bonus (仅直连 AWS;外部中转账号不展示 credits) -->
+    <!-- Kiro platform: show credits + welcome bonus + bonuses[] 赠送 (仅直连 AWS;外部中转账号不展示 credits) -->
     <template v-else-if="isKiroUsageAccount">
       <div v-if="loading" class="space-y-1.5">
         <div class="h-4 w-24 animate-pulse rounded bg-gray-200 dark:bg-gray-700"></div>
@@ -672,6 +672,23 @@
           </div>
           <div v-if="kiroBonusMeta" class="text-[9px] leading-tight text-gray-500 dark:text-gray-400">
             {{ kiroBonusMeta }}
+          </div>
+        </div>
+
+        <div
+          v-for="(bonus, index) in kiroBonusEntries"
+          :key="`kiro-bonus-${index}-${bonus.bonus_code || bonus.name || ''}`"
+          class="space-y-1"
+        >
+          <div class="flex items-baseline justify-between gap-2 text-[11px] text-gray-600 dark:text-gray-300">
+            <span class="font-medium tracking-[0.01em]">{{ bonus.name || t('admin.accounts.usageWindow.kiroBonusGift') }}</span>
+            <span class="font-semibold tabular-nums text-gray-700 dark:text-gray-200">{{ formatKiroAmount(bonus.current_usage) }} / {{ formatKiroAmount(bonus.usage_limit) }}</span>
+          </div>
+          <div class="h-1.5 overflow-hidden rounded-full bg-gray-200 dark:bg-gray-700">
+            <div class="h-full rounded-full bg-emerald-500 transition-all" :style="{ width: `${clampPercent(bonus.percentage_used)}%` }"></div>
+          </div>
+          <div v-if="kiroProgressMeta(bonus)" class="text-[9px] leading-tight text-gray-500 dark:text-gray-400">
+            {{ kiroProgressMeta(bonus) }}
           </div>
         </div>
 
@@ -1800,6 +1817,7 @@ const kiroUsageAvailable = computed(() => {
   return !!(
     usageInfo.value?.kiro_credit ||
     usageInfo.value?.kiro_bonus ||
+    usageInfo.value?.kiro_bonuses?.length ||
     usageInfo.value?.kiro_reset_at
   )
 })
@@ -1889,20 +1907,27 @@ const kiroResetDisplay = computed(() => {
   return parsed.toLocaleDateString()
 })
 
-const kiroBonusMeta = computed(() => {
-  const bonus = usageInfo.value?.kiro_bonus
-  if (!bonus) return ''
-  if ((bonus.days_remaining ?? 0) > 0) {
-    return t('admin.accounts.usageWindow.kiroDaysLeft', { days: bonus.days_remaining })
+// Kiro 各额度池共用的 meta 行：优先剩余天数，回退到期日。
+const kiroProgressMeta = (
+  progress?: { days_remaining?: number; expiry_date?: string | null } | null
+) => {
+  if (!progress) return ''
+  if ((progress.days_remaining ?? 0) > 0) {
+    return t('admin.accounts.usageWindow.kiroDaysLeft', { days: progress.days_remaining })
   }
-  if (bonus.expiry_date) {
-    const parsed = new Date(bonus.expiry_date)
+  if (progress.expiry_date) {
+    const parsed = new Date(progress.expiry_date)
     if (!Number.isNaN(parsed.getTime())) {
       return `${t('admin.accounts.usageWindow.kiroExpires')} ${parsed.toLocaleDateString()}`
     }
   }
   return ''
-})
+}
+
+const kiroBonusMeta = computed(() => kiroProgressMeta(usageInfo.value?.kiro_bonus))
+
+// bonuses[]（兑换/活动赠送）逐条展示。
+const kiroBonusEntries = computed(() => usageInfo.value?.kiro_bonuses ?? [])
 
 const kiroRuntimeResetDisplay = computed(() => {
   const raw = usageInfo.value?.kiro_runtime_reset_at

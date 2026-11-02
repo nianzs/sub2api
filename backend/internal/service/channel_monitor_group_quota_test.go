@@ -118,6 +118,32 @@ func TestUsageQuotaTiers_MapsKiroCreditsAndBonus(t *testing.T) {
 	require.Equal(t, "bonus", tiers[1].Label)
 }
 
+// bonuses[]（兑换赠送）逐条成 tier；ResetAt 优先用池自身到期时间，缺失时回退 KiroResetAt。
+func TestUsageQuotaTiers_MapsKiroBonusPools(t *testing.T) {
+	resetAt := time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC)
+	bonusExpiry := time.Date(2026, 8, 15, 0, 0, 0, 0, time.UTC)
+	usage := &UsageInfo{
+		KiroResetAt: &resetAt,
+		KiroCredit:  &KiroCreditProgress{CurrentUsage: 125, UsageLimit: 2000, PercentageUsed: 6.25},
+		KiroBonuses: []*KiroBonusProgress{
+			{Name: "Launch promo", Status: "ACTIVE", CurrentUsage: 30, UsageLimit: 300, PercentageUsed: 10, ExpiryDate: &bonusExpiry},
+			{Name: "Used promo", Status: "EXHAUSTED", CurrentUsage: 100, UsageLimit: 100, PercentageUsed: 100},
+		},
+	}
+
+	tiers := usageQuotaTiers(usage)
+
+	require.Len(t, tiers, 3)
+	require.Equal(t, "credits", tiers[0].Label)
+	require.Equal(t, "bonus", tiers[1].Label)
+	require.Equal(t, float64(30), tiers[1].Used)
+	require.Equal(t, float64(300), tiers[1].Limit)
+	require.Equal(t, "2026-08-15T00:00:00Z", tiers[1].ResetAt)
+	require.Equal(t, "bonus", tiers[2].Label)
+	require.Equal(t, float64(100), tiers[2].Used)
+	require.Equal(t, "2026-09-01T00:00:00Z", tiers[2].ResetAt)
+}
+
 // 上游没给额度上限时使用率无从计算，跳过而不是产出 0% 的假 tier。
 func TestUsageQuotaTiers_SkipsKiroCreditsWithoutLimit(t *testing.T) {
 	require.Nil(t, usageQuotaTiers(&UsageInfo{

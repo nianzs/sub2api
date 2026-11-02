@@ -1091,6 +1091,65 @@ describe('AccountUsageCell', () => {
     expect(wrapper.text()).toContain('admin.accounts.usageWindow.kiroReset')
   })
 
+  it('Kiro OAuth 会逐条展示赠送额度', async () => {
+    const account = makeAccount({
+      id: 3002,
+      platform: 'kiro',
+      type: 'oauth',
+      extra: {},
+      credentials: {}
+    })
+
+    getUsage.mockResolvedValue({
+      source: 'passive',
+      kiro_subscription_name: 'KIRO PRO+',
+      kiro_credit: {
+        current_usage: 2000,
+        usage_limit: 2000,
+        percentage_used: 100,
+      },
+      kiro_bonuses: [
+        {
+          name: 'Launch promo',
+          status: 'ACTIVE',
+          bonus_code: 'LAUNCH-2026',
+          current_usage: 30,
+          usage_limit: 300,
+          percentage_used: 10,
+          days_remaining: 7,
+        },
+        {
+          status: 'EXHAUSTED',
+          current_usage: 100,
+          usage_limit: 100,
+          percentage_used: 100,
+        },
+      ],
+      kiro_reset_at: '2099-03-13T12:00:00Z',
+    })
+
+    const wrapper = mount(AccountUsageCell, {
+      props: {
+        account
+      },
+      global: {
+        stubs: {
+          UsageProgressBar: true,
+          AccountQuotaInfo: true
+        }
+      }
+    })
+
+    await flushPromises()
+
+    // 主额度 + 两条赠送（首条带官方 displayName，次条无名称回退 i18n）。
+    expect(wrapper.text()).toContain('2.0K / 2.0K')
+    expect(wrapper.text()).toContain('Launch promo')
+    expect(wrapper.text()).toContain('30 / 300')
+    expect(wrapper.text()).toContain('admin.accounts.usageWindow.kiroBonusGift')
+    expect(wrapper.text()).toContain('100 / 100')
+  })
+
   it('Fish token 号用 passive source 展示积分与套餐，并回写套餐（不再展示今日出图）', async () => {
     const account = makeAccount({
       id: 4001,

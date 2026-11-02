@@ -607,6 +607,7 @@ export default {
         kiroDaysLeft: '剩余 {days} 天',
         kiroExpires: '到期',
         kiroReset: '重置',
+        kiroBonusGift: '赠送额度',
         estimatedTotalCost: '预计总费用 ${cost}',
         estimatedTotalCostTooltip: '根据当前窗口费用和使用率估算达到 100% 使用率时的总费用'
       },

@@ -43,10 +43,23 @@ type kiroUsageBreakdown struct {
 	DisplayName               string             `json:"displayName"`
 	DisplayNamePlural         string             `json:"displayNamePlural"`
 	FreeTrialInfo             *kiroFreeTrialInfo `json:"freeTrialInfo"`
+	Bonuses                   []kiroBonusEntry   `json:"bonuses"`
 	NextDateReset             any                `json:"nextDateReset"`
 	ResourceType              string             `json:"resourceType"`
 	UsageLimit                *float64           `json:"usageLimit"`
 	UsageLimitWithPrecision   *float64           `json:"usageLimitWithPrecision"`
+}
+
+type kiroBonusEntry struct {
+	BonusCode    string   `json:"bonusCode"`
+	BonusType    string   `json:"bonusType"`
+	DisplayName  string   `json:"displayName"`
+	Description  string   `json:"description"`
+	Status       string   `json:"status"`
+	CurrentUsage *float64 `json:"currentUsage"`
+	UsageLimit   *float64 `json:"usageLimit"`
+	ExpiresAt    any      `json:"expiresAt"`
+	RedeemedAt   any      `json:"redeemedAt"`
 }
 
 type kiroFreeTrialInfo struct {
@@ -403,30 +416,63 @@ func mapKiroUsageToInfo(resp *kiroUsageLimitsResponse) *UsageInfo {
 		}
 		if ft := credit.FreeTrialInfo; ft != nil && strings.EqualFold(strings.TrimSpace(ft.FreeTrialStatus), "ACTIVE") {
 			expiry := parseKiroTimestamp(ft.FreeTrialExpiry)
-			daysRemaining := 0
-			if expiry != nil {
-				daysRemaining = int(time.Until(*expiry).Hours() / 24)
-				if time.Until(*expiry)%(24*time.Hour) != 0 {
-					daysRemaining++
-				}
-				if daysRemaining < 0 {
-					daysRemaining = 0
-				}
-			}
 			current := selectKiroFloat(ft.CurrentUsageWithPrecision, ft.CurrentUsage)
 			limit := selectKiroFloat(ft.UsageLimitWithPrecision, ft.UsageLimit)
 			info.KiroBonus = &KiroCreditProgress{
 				CurrentUsage:   current,
 				UsageLimit:     limit,
 				PercentageUsed: percentageOrZero(current, limit),
-				DaysRemaining:  daysRemaining,
+				DaysRemaining:  kiroDaysRemaining(expiry),
 				ExpiryDate:     expiry,
 			}
 		}
 	}
+	info.KiroBonuses = collectKiroBonuses(resp.UsageBreakdownList)
 	info.KiroResetAt = resetAt
 	setKiroQuotaStateFromUsage(info)
 	return info
+}
+
+func kiroDaysRemaining(expiry *time.Time) int {
+	if expiry == nil {
+		return 0
+	}
+	daysRemaining := int(time.Until(*expiry).Hours() / 24)
+	if time.Until(*expiry)%(24*time.Hour) != 0 {
+		daysRemaining++
+	}
+	if daysRemaining < 0 {
+		daysRemaining = 0
+	}
+	return daysRemaining
+}
+
+func collectKiroBonuses(items []kiroUsageBreakdown) []*KiroBonusProgress {
+	var bonuses []*KiroBonusProgress
+	for i := range items {
+		for _, entry := range items[i].Bonuses {
+			status := strings.ToUpper(strings.TrimSpace(entry.Status))
+			if status != "ACTIVE" && status != "EXHAUSTED" {
+				continue
+			}
+			expiry := parseKiroTimestamp(entry.ExpiresAt)
+			current := selectKiroFloat(entry.CurrentUsage, nil)
+			limit := selectKiroFloat(entry.UsageLimit, nil)
+			bonuses = append(bonuses, &KiroBonusProgress{
+				Name:           strings.TrimSpace(entry.DisplayName),
+				Status:         status,
+				BonusCode:      strings.TrimSpace(entry.BonusCode),
+				Description:    strings.TrimSpace(entry.Description),
+				CurrentUsage:   current,
+				UsageLimit:     limit,
+				PercentageUsed: percentageOrZero(current, limit),
+				DaysRemaining:  kiroDaysRemaining(expiry),
+				ExpiryDate:     expiry,
+				RedeemedAt:     parseKiroTimestamp(entry.RedeemedAt),
+			})
+		}
+	}
+	return bonuses
 }
 
 func selectKiroCreditBreakdown(items []kiroUsageBreakdown) *kiroUsageBreakdown {
@@ -603,11 +649,31 @@ func setKiroQuotaStateFromUsage(info *UsageInfo) {
 		creditExhausted = info.KiroCredit.CurrentUsage >= info.KiroCredit.UsageLimit
 	}
 	switch {
-	case creditExhausted:
+	case creditExhausted && !kiroHasRemainingCredits(info):
 		info.KiroQuotaState = kiroQuotaStateCreditsExhausted
 		info.KiroQuotaReason = "credits_exhausted"
 		info.KiroQuotaResetAt = info.KiroResetAt
 	default:
 		info.KiroQuotaState = kiroQuotaStateNormal
 	}
+}
+
+// kiroHasRemainingCredits 判断主额度打满后是否仍有可用的赠送额度
+// (welcome bonus 与 bonuses[] 兑换赠送;官方语义:任一额度池有余额即可继续请求)。
+func kiroHasRemainingCredits(info *UsageInfo) bool {
+	if info == nil {
+		return false
+	}
+	if b := info.KiroBonus; b != nil && b.UsageLimit > 0 && b.CurrentUsage < b.UsageLimit {
+		return true
+	}
+	for _, b := range info.KiroBonuses {
+		if b == nil || !strings.EqualFold(b.Status, "ACTIVE") {
+			continue
+		}
+		if b.UsageLimit > 0 && b.CurrentUsage < b.UsageLimit {
+			return true
+		}
+	}
+	return false
 }
