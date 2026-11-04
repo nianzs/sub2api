@@ -109,6 +109,25 @@ func writeKiroMessagesRequestError(c *gin.Context) {
 	})
 }
 
+// kiroFailoverFromOpenErr 识别打开 Kiro 上游时返回的可换号错误（本地冷却闸门、402 额度耗尽），
+// 记一条 failover 事件后原样返回，交给 handler 换号；其它错误返回 nil，由调用方按请求失败处理。
+// Messages / Responses / Chat Completions 三个入口必须共用它，否则冷却中的号会直接回 502 而不换号。
+func kiroFailoverFromOpenErr(c *gin.Context, account *Account, err error) *UpstreamFailoverError {
+	var failoverErr *UpstreamFailoverError
+	if !errors.As(err, &failoverErr) {
+		return nil
+	}
+	appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
+		Platform:           account.Platform,
+		AccountID:          account.ID,
+		AccountName:        account.Name,
+		UpstreamStatusCode: failoverErr.StatusCode,
+		Kind:               "failover",
+		Message:            sanitizeUpstreamErrorMessage(err.Error()),
+	})
+	return failoverErr
+}
+
 func (s *GatewayService) forwardKiroMessages(ctx context.Context, c *gin.Context, account *Account, parsed *ParsedRequest, startTime time.Time) (*ForwardResult, error) {
 	if account == nil || parsed == nil {
 		return nil, fmt.Errorf("kiro forward: missing account or request")
@@ -143,16 +162,7 @@ func (s *GatewayService) forwardKiroMessages(ctx context.Context, c *gin.Context
 	if parsed.Stream {
 		resp, _, err := s.openKiroAnthropicStreamResponse(ctx, account, parsed, body, mappedModel, originalModel, c.Request.Header, parsed.Group, nil)
 		if err != nil {
-			var failoverErr *UpstreamFailoverError
-			if errors.As(err, &failoverErr) {
-				appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
-					Platform:           account.Platform,
-					AccountID:          account.ID,
-					AccountName:        account.Name,
-					UpstreamStatusCode: failoverErr.StatusCode,
-					Kind:               "failover",
-					Message:            sanitizeUpstreamErrorMessage(err.Error()),
-				})
+			if failoverErr := kiroFailoverFromOpenErr(c, account, err); failoverErr != nil {
 				return nil, failoverErr
 			}
 			safeErr := sanitizeUpstreamErrorMessage(err.Error())
@@ -224,16 +234,7 @@ func (s *GatewayService) forwardKiroMessages(ctx context.Context, c *gin.Context
 			if errors.As(webSearchErr, &httpErr) && httpErr.Response != nil {
 				return nil, s.handleKiroHTTPError(ctx, httpErr.Response, c, account, mappedModel, body)
 			}
-			var failoverErr *UpstreamFailoverError
-			if errors.As(webSearchErr, &failoverErr) {
-				appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
-					Platform:           account.Platform,
-					AccountID:          account.ID,
-					AccountName:        account.Name,
-					UpstreamStatusCode: failoverErr.StatusCode,
-					Kind:               "failover",
-					Message:            sanitizeUpstreamErrorMessage(webSearchErr.Error()),
-				})
+			if failoverErr := kiroFailoverFromOpenErr(c, account, webSearchErr); failoverErr != nil {
 				return nil, failoverErr
 			}
 			safeErr := sanitizeUpstreamErrorMessage(webSearchErr.Error())
@@ -245,16 +246,7 @@ func (s *GatewayService) forwardKiroMessages(ctx context.Context, c *gin.Context
 	inputTokens := estimateKiroInputTokens(ctx, s.kiroMeteringAlgorithm(ctx), body)
 	resp, requestCtx, err := s.executeKiroUpstreamWithParsed(ctx, account, parsed, body, mappedModel, originalModel, token, c.Request.Header)
 	if err != nil {
-		var failoverErr *UpstreamFailoverError
-		if errors.As(err, &failoverErr) {
-			appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
-				Platform:           account.Platform,
-				AccountID:          account.ID,
-				AccountName:        account.Name,
-				UpstreamStatusCode: failoverErr.StatusCode,
-				Kind:               "failover",
-				Message:            sanitizeUpstreamErrorMessage(err.Error()),
-			})
+		if failoverErr := kiroFailoverFromOpenErr(c, account, err); failoverErr != nil {
 			return nil, failoverErr
 		}
 		safeErr := sanitizeUpstreamErrorMessage(err.Error())
