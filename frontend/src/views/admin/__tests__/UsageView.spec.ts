@@ -100,6 +100,7 @@ vi.mock('@/stores/app', () => ({
 
 vi.mock('@/utils/format', () => ({
   formatReasoningEffort: (value: string | null | undefined) => value ?? '-',
+  getBrowserTimeZone: () => 'Asia/Shanghai',
 }))
 
 vi.mock('vue-i18n', async () => {
@@ -674,6 +675,9 @@ describe('admin UsageView errors tab filter forwarding', () => {
     vm.filters.error_phase = 'request'
     vm.filters.error_category = 'cyber'
     vm.filters.status_code = 200
+    // 日期范围选「上月」：错误日志与用量明细走同一套 start_date/end_date + timezone 契约
+    vm.filters.start_date = '2026-10-01'
+    vm.filters.end_date = '2026-10-31'
     await flushPromises()
 
     // 切换到「错误请求」标签（第二个 tab 按钮）触发 loadAdminErrors
@@ -689,7 +693,14 @@ describe('admin UsageView errors tab filter forwarding', () => {
       phase: 'request',
       category: 'cyber',
       status_codes: '200',
+      start_date: '2026-10-01',
+      end_date: '2026-10-31',
+      timezone: 'Asia/Shanghai',
     }))
+    // 不再发送 RFC3339 的 start_time/end_time（后者受后端 30 天窗口限制，选「上月」会 400）
+    const listParams = listErrorLogs.mock.calls.at(-1)![0]
+    expect(listParams).not.toHaveProperty('start_time')
+    expect(listParams).not.toHaveProperty('end_time')
   })
 
   it('clears error request logs from the errors tab using ops filters', async () => {
@@ -728,6 +739,8 @@ describe('admin UsageView errors tab filter forwarding', () => {
     vm.filters.error_phase = 'request'
     vm.filters.error_category = 'cyber'
     vm.filters.status_code = 200
+    vm.filters.start_date = '2026-10-01'
+    vm.filters.end_date = '2026-10-31'
 
     await wrapper.findAll('[data-testid="usage-detail-tab"]')[1].trigger('click')
     await flushPromises()
@@ -750,7 +763,15 @@ describe('admin UsageView errors tab filter forwarding', () => {
       phase: 'request',
       category: 'cyber',
       status_codes: '200',
+      start_date: '2026-10-01',
+      end_date: '2026-10-31',
+      // 清理走 DELETE，请求拦截器不会自动附加 timezone，必须由页面显式传入，否则按服务器时区删错窗口
+      timezone: 'Asia/Shanghai',
     }))
+    const clearParams = clearErrorLogs.mock.calls.at(-1)![0]
+    expect(clearParams).not.toHaveProperty('start_time')
+    expect(clearParams).not.toHaveProperty('end_time')
+    expect(clearParams).not.toHaveProperty('page')
     expect(listErrorLogs).toHaveBeenCalledTimes(2)
   })
 })
