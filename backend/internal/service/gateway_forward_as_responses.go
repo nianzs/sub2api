@@ -173,6 +173,9 @@ func (s *GatewayService) ForwardAsResponses(
 			resp, err = retryKiroCompactionOnContextLength(resp, compactionRetry)
 		}
 		if err != nil {
+			if failoverErr := kiroFailoverFromOpenErr(c, account, err); failoverErr != nil {
+				return nil, failoverErr
+			}
 			safeErr := sanitizeUpstreamErrorMessage(err.Error())
 			setOpsUpstreamError(c, 0, safeErr, "")
 			appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
