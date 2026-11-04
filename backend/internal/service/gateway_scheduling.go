@@ -387,6 +387,9 @@ func (s *GatewayService) SelectAccountWithLoadAwareness(ctx context.Context, gro
 								}
 							}
 
+							if stickyCacheMissReason == "" && !stickyWaitsWhenBusy(stickyAccount) {
+								stickyCacheMissReason = "busy_switch"
+							}
 							if stickyCacheMissReason == "" {
 								waitingCount, _ := s.concurrencyService.GetAccountWaitingCount(ctx, stickyAccountID)
 								if waitingCount < cfg.StickySessionMaxWaiting {
@@ -595,8 +598,13 @@ func (s *GatewayService) SelectAccountWithLoadAwareness(ctx context.Context, gro
 						)
 					}
 
-					waitingCount, _ := s.concurrencyService.GetAccountWaitingCount(ctx, accountID)
-					if waitingCount < cfg.StickySessionMaxWaiting {
+					if !stickyWaitsWhenBusy(account) {
+						slog.Debug("sticky.layer1_5_no_routing_miss",
+							"account_id", accountID,
+							"reason", "busy_switch",
+							"session", shortSessionHash(sessionHash),
+						)
+					} else if waitingCount, _ := s.concurrencyService.GetAccountWaitingCount(ctx, accountID); waitingCount < cfg.StickySessionMaxWaiting {
 						// 会话数量限制检查（等待计划也需要占用会话配额）
 						if !s.checkAndRegisterSession(ctx, account, sessionHash) {
 							// 会话限制已满，继续到 Layer 2
@@ -1181,6 +1189,16 @@ func (s *GatewayService) isAccountSchedulableForModelSelection(ctx context.Conte
 		return false
 	}
 	return s.isKiroRuntimeSchedulable(ctx, account)
+}
+
+// stickyWaitsWhenBusy 判断粘性账号槽位满时是否排队等它空出来。
+//
+// Kiro 不排队，直接落到负载均衡换一个有空槽的号：排队最多要等
+// sticky_session_wait_timeout（默认 120s），等不到整个请求就失败；而 Kiro 换号代价有限——
+// 上游 prompt cache 按 profile 共享（同 profile 换号不丢），换号后会话也会改绑到新号。
+// 所有号都满时仍走 Layer 3 兜底排队。
+func stickyWaitsWhenBusy(account *Account) bool {
+	return account == nil || account.Platform != PlatformKiro
 }
 
 func (s *GatewayService) isKiroRuntimeSchedulable(ctx context.Context, account *Account) bool {
