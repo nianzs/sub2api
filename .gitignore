@@ -144,6 +144,7 @@ deploy/online/*.tar.gz
 .gocache/
 vite.config.js
 docs/*
+!docs/agent-resource-safety.md
 !docs/admin-api-keys.md
 !docs/mcp.md
 !docs/PAYMENT.md
