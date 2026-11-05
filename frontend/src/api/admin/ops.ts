@@ -1098,6 +1098,13 @@ export type OpsErrorListQueryParams = {
   time_range?: string
   start_time?: string
   end_time?: string
+  // 与用量明细(/admin/usage)同一套日期契约：YYYY-MM-DD，按 timezone 所在时区取日界，结束日含当天，
+  // 无窗口上限；传了日期则优先于 start_time/end_time（后者为 RFC3339，窗口上限 30 天）。
+  // 仅 GET /admin/ops/errors 与 DELETE /admin/ops/errors 支持。请求拦截器只给 GET 自动附加 timezone，
+  // DELETE（清理）需显式传 timezone，否则后端按服务器时区解释。
+  start_date?: string
+  end_date?: string
+  timezone?: string
   platform?: string
   group_id?: number | null
   account_id?: number | null

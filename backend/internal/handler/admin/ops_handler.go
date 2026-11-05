@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/response"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/timezone"
 	"github.com/Wei-Shaw/sub2api/internal/server/middleware"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/gin-gonic/gin"
@@ -97,7 +98,7 @@ func (h *OpsHandler) GetErrorLogs(c *gin.Context) {
 		pageSize = 500
 	}
 
-	startTime, endTime, err := parseOpsTimeRange(c, "1h")
+	startTime, endTime, err := parseOpsErrorLogTimeRange(c, "1h", false)
 	if err != nil {
 		response.BadRequest(c, err.Error())
 		return
@@ -211,12 +212,8 @@ func (h *OpsHandler) DeleteErrorLogs(c *gin.Context) {
 		response.ErrorFrom(c, err)
 		return
 	}
-	if strings.TrimSpace(c.Query("start_time")) == "" || strings.TrimSpace(c.Query("end_time")) == "" {
-		response.BadRequest(c, "start_time and end_time are required")
-		return
-	}
-
-	startTime, endTime, err := parseOpsTimeRange(c, "1h")
+	// 清理必须显式给出起止两端（start_date/end_date 或 start_time/end_time），避免无界删除。
+	startTime, endTime, err := parseOpsErrorLogTimeRange(c, "1h", true)
 	if err != nil {
 		response.BadRequest(c, err.Error())
 		return
@@ -847,6 +844,48 @@ func parseOpsTimeRange(c *gin.Context, defaultRange string) (time.Time, time.Tim
 	start = end.Add(-dur)
 	if end.Sub(start) > 30*24*time.Hour {
 		return time.Time{}, time.Time{}, fmt.Errorf("invalid time range: max window is 30 days")
+	}
+	return start, end, nil
+}
+
+// parseOpsErrorLogTimeRange 解析错误日志列表/清理的时间窗口。
+//
+// 与用量明细（/admin/usage）同一套日期契约：start_date / end_date（YYYY-MM-DD）按 timezone
+// 参数所在时区解释，end_date 含当天（取次日 00:00，半开区间 [start, end)，DST 安全），
+// 不设窗口上限；缺省的一端不设边界（返回零值）。
+// 两个日期参数都未传时回退到 parseOpsTimeRange（start_time/end_time/time_range，窗口上限同看板），
+// 兼容旧调用方；两种参数同时传入时日期参数优先。
+// requireBounds=true（清理）要求所用契约的起止两端都显式给出，避免无界删除。
+func parseOpsErrorLogTimeRange(c *gin.Context, defaultRange string, requireBounds bool) (time.Time, time.Time, error) {
+	startDate := strings.TrimSpace(c.Query("start_date"))
+	endDate := strings.TrimSpace(c.Query("end_date"))
+
+	if startDate == "" && endDate == "" {
+		if requireBounds && (strings.TrimSpace(c.Query("start_time")) == "" || strings.TrimSpace(c.Query("end_time")) == "") {
+			return time.Time{}, time.Time{}, fmt.Errorf("start_date and end_date (or start_time and end_time) are required")
+		}
+		return parseOpsTimeRange(c, defaultRange)
+	}
+	if requireBounds && (startDate == "" || endDate == "") {
+		return time.Time{}, time.Time{}, fmt.Errorf("start_date and end_date are required")
+	}
+
+	userTZ := c.Query("timezone")
+	var start, end time.Time
+	if startDate != "" {
+		t, err := timezone.ParseInUserLocation("2006-01-02", startDate, userTZ)
+		if err != nil {
+			return time.Time{}, time.Time{}, fmt.Errorf("invalid start_date format, use YYYY-MM-DD")
+		}
+		start = t
+	}
+	if endDate != "" {
+		t, err := timezone.ParseInUserLocation("2006-01-02", endDate, userTZ)
+		if err != nil {
+			return time.Time{}, time.Time{}, fmt.Errorf("invalid end_date format, use YYYY-MM-DD")
+		}
+		// 半开区间 [start, end)：取结束日次日 00:00（按日历日推进，DST 安全）。
+		end = t.AddDate(0, 0, 1)
 	}
 	return start, end, nil
 }
