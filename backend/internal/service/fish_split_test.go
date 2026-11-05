@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/domain"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/fish"
@@ -188,5 +189,115 @@ func TestAccountFishImageCap(t *testing.T) {
 	}
 	if got := accountFishImageCap(nil); got != fishMaxImagesPerRequest {
 		t.Fatalf("nil account cap = %d", got)
+	}
+}
+
+// fishPerImagePriceUpstream 在 fishSplitUpstream 之上把计价改成按张线性，
+// 每张 150 积分；按余额拆批的断言依赖它。
+func fishPerImagePriceUpstream(t *testing.T, submitCount *int32, failOnSubmit int32) http.Handler {
+	upstream := fishSplitUpstream(t, submitCount, failOnSubmit)
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/tools/image-video/price" {
+			upstream.ServeHTTP(w, r)
+			return
+		}
+		var body struct {
+			Count int `json:"count"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		_ = json.NewEncoder(w).Encode(map[string]any{"credits": 150 * body.Count, "perItemCredits": 150, "pricingVersion": "pv"})
+	})
+}
+
+// fishAccountWithBalance 是带可信钱包余额观测的 fish 原生号。
+func fishAccountWithBalance(cap, balance int) *Account {
+	account := fishAccountWithCap(cap)
+	account.Platform = PlatformFish
+	account.Extra = map[string]any{
+		FishWalletBalanceExtraKey:   balance,
+		FishWalletBalanceAtExtraKey: time.Now().UTC().Format(time.RFC3339),
+	}
+	return account
+}
+
+func enabledFishCreditPolicy() FishCreditPolicy {
+	return FishCreditPolicy{Enabled: true, BalanceTrust: time.Hour, WalletRefreshMinInterval: time.Minute}
+}
+
+// resetFishPricesForTest 给每个测试一张空的进程级单价表。
+func resetFishPricesForTest(t *testing.T) {
+	t.Helper()
+	orig := fishPrices
+	fishPrices = &fishPriceCache{entries: make(map[fishPriceKey]fishPriceEntry)}
+	t.Cleanup(func() { fishPrices = orig })
+}
+
+func TestFishGenerateCallSplitsBatchesByKnownBalance(t *testing.T) {
+	resetFishPricesForTest(t)
+	var submits int32
+	service, _, _ := newFishTestService(t, fishPerImagePriceUpstream(t, &submits, 0))
+	// 余额 300、单价 150、n=4：先交 2 张，余下 2 张付不起 → 本地判定换号（不提交、不冷却）。
+	account := fishAccountWithBalance(8, 300)
+	call := NewFishImageCall(fishImageRequest("gpt-image-2", "", "", 4), "gpt-image-2", domain.FishFitLimits{})
+	call.SetCreditPolicy(enabledFishCreditPolicy())
+
+	_, err := service.GenerateCall(context.Background(), account, "tok", call)
+	var short *fishCreditsShortError
+	if !errors.As(err, &short) || short.cause != nil {
+		t.Fatalf("err = %v, want a locally decided fishCreditsShortError", err)
+	}
+	if short.need != 150 || short.balance != 0 {
+		t.Fatalf("short = need %d balance %d, want need 150 balance 0", short.need, short.balance)
+	}
+	if submits != 1 || call.Delivered() != 2 || call.Remaining() != 2 {
+		t.Fatalf("submits=%d delivered=%d remaining=%d, want 1/2/2", submits, call.Delivered(), call.Remaining())
+	}
+	if spent := call.TakeAttemptSpend(); spent != 300 {
+		t.Fatalf("attempt spend = %d, want 300", spent)
+	}
+	if failure := classifyFishError(err); !failure.Failover.ShouldRetryNextAccount() || failure.Cooldown != 0 {
+		t.Fatalf("failure = %+v, want retry next account without cooldown", failure)
+	}
+}
+
+func TestFishGenerateCallWrapsOutOfCreditsOnlyWhenPolicyEnabled(t *testing.T) {
+	cases := []struct {
+		name      string
+		policy    FishCreditPolicy
+		wantShort bool
+	}{
+		{"enabled: short for this job", enabledFishCreditPolicy(), true},
+		{"disabled: legacy insufficient credits", FishCreditPolicy{}, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			resetFishPricesForTest(t)
+			var submits int32
+			service, _, _ := newFishTestService(t, fishPerImagePriceUpstream(t, &submits, 1))
+			account := fishAccountWithCap(8)
+			account.Platform = PlatformFish
+			call := NewFishImageCall(fishImageRequest("gpt-image-2", "", "", 2), "gpt-image-2", domain.FishFitLimits{})
+			call.SetCreditPolicy(tc.policy)
+
+			_, err := service.GenerateCall(context.Background(), account, "tok", call)
+			var short *fishCreditsShortError
+			if got := errors.As(err, &short); got != tc.wantShort {
+				t.Fatalf("fishCreditsShortError = %v, want %v (err %v)", got, tc.wantShort, err)
+			}
+			if tc.wantShort && (short.need != 300 || !fish.IsOutOfCredits(short.cause)) {
+				t.Fatalf("short = need %d cause %v, want need 300 wrapping OUT_OF_CREDITS", short.need, short.cause)
+			}
+			wantReason := fishFailureInsufficientCredits
+			if tc.wantShort {
+				wantReason = fishFailureCreditsShortForJob
+			}
+			if got := classifyFishError(err).Failover.Reason; got != wantReason {
+				t.Fatalf("reason = %q, want %q", got, wantReason)
+			}
+			// 单价表只在开启时学习：关闭后巡检不会据它解除 402 冷却。
+			if _, learned := fishPrices.minPerItem(time.Now()); learned != tc.wantShort {
+				t.Fatalf("price learned = %v, want %v", learned, tc.wantShort)
+			}
+		})
 	}
 }

@@ -373,7 +373,7 @@ func (c *Client) queryRaw(ctx context.Context, token string, identity Identity, 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		var envelope apiErrorEnvelope
 		_ = json.Unmarshal(raw, &envelope)
-		return nil, classifyAPIError(resp.StatusCode, envelope.Message)
+		return nil, withErrorCode(classifyAPIError(resp.StatusCode, envelope.Message), strings.TrimSpace(envelope.Code))
 	}
 	return raw, nil
 }

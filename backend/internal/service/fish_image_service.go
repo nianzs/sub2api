@@ -140,6 +140,28 @@ type FishImageCall struct {
 	remaining int
 	// startedAt 是请求起点：usage 记录的总耗时按整个请求计（含换号续跑）。
 	startedAt time.Time
+	// creditPolicy 是按余额调度的设置（handler 每请求传入；零值 = 关闭）。
+	creditPolicy FishCreditPolicy
+	// attemptSpent 是当前账号这次尝试里已受理批次的积分（每次 GenerateCall
+	// 开始清零，handler 用 TakeAttemptSpend 取走后扣减已知余额）。
+	attemptSpent int
+}
+
+// SetCreditPolicy 设置本次请求的按余额调度策略。
+func (c *FishImageCall) SetCreditPolicy(policy FishCreditPolicy) {
+	if c != nil {
+		c.creditPolicy = policy
+	}
+}
+
+// TakeAttemptSpend 返回并清零上一次 GenerateCall 在当前账号上已受理批次的积分。
+func (c *FishImageCall) TakeAttemptSpend() int {
+	if c == nil {
+		return 0
+	}
+	spent := c.attemptSpent
+	c.attemptSpent = 0
+	return spent
 }
 
 // NewFishImageCall 构造一次调用的共享状态。fitLimits 零值 = 不裁剪 +
@@ -218,6 +240,8 @@ func accountFishImageCap(account *Account) int {
 type fishPendingBatch struct {
 	groupID string
 	count   int
+	// credits 是这批受理时的计价；组内失败上游会退回，从本次花费里扣掉。
+	credits int
 }
 
 // GenerateCall 在指定账号上尽量完成 call.remaining 张图（三段式）：
@@ -276,41 +300,104 @@ func (s *FishImageService) GenerateCall(ctx context.Context, account *Account, t
 	client := s.clients.clientForAccount(account)
 	identity := fishIdentityFromAccount(account)
 	cap := accountFishImageCap(account)
+	policy := call.creditPolicy
+	call.attemptSpent = 0
 
-	// 参考图（/v1/images/edits）：跨账号只取一次
-	var refAssets []fish.RefAsset
+	// 参考图（/v1/images/edits）：跨账号只取一次；上传推迟到首批定价之后，
+	// 付不起这一单的账号不白传。
+	var inputs []*fishInputImage
+	variant := fish.VariantTextToImage
 	if wantsFishImageEdits(parsed) {
-		inputs, err := s.loadInputs(ctx, call)
+		loaded, err := s.loadInputs(ctx, call)
 		if err != nil {
 			return nil, err
 		}
-		for _, input := range inputs {
-			asset, err := client.UploadRefImage(ctx, token, identity, "image.png", input.ContentType, input.Data)
-			if err != nil {
-				return nil, err
-			}
-			refAssets = append(refAssets, *asset)
-		}
-	}
-	variant := fish.VariantTextToImage
-	if len(refAssets) > 0 {
+		inputs = loaded
 		variant = fish.VariantEdit
 	}
+	priceKey := fishPriceKey{model: model.Name, variant: variant, imageSize: imageSize, quality: quality, refImageCount: len(inputs)}
+	// 单价表只在按余额调度开启时学习：关闭后选号、拆批、巡检解除冷却都依赖
+	// 它，表为空即整套机制不生效。
+	recordPrice := func(price *fish.PriceResult, count int) {
+		if policy.Enabled {
+			fishPrices.record(priceKey, price, count, time.Now())
+		}
+	}
+	balance, balanceKnown := policy.trustedBalance(account, time.Now())
+	perItem, _ := fishPrices.perItem(priceKey, time.Now())
 
-	// ── 提交段（串行）──
+	// ── 首批定价（上传参考图之前）：可信余额按单价压低张数，连一张都付不起
+	// 就不提交、换号（不冷却）。
+	batch := minInt(cap, call.remaining)
+	if balanceKnown {
+		batch = fishAffordableBatch(batch, balance, perItem)
+		if batch < 1 {
+			return nil, &fishCreditsShortError{need: perItem, balance: balance}
+		}
+	}
+	price, err := client.Price(ctx, token, identity, fish.PriceParams{
+		Model: model.Name, Variant: variant, ImageSize: imageSize,
+		Quality: quality, Count: batch, RefImageCount: len(inputs),
+	})
+	if err != nil {
+		return nil, fishCreditAwareError(policy, err, 0)
+	}
+	recordPrice(price, batch)
+	perItem = fishPerItemCredits(price, batch)
+	if balanceKnown && balance < price.Credits {
+		// 缓存单价缺失或过时：按实时单价重新压低张数再计价。
+		batch = fishAffordableBatch(batch, balance, perItem)
+		if batch < 1 {
+			return nil, &fishCreditsShortError{need: perItem, balance: balance}
+		}
+		price, err = client.Price(ctx, token, identity, fish.PriceParams{
+			Model: model.Name, Variant: variant, ImageSize: imageSize,
+			Quality: quality, Count: batch, RefImageCount: len(inputs),
+		})
+		if err != nil {
+			return nil, fishCreditAwareError(policy, err, 0)
+		}
+	}
+
+	var refAssets []fish.RefAsset
+	for _, input := range inputs {
+		asset, err := client.UploadRefImage(ctx, token, identity, "image.png", input.ContentType, input.Data)
+		if err != nil {
+			return nil, err
+		}
+		refAssets = append(refAssets, *asset)
+	}
+	if len(refAssets) > 0 {
+		// 上传参考图要几秒，上面的计价只用来判断付不付得起；提交前重新计价，
+		// 保证 ExpectedCredits / PricingVersion 来自紧邻的 Price。
+		price = nil
+	}
+
+	// ── 提交段（串行）：首批复用上面的计价（改图除外），之后每批实时计价，
+	// 因为 ExpectedCredits / PricingVersion 必须来自紧邻的 Price。
 	var pending []fishPendingBatch
 	var submitErr error     // 可换号的提交错误（配额/429/5xx…）
 	var indeterminate error // 提交结果不明（网络错）
 	remaining := call.remaining
 	for remaining > 0 {
-		batch := minInt(cap, remaining)
-		price, err := client.Price(ctx, token, identity, fish.PriceParams{
-			Model: model.Name, Variant: variant, ImageSize: imageSize,
-			Quality: quality, Count: batch, RefImageCount: len(refAssets),
-		})
-		if err != nil {
-			submitErr = err
-			break
+		if price == nil {
+			batch = minInt(cap, remaining)
+			if balanceKnown {
+				batch = fishAffordableBatch(batch, balance, perItem)
+				if batch < 1 {
+					submitErr = &fishCreditsShortError{need: perItem, balance: balance}
+					break
+				}
+			}
+			price, err = client.Price(ctx, token, identity, fish.PriceParams{
+				Model: model.Name, Variant: variant, ImageSize: imageSize,
+				Quality: quality, Count: batch, RefImageCount: len(refAssets),
+			})
+			if err != nil {
+				submitErr = fishCreditAwareError(policy, err, 0)
+				break
+			}
+			recordPrice(price, batch)
 		}
 		submitCtx, cancel := context.WithTimeout(ctx, fishSubmitBudget)
 		group, err := client.SubmitGeneration(submitCtx, token, identity, fish.GenerateRequest{
@@ -323,12 +410,17 @@ func (s *FishImageService) GenerateCall(ctx context.Context, account *Account, t
 			if isFishNetworkErr(err) {
 				indeterminate = &fishSubmitIndeterminateError{err: err}
 			} else {
-				submitErr = err
+				submitErr = fishCreditAwareError(policy, err, price.Credits)
 			}
 			break
 		}
-		pending = append(pending, fishPendingBatch{groupID: group.ID, count: batch})
+		pending = append(pending, fishPendingBatch{groupID: group.ID, count: batch, credits: price.Credits})
 		remaining -= batch
+		call.attemptSpent += price.Credits
+		if balanceKnown {
+			balance -= price.Credits
+		}
+		price = nil
 	}
 	// 提交段一个都没成且无不明 → 参数类错误直接终态（没有进度可言）
 	if len(pending) == 0 && indeterminate == nil && submitErr != nil && !isFishFailoverClass(submitErr) {
@@ -344,7 +436,8 @@ func (s *FishImageService) GenerateCall(ctx context.Context, account *Account, t
 		if err != nil {
 			var generationFailed *fishGenerationFailedError
 			if errors.As(err, &generationFailed) {
-				// 组内失败（审核等）：这批不交付，继续下一组
+				// 组内失败（审核等）：这批不交付、积分已退，继续下一组
+				call.attemptSpent = max(call.attemptSpent-batch.credits, 0)
 				lastGroupErr = err
 				continue
 			}

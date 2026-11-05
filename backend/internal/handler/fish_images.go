@@ -227,6 +227,7 @@ func (h *GatewayHandler) runFishImagesFailover(
 
 	requireRelay := service.FishRequiresRelay(parsed, req.call.FitLimits())
 	deferredNatives := make(map[int64]struct{})
+	req.call.SetCreditPolicy(h.gatewayService.FishCreditPolicy())
 
 	attempts := 0
 	for round := 0; attempts <= h.maxAccountSwitches && round < fishImagesMaxSelectionRounds; round++ {
@@ -239,8 +240,10 @@ func (h *GatewayHandler) runFishImagesFailover(
 		if requireRelay {
 			h.gatewayService.ExcludeFishNativeAccounts(requestCtx, apiKey.GroupID, excluded)
 		}
+		// 单价已知时选号排除付不起的账号、优先用零头（每轮重算：本请求的首次
+		// 计价也会让后续轮次拿到单价）。
 		account, err := h.gatewayService.SelectAccountForModelWithExclusions(
-			requestCtx, apiKey.GroupID, "", req.routingModel, excluded)
+			service.WithFishCreditRequirement(requestCtx, req.call), apiKey.GroupID, "", req.routingModel, excluded)
 		if err != nil || account == nil {
 			if requireRelay && len(failedAccountIDs) == 0 {
 				reqLog.Warn("fish_images.relay_required_unavailable",
@@ -295,6 +298,7 @@ func (h *GatewayHandler) runFishImagesFailover(
 		}
 
 		attempts++
+		h.gatewayService.TouchFishAccountSelected(requestCtx, account.ID)
 		if service.IsFishRelayAccount(account) {
 			// 中转号对 stream=true 是真流式、自写响应头：转发期间暂停假流式保活。
 			if fakeStream != nil {
@@ -323,6 +327,7 @@ func (h *GatewayHandler) runFishImagesFailover(
 		// 提交之后的阶段在 service 内脱离客户端连接：拿到产物就一定记账。
 		result, err := h.fishImageService.GenerateCall(requestCtx, account, token, req.call)
 		releaseAccount()
+		h.gatewayService.RecordFishSpend(requestCtx, account, req.call.TakeAttemptSpend())
 		if err == nil {
 			h.finishFishImagesSuccess(c, reqLog, apiKey, subject, subscription, account, result, req)
 			return
