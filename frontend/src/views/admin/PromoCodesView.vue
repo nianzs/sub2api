@@ -668,19 +668,8 @@ const copyRegisterLink = async (code: PromoCode) => {
   const baseUrl = window.location.origin
   const registerLink = `${baseUrl}/register?promo=${encodeURIComponent(code.code)}`
 
-  try {
-    await navigator.clipboard.writeText(registerLink)
-    appStore.showSuccess(t('admin.promo.registerLinkCopied'))
-  } catch (error) {
-    // Fallback for older browsers
-    const textArea = document.createElement('textarea')
-    textArea.value = registerLink
-    document.body.appendChild(textArea)
-    textArea.select()
-    document.execCommand('copy')
-    document.body.removeChild(textArea)
-    appStore.showSuccess(t('admin.promo.registerLinkCopied'))
-  }
+  // 成功/失败提示与非安全上下文的降级复制都由 useClipboard 统一处理。
+  await clipboardCopy(registerLink, t('admin.promo.registerLinkCopied'))
 }
 
 // Delete
