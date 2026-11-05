@@ -2106,6 +2106,9 @@ func (s *GatewayService) selectAccountForModelWithPlatform(ctx context.Context, 
 			if !s.isAccountSchedulableForRPM(ctx, acc, false) {
 				continue
 			}
+			if !isAccountAffordableForFishJob(ctx, acc) {
+				continue
+			}
 			if selected == nil {
 				selected = acc
 				continue
@@ -2113,6 +2116,13 @@ func (s *GatewayService) selectAccountForModelWithPlatform(ctx context.Context, 
 			if acc.Priority < selected.Priority {
 				selected = acc
 			} else if acc.Priority == selected.Priority {
+				// fish 按余额调度：同优先级先比余额档位（零头优先），同档再按最久未用。
+				if accTier, selectedTier := fishCreditTier(ctx, acc), fishCreditTier(ctx, selected); accTier != selectedTier {
+					if accTier < selectedTier {
+						selected = acc
+					}
+					continue
+				}
 				switch {
 				case acc.LastUsedAt == nil && selected.LastUsedAt != nil:
 					selected = acc
@@ -2223,6 +2233,9 @@ func (s *GatewayService) selectAccountForModelWithPlatform(ctx context.Context, 
 		if !s.isAccountSchedulableForRPM(ctx, acc, false) {
 			continue
 		}
+		if !isAccountAffordableForFishJob(ctx, acc) {
+			continue
+		}
 		if selected == nil {
 			selected = acc
 			continue
@@ -2230,6 +2243,13 @@ func (s *GatewayService) selectAccountForModelWithPlatform(ctx context.Context, 
 		if acc.Priority < selected.Priority {
 			selected = acc
 		} else if acc.Priority == selected.Priority {
+			// fish 按余额调度：同优先级先比余额档位（零头优先），同档再按最久未用。
+			if accTier, selectedTier := fishCreditTier(ctx, acc), fishCreditTier(ctx, selected); accTier != selectedTier {
+				if accTier < selectedTier {
+					selected = acc
+				}
+				continue
+			}
 			switch {
 			case acc.LastUsedAt == nil && selected.LastUsedAt != nil:
 				selected = acc

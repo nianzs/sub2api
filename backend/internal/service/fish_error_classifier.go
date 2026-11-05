@@ -43,20 +43,23 @@ var fishDailyResetLookupTimeout = 5 * time.Second
 // fish 失败原因，进入 UpstreamFailoverError.Reason 供 ops 归因。
 const (
 	fishFailureInsufficientCredits = GatewayFailureReason("fish_insufficient_credits")
-	fishFailureAuth                = GatewayFailureReason("fish_auth")
-	fishFailureForbidden           = GatewayFailureReason("fish_forbidden")
-	fishFailureUpstream            = GatewayFailureReason("fish_upstream")
-	fishFailureRequest             = GatewayFailureReason("fish_request")
-	fishFailureGenerationFailed    = GatewayFailureReason("fish_generation_failed")
-	fishFailureIndeterminate       = GatewayFailureReason("fish_indeterminate")
-	fishFailureResultUnavailable   = GatewayFailureReason("fish_result_unavailable")
+	// fishFailureCreditsShortForJob 是「余额不够这一单」：换号、不冷却
+	//（按余额调度开启时 402 OUT_OF_CREDITS 与本地余额判定都归这里）。
+	fishFailureCreditsShortForJob = GatewayFailureReason("fish_credits_short_for_job")
+	fishFailureAuth               = GatewayFailureReason("fish_auth")
+	fishFailureForbidden          = GatewayFailureReason("fish_forbidden")
+	fishFailureUpstream           = GatewayFailureReason("fish_upstream")
+	fishFailureRequest            = GatewayFailureReason("fish_request")
+	fishFailureGenerationFailed   = GatewayFailureReason("fish_generation_failed")
+	fishFailureIndeterminate      = GatewayFailureReason("fish_indeterminate")
+	fishFailureResultUnavailable  = GatewayFailureReason("fish_result_unavailable")
 )
 
 // fishFailure 是 pkg/fish 的错误翻译成网关语义后的结果（镜像 leonardoFailure）。
 type fishFailure struct {
-	Failover            *UpstreamFailoverError
-	Cooldown            time.Duration
-	CooldownReason      string
+	Failover       *UpstreamFailoverError
+	Cooldown       time.Duration
+	CooldownReason string
 	// RateLimited 标记 429 限流（Reason 与 5xx 同为 fishFailureUpstream，
 	// 靠本字段区分账号侧处置）。
 	RateLimited         bool
@@ -98,19 +101,22 @@ func classifyFishError(err error) fishFailure {
 		}
 	}
 
-	var insufficientErr *fish.InsufficientCreditsError
-	if errors.As(err, &insufficientErr) {
+	var creditsShort *fishCreditsShortError
+	if errors.As(err, &creditsShort) {
 		return fishFailure{
 			Failover: &UpstreamFailoverError{
-				StatusCode:        statusOrDefault(insufficientErr.StatusCode, http.StatusTooManyRequests),
+				StatusCode:        http.StatusPaymentRequired,
 				Stage:             GatewayFailureStageInference,
 				Scope:             GatewayFailureScopeAccount,
-				Reason:            fishFailureInsufficientCredits,
+				Reason:            fishFailureCreditsShortForJob,
 				NextAccountAction: NextAccountRetry,
 			},
-			Cooldown:       fishInsufficientCooldown,
-			CooldownReason: "fish credits exhausted or quota exceeded",
 		}
+	}
+
+	var insufficientErr *fish.InsufficientCreditsError
+	if errors.As(err, &insufficientErr) {
+		return fishInsufficientCreditsFailure(insufficientErr.StatusCode)
 	}
 
 	var authErr *fish.AuthError
@@ -197,6 +203,23 @@ func classifyFishError(err error) fishFailure {
 	return fishFailure{}
 }
 
+// fishInsufficientCreditsFailure 构造「积分耗尽」决策：换号并冷却（free 号
+// 到 UTC 零点，其余 2h + 后台补查每日窗口）。按余额调度关闭时 402 走这里；
+// 开启时只在确认付不起最便宜一单后才用它落冷却。
+func fishInsufficientCreditsFailure(statusCode int) fishFailure {
+	return fishFailure{
+		Failover: &UpstreamFailoverError{
+			StatusCode:        statusOrDefault(statusCode, http.StatusTooManyRequests),
+			Stage:             GatewayFailureStageInference,
+			Scope:             GatewayFailureScopeAccount,
+			Reason:            fishFailureInsufficientCredits,
+			NextAccountAction: NextAccountRetry,
+		},
+		Cooldown:       fishInsufficientCooldown,
+		CooldownReason: fishCreditsExhaustedReason,
+	}
+}
+
 // fishIndeterminateFailure 构造「提交结果不明」的 failover 决策：504、不换号。
 func fishIndeterminateFailure() *UpstreamFailoverError {
 	return &UpstreamFailoverError{
@@ -238,10 +261,18 @@ func (s *GatewayService) FishFailover(ctx context.Context, accountID int64, _ st
 	if failure.Failover == nil {
 		return nil
 	}
-	if s != nil {
-		applyFishCooldown(ctx, s.accountRepo, accountID, failure)
-		applyFishAccountError(ctx, s.accountRepo, accountID, failure)
+	if s == nil {
+		return failure.Failover
 	}
+	var creditsShort *fishCreditsShortError
+	if failure.Failover.Reason == fishFailureCreditsShortForJob && errors.As(err, &creditsShort) {
+		if s.accountRepo != nil {
+			applyFishCreditShortfall(ctx, s.accountRepo, accountID, creditsShort, s.FishCreditPolicy())
+		}
+		return failure.Failover
+	}
+	applyFishCooldown(ctx, s.accountRepo, accountID, failure)
+	applyFishAccountError(ctx, s.accountRepo, accountID, failure)
 	return failure.Failover
 }
 

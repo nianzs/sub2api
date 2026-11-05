@@ -200,6 +200,13 @@ func (s *AccountUsageService) fetchAndCacheFishUsage(ctx context.Context, accoun
 		}
 		s.applyFishDailyObservation(ctx, account, entitlements)
 	}
+	// 钱包余额落库（含 0，选号据此排除付不起的账号）；顺带解除被旧版「402
+	// 一律耗尽」误冷却、实际还够最便宜一单的账号。每日次数状态未知时不解除。
+	if walletErr == nil && wallet != nil && s.accountRepo != nil {
+		applyFishWalletObservation(ctx, s.accountRepo, account.ID, wallet.Balance, now)
+		dailyAvailable := entErr == nil && entitlements != nil && !fishDailyImageExhausted(entitlements.DailyImage)
+		recoverFishCreditCooldown(ctx, s.accountRepo, account, wallet.Balance, dailyAvailable, now)
+	}
 	s.storeFishUsageSnapshot(account.ID, info)
 	return info, nil
 }

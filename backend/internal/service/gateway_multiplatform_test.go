@@ -9,7 +9,9 @@ import (
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
+	"github.com/Wei-Shaw/sub2api/internal/domain"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/ctxkey"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/fish"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/pagination"
 	"github.com/stretchr/testify/require"
 )
@@ -3585,4 +3587,78 @@ func TestGatewayService_SelectAccountForModelWithPlatform_RoutedOpenAIGroup(t *t
 	require.NoError(t, err)
 	require.NotNil(t, acc)
 	require.Equal(t, int64(2), acc.ID, "routed account must win over the higher-priority unrouted one")
+}
+
+func TestGatewayService_SelectAccountForModelWithPlatform_FishCreditAware(t *testing.T) {
+	resetFishPricesForTest(t)
+	now := time.Now()
+	fishAccount := func(id int64, lastUsed time.Duration, extra map[string]any) Account {
+		return Account{
+			ID: id, Platform: PlatformFish, Type: AccountTypeAPIKey, Priority: 1, Status: StatusActive, Schedulable: true,
+			Credentials: map[string]any{fishCredentialToken: "tok"}, Extra: extra, LastUsedAt: ptr(now.Add(-lastUsed)),
+		}
+	}
+	balance := func(credits int) map[string]any {
+		return map[string]any{FishWalletBalanceExtraKey: credits, FishWalletBalanceAtExtraKey: now.UTC().Format(time.RFC3339)}
+	}
+	repo := &mockAccountRepoForPlatform{
+		accounts: []Account{
+			fishAccount(1, 5*time.Hour, balance(100)),  // 付不起 150：排除
+			fishAccount(2, 4*time.Hour, balance(3000)), // 够 20 张：第 2 档
+			fishAccount(3, 1*time.Hour, balance(400)),  // 只够 2 张：零头优先
+			fishAccount(7, 2*time.Hour, balance(900)),  // 够 6 张：单张第 1 档，4 张的单正好付清
+			fishAccount(4, 3*time.Hour, nil),           // 余额未知：最后
+			fishAccount(5, 6*time.Hour, map[string]any{ // 近期 402 记下余额 < 150：排除
+				FishWalletBelowExtraKey: 150, FishWalletBelowAtExtraKey: now.UTC().Format(time.RFC3339),
+			}),
+			fishAccount(6, 7*time.Hour, map[string]any{ // 估算余额够，但更新的 402 说付不起：排除
+				FishWalletBalanceExtraKey: 3000, FishWalletBalanceAtExtraKey: now.UTC().Format(time.RFC3339),
+				FishWalletBelowExtraKey: 150, FishWalletBelowAtExtraKey: now.UTC().Format(time.RFC3339),
+			}),
+		},
+		accountsByID: map[int64]*Account{},
+	}
+	for i := range repo.accounts {
+		repo.accountsByID[repo.accounts[i].ID] = &repo.accounts[i]
+	}
+	svc := &GatewayService{accountRepo: repo, cache: &mockGatewayCacheForPlatform{}, cfg: testConfig()}
+
+	call := NewFishImageCall(fishImageRequest("gpt-image-2", "", "", 1), "gpt-image-2", domain.DefaultFishFitLimits())
+	call.SetCreditPolicy(FishCreditPolicy{Enabled: true, BalanceTrust: time.Hour})
+	key, ok := fishCallPriceKey(call)
+	require.True(t, ok)
+	fishPrices.record(key, &fish.PriceResult{PerItemCredits: 150}, 1, now)
+
+	multi := NewFishImageCall(fishImageRequest("gpt-image-2", "", "", 4), "gpt-image-2", domain.DefaultFishFitLimits())
+	multi.SetCreditPolicy(FishCreditPolicy{Enabled: true, BalanceTrust: time.Hour})
+	single := WithFishCreditRequirement(context.Background(), call)
+	four := WithFishCreditRequirement(context.Background(), multi)
+
+	cases := []struct {
+		name     string
+		ctx      context.Context
+		excluded map[int64]struct{}
+		want     int64
+	}{
+		{"no requirement keeps oldest-first", context.Background(), nil, 6},
+		{"leftovers first", single, nil, 3},
+		{"then larger balances", single, map[int64]struct{}{3: {}}, 7},
+		{"largest balance after that", single, map[int64]struct{}{3: {}, 7: {}}, 2},
+		{"unknown balance last", single, map[int64]struct{}{2: {}, 3: {}, 7: {}}, 4},
+		{"multi-image: tightest account that pays all", four, nil, 7},
+		{"multi-image: then larger balances", four, map[int64]struct{}{7: {}}, 2},
+		{"multi-image: unknown before partial", four, map[int64]struct{}{2: {}, 7: {}}, 4},
+		{"multi-image: partial account as last resort", four, map[int64]struct{}{2: {}, 4: {}, 7: {}}, 3},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			acc, err := svc.selectAccountForModelWithPlatform(tc.ctx, nil, "", "gpt-image-2", tc.excluded, PlatformFish)
+			require.NoError(t, err)
+			require.Equal(t, tc.want, acc.ID)
+		})
+	}
+
+	_, err := svc.selectAccountForModelWithPlatform(WithFishCreditRequirement(context.Background(), call), nil, "", "gpt-image-2",
+		map[int64]struct{}{2: {}, 3: {}, 4: {}, 7: {}}, PlatformFish)
+	require.Error(t, err, "accounts known to be unable to pay must be filtered out")
 }

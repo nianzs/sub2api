@@ -1269,8 +1269,19 @@ type GatewayCNProvidersConfig struct {
 //     每轮对全部 active 的 fish token 号拉一次 entitlements（复用用量服务的
 //     缓存/singleflight/代理路由），看到每日出图次数耗尽即落临时不可调度到
 //     重置时刻——不依赖请求流量和管理端看列表。
+//   - credit_aware_scheduling_enabled: 按钱包余额调度（默认 true）。402
+//     OUT_OF_CREDITS 只说明余额不够这一单：开启时只跳过该账号、不冷却，
+//     选号排除已知付不起的账号并优先用零头，多张图按余额拆批。关闭即回到
+//     「402 一律冷却」的旧行为。
+//   - balance_trust_hours: 钱包余额观测的可信时长（小时，默认 6）。过期的
+//     余额按未知处理（选号放行），等巡检或下一次 402 刷新。
+//   - wallet_refresh_min_interval_seconds: 402 后补查钱包的最短间隔（秒，
+//     默认 600）。窗口内已有观测就不再查，避免 402 风暴打爆钱包接口。
 type GatewayFishConfig struct {
-	QuotaSweepIntervalMinutes int `mapstructure:"quota_sweep_interval_minutes"`
+	QuotaSweepIntervalMinutes       int  `mapstructure:"quota_sweep_interval_minutes"`
+	CreditAwareSchedulingEnabled    bool `mapstructure:"credit_aware_scheduling_enabled"`
+	BalanceTrustHours               int  `mapstructure:"balance_trust_hours"`
+	WalletRefreshMinIntervalSeconds int  `mapstructure:"wallet_refresh_min_interval_seconds"`
 }
 
 type GatewayLiveConfig struct {
@@ -2643,6 +2654,10 @@ func setDefaults() {
 	viper.SetDefault("gateway.cn_providers.balance_check_interval_minutes", 10)
 	// fish 渠道周期配额巡检：耗尽号不依赖流量/看列表即可落冷却。
 	viper.SetDefault("gateway.fish.quota_sweep_interval_minutes", 30)
+	// fish 按钱包余额调度：402 只跳过不冷却，选号看余额（关闭回到旧行为）。
+	viper.SetDefault("gateway.fish.credit_aware_scheduling_enabled", true)
+	viper.SetDefault("gateway.fish.balance_trust_hours", 6)
+	viper.SetDefault("gateway.fish.wallet_refresh_min_interval_seconds", 600)
 	viper.SetDefault("gateway.image_concurrency.enabled", false)
 	viper.SetDefault("gateway.image_concurrency.max_concurrent_requests", 0)
 	viper.SetDefault("gateway.image_concurrency.overflow_mode", ImageConcurrencyOverflowModeReject)

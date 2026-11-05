@@ -1236,3 +1236,18 @@ func TestFilterSchedulerExtraDropsRetiredExcelBPSWhitelist(t *testing.T) {
 	require.NotContains(t, filtered, "openai_excel_bps_models")
 	require.NotContains(t, filtered, "openai_passthrough")
 }
+
+func TestFishWalletExtraIsProjectedAndSchedulerNeutral(t *testing.T) {
+	filtered := filterSchedulerExtra(map[string]any{
+		service.FishWalletBalanceExtraKey:   300,
+		service.FishWalletBalanceAtExtraKey: "2026-11-05T00:00:00Z",
+		service.FishWalletBelowExtraKey:     650,
+		service.FishWalletBelowAtExtraKey:   "2026-11-05T00:00:00Z",
+		"fish_max_quality":                  "medium",
+	})
+	require.Len(t, filtered, 5, "fish credit-aware selection reads these from the snapshot")
+	require.False(t, shouldEnqueueSchedulerOutboxForExtraUpdates(map[string]any{
+		service.FishWalletBalanceExtraKey:   300,
+		service.FishWalletBalanceAtExtraKey: "2026-11-05T00:00:00Z",
+	}), "wallet observations must not trigger a bucket rebuild")
+}

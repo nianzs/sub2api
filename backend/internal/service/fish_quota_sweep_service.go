@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"log"
+	"slices"
 	"sync"
 	"time"
 )
@@ -101,23 +102,39 @@ func (s *FishQuotaSweepService) runOnce() {
 
 	sem := make(chan struct{}, fishQuotaSweepConcurrency)
 	var wg sync.WaitGroup
-	for i := range accounts {
-		account := &accounts[i]
-		// 中转号没有 fish entitlements；非 active 号（error/手动禁用）不必巡检。
-		if !account.IsActive() || !isFishTokenAccount(account) {
-			continue
+	for _, account := range fishQuotaSweepTargets(accounts) {
+		// 按顺序拿并发槽，优先级才真正生效；预算耗尽就停止派发。
+		select {
+		case sem <- struct{}{}:
+		case <-ctx.Done():
+			wg.Wait()
+			return
 		}
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			sem <- struct{}{}
+		wg.Go(func() {
 			defer func() { <-sem }()
 			if _, err := s.prober.GetUsageForAccount(ctx, account); err != nil {
 				log.Printf("[FishQuotaSweep] probe account %d failed: %v", account.ID, err)
 			}
-		}()
+		})
 	}
 	wg.Wait()
+}
+
+// fishQuotaSweepTargets 返回本轮要巡检的号及顺序：只查 active 的 token 号，
+// 中转号没有 entitlements 与钱包；钱包余额最久没观测（或从没观测）的在前。
+// 单轮预算覆盖不了全部号，按这个顺序几轮下来就能轮遍全池，而不是每轮都查
+// 列表前面同一批。
+func fishQuotaSweepTargets(accounts []Account) []*Account {
+	targets := make([]*Account, 0, len(accounts))
+	for i := range accounts {
+		if accounts[i].IsActive() && isFishTokenAccount(&accounts[i]) {
+			targets = append(targets, &accounts[i])
+		}
+	}
+	slices.SortStableFunc(targets, func(a, b *Account) int {
+		return fishWalletObservedAt(a).Compare(fishWalletObservedAt(b))
+	})
+	return targets
 }
 
 // runOnceBudget 单轮预算：每账号 10s（含代理握手），下限 30s。

@@ -20,10 +20,31 @@ const (
 // RequestError 是 fish 上游调用的基础错误。fish API 的错误信封统一为
 // {"status":N,"message":"..."}（2026-10 抓包确认）。
 type RequestError struct {
-	Message    string
-	StatusCode int
-	ErrorType  string
+	Message     string
+	StatusCode  int
+	ErrorType   string
 	UserMessage string
+	// Code 是错误信封里的稳定机器码（如 OUT_OF_CREDITS），部分错误没有。
+	Code string
+}
+
+// CodeOutOfCredits 是 402 的机器码：钱包余额不够这一单的价格。它不代表
+// 余额为零——响应不带余额，也不带所需积分。
+const CodeOutOfCredits = "OUT_OF_CREDITS"
+
+// IsOutOfCredits 报告错误是否为带 OUT_OF_CREDITS 机器码的 402。
+func IsOutOfCredits(err error) bool {
+	var insufficient *InsufficientCreditsError
+	return errors.As(err, &insufficient) && insufficient.Code == CodeOutOfCredits
+}
+
+// withErrorCode 把信封机器码写到已分类错误内嵌的 RequestError 上。
+func withErrorCode(err error, code string) error {
+	var reqErr *RequestError
+	if code != "" && errors.As(err, &reqErr) {
+		reqErr.Code = code
+	}
+	return err
 }
 
 func (e *RequestError) Error() string {

@@ -11,6 +11,8 @@ import (
 	"image/png"
 	"net/http"
 	"net/http/httptest"
+	"slices"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -105,7 +107,12 @@ func TestFishGenerateCallHappyPath(t *testing.T) {
 func TestFishGenerateCallEditsFlow(t *testing.T) {
 	png := []byte("ref-image")
 	var variant string
+	var sequence []string
 	service, account, _ := newFishTestService(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/task/upload-url", "/tools/image-video/price", "/tools/image-video/generate":
+			sequence = append(sequence, r.URL.Path)
+		}
 		switch r.URL.Path {
 		case "/task/upload-url":
 			_, _ = w.Write([]byte(`{"object_key":"media_gen_ref/x/image.png","upload_url":"http://` + r.Host + `/r2"}`))
@@ -135,6 +142,12 @@ func TestFishGenerateCallEditsFlow(t *testing.T) {
 	}
 	if variant != fish.VariantEdit {
 		t.Fatalf("variant = %q, want edit", variant)
+	}
+	// 先计价再上传（付不起不白传），提交前重新计价（ExpectedCredits /
+	// PricingVersion 来自紧邻的 Price）。
+	want := []string{"/tools/image-video/price", "/task/upload-url", "/tools/image-video/price", "/tools/image-video/generate"}
+	if !slices.Equal(sequence, want) {
+		t.Fatalf("call sequence = %v, want %v", sequence, want)
 	}
 }
 
@@ -219,6 +232,38 @@ func TestFishGenerateCallFailedGroup(t *testing.T) {
 	}
 	if failed.reason != "moderation" {
 		t.Fatalf("reason = %q", failed.reason)
+	}
+}
+
+func TestFishGenerateCallRefundsFailedGroupFromAttemptSpend(t *testing.T) {
+	var submits int32
+	service, account, _ := newFishTestService(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/tools/image-video/price":
+			_, _ = w.Write([]byte(`{"credits":650,"pricingVersion":"pv"}`))
+		case "/tools/image-video/generate":
+			n := atomic.AddInt32(&submits, 1)
+			_, _ = w.Write([]byte(`{"id":"g` + strconv.Itoa(int(n)) + `","status":"generating","results":[]}`))
+		case "/task/group/g1":
+			_, _ = w.Write([]byte(`{"id":"g1","status":"failed","results":[{"id":"m","status":"failed","failureReason":"moderation"}]}`))
+		case "/task/group/g2":
+			_, _ = w.Write([]byte(`{"id":"g2","status":"done","results":[{"id":"m","status":"done","mediaItem":{"id":"m","url":"http://` + r.Host + `/o.png"}}]}`))
+		case "/o.png":
+			_, _ = w.Write([]byte("out"))
+		default:
+			w.WriteHeader(404)
+		}
+	}))
+	account.Credentials[fishCredentialMaxPerGen] = 1
+	call := NewFishImageCall(fishImageRequest("gpt-image-2", "", "", 2), "gpt-image-2", domain.FishFitLimits{})
+
+	_, err := service.GenerateCall(context.Background(), account, "tok", call)
+	var failed *fishGenerationFailedError
+	if !errors.As(err, &failed) || call.Delivered() != 1 {
+		t.Fatalf("err = %v delivered = %d, want the moderation failure with 1 delivered", err, call.Delivered())
+	}
+	if spent := call.TakeAttemptSpend(); spent != 650 {
+		t.Fatalf("attempt spend = %d, want 650 (the failed group is refunded upstream)", spent)
 	}
 }
 
@@ -756,5 +801,40 @@ func TestFishGenerateCallEstimatesUsage(t *testing.T) {
 	}
 	if string(result.Usage) == "" {
 		t.Fatal("result.Usage must carry the estimate for the stream path")
+	}
+}
+
+func TestFishGenerateCallEditsSkipsUploadWhenBalanceCannotPay(t *testing.T) {
+	resetFishPricesForTest(t)
+	var uploads int32
+	service, account, _ := newFishTestService(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/tools/image-video/price":
+			_, _ = w.Write([]byte(`{"credits":650,"perItemCredits":650,"pricingVersion":"pv"}`))
+		case "/task/upload-url", "/r2", "/tools/image-video/media/inspect":
+			atomic.AddInt32(&uploads, 1)
+			w.WriteHeader(500)
+		default:
+			t.Errorf("unexpected %s %s", r.Method, r.URL.Path)
+			w.WriteHeader(404)
+		}
+	}))
+	account.Platform = PlatformFish
+	account.Extra = map[string]any{
+		FishWalletBalanceExtraKey:   400,
+		FishWalletBalanceAtExtraKey: time.Now().UTC().Format(time.RFC3339),
+	}
+	req := fishImageRequest("gpt-image-2", "2048x2048", "high", 1)
+	req.Uploads = []OpenAIImagesUpload{{Data: []byte("ref"), ContentType: "image/png"}}
+	call := NewFishImageCall(req, req.Model, domain.DefaultFishFitLimits())
+	call.SetCreditPolicy(FishCreditPolicy{Enabled: true, BalanceTrust: time.Hour})
+
+	_, err := service.GenerateCall(context.Background(), account, "tok", call)
+	var short *fishCreditsShortError
+	if !errors.As(err, &short) || short.need != 650 || short.balance != 400 {
+		t.Fatalf("err = %v, want fishCreditsShortError need 650 balance 400", err)
+	}
+	if uploads != 0 {
+		t.Fatalf("reference image uploads = %d, want 0 when the balance cannot pay", uploads)
 	}
 }

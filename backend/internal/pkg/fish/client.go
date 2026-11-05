@@ -181,10 +181,11 @@ func (c *Client) doJSON(ctx context.Context, method, path string, token string, 
 				envelope.Message = envelope.Message[:maxErrorBodySnippet]
 			}
 		}
-		if code := strings.TrimSpace(envelope.Code); code != "" {
+		code := strings.TrimSpace(envelope.Code)
+		if code != "" {
 			envelope.Message = code + ": " + envelope.Message
 		}
-		return classifyAPIError(resp.StatusCode, envelope.Message)
+		return withErrorCode(classifyAPIError(resp.StatusCode, envelope.Message), code)
 	}
 	if out != nil {
 		if err := json.Unmarshal(raw, out); err != nil {

@@ -484,6 +484,16 @@ func (s *SchedulerSnapshotService) handleOutboxEvent(ctx context.Context, event 
 	}
 }
 
+// TouchLastUsed 立刻把单个账号在调度缓存里的 last_used 往前推（Lua 只接受
+// 更晚的时间）。选中即推，并发选号就不会都落到同一个「最久没用」的账号上；
+// 数据库里的 LastUsedAt 仍由成功计费后的延迟刷新写入。
+func (s *SchedulerSnapshotService) TouchLastUsed(ctx context.Context, accountID int64, at time.Time) error {
+	if s == nil || s.cache == nil || accountID <= 0 {
+		return nil
+	}
+	return s.cache.UpdateLastUsed(ctx, map[int64]time.Time{accountID: at})
+}
+
 func (s *SchedulerSnapshotService) handleLastUsedEvent(ctx context.Context, payload map[string]any) error {
 	if s.cache == nil || payload == nil {
 		return nil
