@@ -79,7 +79,7 @@ func (s *GatewayService) handleResponsesCompactionResponseWithRetry(
 		heartbeat = hb.tick
 	}
 
-	finalResp, usage := s.collectAnthropicResponseFromSSE(resp.Body, requestID, heartbeat)
+	finalResp, usage, _ := s.collectAnthropicResponseFromSSE(resp.Body, requestID, heartbeat)
 	if finalResp != nil && retry != nil &&
 		apicompat.AnthropicStopReasonString(finalResp.StopReason) == compactionStopContextWindowExceeded {
 		retryResp, err := retry()
@@ -98,7 +98,7 @@ func (s *GatewayService) handleResponsesCompactionResponseWithRetry(
 				}
 				return nil, s.failCompaction(c, clientStream, mapUpstreamStatusCode(retryResp.StatusCode), "Upstream request failed", requestID)
 			}
-			retryFinal, retryUsage := s.collectAnthropicResponseFromSSE(retryResp.Body, requestID, heartbeat)
+			retryFinal, retryUsage, _ := s.collectAnthropicResponseFromSSE(retryResp.Body, requestID, heartbeat)
 			usage = addClaudeUsage(usage, retryUsage)
 			finalResp = retryFinal
 		}

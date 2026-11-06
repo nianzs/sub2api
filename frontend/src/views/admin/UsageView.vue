@@ -200,7 +200,7 @@ import { saveAs } from 'file-saver'
 import { useRoute } from 'vue-router'
 import { useAppStore } from '@/stores/app'; import { adminAPI } from '@/api/admin'; import { adminUsageAPI } from '@/api/admin/usage'
 import { getPersistedPageSize } from '@/composables/usePersistedPageSize'
-import { formatReasoningEffort } from '@/utils/format'
+import { formatReasoningEffort, getBrowserTimeZone } from '@/utils/format'
 import { resolveUsageRequestType, requestTypeToLegacyStream } from '@/utils/usageRequestType'
 import AppLayout from '@/components/layout/AppLayout.vue'; import Pagination from '@/components/common/Pagination.vue'; import Select from '@/components/common/Select.vue'; import DateRangePicker from '@/components/common/DateRangePicker.vue'
 import UsageStatsCards from '@/components/admin/usage/UsageStatsCards.vue'; import UsageFilters from '@/components/admin/usage/UsageFilters.vue'
@@ -841,15 +841,14 @@ const errSortOrder = ref<'asc' | 'desc'>('desc')
 const showErrorModal = ref(false)
 const selectedErrorId = ref<number | null>(null)
 
-// 注意：'YYYY-MM-DDT00:00:00' 无时区后缀，按本地时区解析后再转 UTC——与页面其它日期处理语义一致，刻意如此，勿改成 'T00:00:00Z'
-const toRFC3339 = (d: string | undefined, endOfDay = false): string | undefined =>
-  d ? new Date(d + (endOfDay ? 'T23:59:59.999' : 'T00:00:00')).toISOString() : undefined
-
 const buildAdminErrorLogParams = (includePagination = true): OpsErrorListQueryParams => {
   const params: OpsErrorListQueryParams = {
     view: 'all',
-    start_time: toRFC3339(filters.value.start_date),
-    end_time: toRFC3339(filters.value.end_date, true),
+    // 与用量明细同一套日期契约：YYYY-MM-DD + 浏览器时区，由后端按该时区取日界（结束日含当天，无窗口上限）。
+    // timezone 必须显式带：清理走 DELETE，请求拦截器只给 GET 自动附加 timezone，缺了会按服务器时区删错窗口。
+    start_date: filters.value.start_date,
+    end_date: filters.value.end_date,
+    timezone: getBrowserTimeZone(),
     user_id: filters.value.user_id ?? undefined,
     api_key_id: filters.value.api_key_id ?? undefined,
     account_id: filters.value.account_id ?? undefined,
