@@ -528,7 +528,7 @@ func BuildKiroPayloadWithContext(claudeBody []byte, modelID, profileArn, origin 
 	}
 
 	messages := gjson.GetBytes(claudeBody, "messages")
-	inlineSystem, filteredMessages := extractInlineSystemPrompts(messages)
+	filteredMessages := normalizeInlineSystemMessages(messages)
 	thinking := deriveThinkingDirective(claudeBody, headers)
 	if hasForcedClaudeToolChoice(claudeBody) {
 		thinking = nil
@@ -549,13 +549,6 @@ func BuildKiroPayloadWithContext(claudeBody []byte, modelID, profileArn, origin 
 	structuredOutputTool, structuredOutputHint := buildStructuredOutputTool(claudeBody, &requestCtx)
 	toolChoiceHint := joinPromptHints(extractClaudeToolChoiceHint(claudeBody, &requestCtx), structuredOutputHint)
 	baseSystem := extractSystemPrompt(claudeBody)
-	if inlineSystem != "" {
-		if strings.TrimSpace(baseSystem) != "" {
-			baseSystem = baseSystem + "\n\n" + inlineSystem
-		} else {
-			baseSystem = inlineSystem
-		}
-	}
 	if IsKiroGPTModel(modelID) {
 		thinking = nil
 		requestCtx.ThinkingEnabled = false
@@ -1510,28 +1503,38 @@ func extractTextFromContentBlocks(content gjson.Result) string {
 	return content.String()
 }
 
-// extractInlineSystemPrompts 从 messages 中提取所有 role=="system" 的中途消息文本，
-// 返回拼接后的 system 文本与剔除 system 后（顺序保留）的消息切片。
-// Claude 桌面版 beta mid-conversation-system-2026-04-07 会在 messages 中插入 system 消息，
-// Kiro/CodeWhisperer 不支持中途 system，故在此提取并折叠进顶层 systemPrompt。
-func extractInlineSystemPrompts(messages gjson.Result) (string, []gjson.Result) {
+// normalizeInlineSystemMessages 把 messages 中的 role=="system" 消息改写成 Kiro 能表达的形式。
+// Claude 桌面版 beta mid-conversation-system-2026-04-07 会在 messages 中途插入 system 消息，
+// Kiro/CodeWhisperer 不支持中途 system：
+//   - 有文本的 system 消息原地改成一条 user 消息，文本用 <system-reminder> 包住。之后
+//     processMessages 里的 mergeAdjacentMessages 会把它并进相邻的 user 消息；落在末尾时
+//     成为当前消息，tools 照常挂载。
+//   - 没有文本的 system 消息（例如只带 output_config 的控制消息）直接丢掉。
+//
+// 不能折叠进顶层 systemPrompt：它被 prependSystemHistory 放在对话最开头，Kiro 上游按前缀
+// 缓存，每多一条中途 system 消息开头就变一次，整段历史都按未命中计费（实测同样内容贵 3.7 倍）。
+func normalizeInlineSystemMessages(messages gjson.Result) []gjson.Result {
 	arr := messages.Array()
-	var sb strings.Builder
-	filtered := make([]gjson.Result, 0, len(arr))
+	out := make([]gjson.Result, 0, len(arr))
 	for _, msg := range arr {
-		if msg.Get("role").String() == "system" {
-			text := strings.TrimSpace(extractTextFromContentBlocks(msg.Get("content")))
-			if text != "" {
-				if sb.Len() > 0 {
-					_, _ = sb.WriteString("\n\n")
-				}
-				_, _ = sb.WriteString(text)
-			}
+		if msg.Get("role").String() != "system" {
+			out = append(out, msg)
 			continue
 		}
-		filtered = append(filtered, msg)
+		text := strings.TrimSpace(extractTextFromContentBlocks(msg.Get("content")))
+		if text == "" {
+			continue
+		}
+		encoded, _ := json.Marshal(map[string]any{
+			"role": "user",
+			"content": []map[string]any{{
+				"type": "text",
+				"text": "<system-reminder>\n" + text + "\n</system-reminder>",
+			}},
+		})
+		out = append(out, gjson.ParseBytes(encoded))
 	}
-	return sb.String(), filtered
+	return out
 }
 
 func deriveThinkingDirective(body []byte, headers http.Header) *thinkingDirective {

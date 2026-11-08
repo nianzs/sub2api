@@ -3455,9 +3455,11 @@ func TestBuildKiroPayloadTrailingInlineSystemPreservesCurrentUserAndTools(t *tes
 	require.NoError(t, err)
 	payload := result.Payload
 
-	require.Equal(t, "real question", gjson.GetBytes(payload, "conversationState.currentMessage.userInputMessage.content").String())
+	// 末尾的 system 并进当前消息，tools 照常挂载
+	current := gjson.GetBytes(payload, "conversationState.currentMessage.userInputMessage.content").String()
+	require.Equal(t, "real question\n\n<system-reminder>\nSKILL LIST REMINDER\n</system-reminder>", current)
 	require.Equal(t, int64(2), gjson.GetBytes(payload, "conversationState.currentMessage.userInputMessage.userInputMessageContext.tools.#").Int())
-	require.Contains(t, gjson.GetBytes(payload, "conversationState.history.0.userInputMessage.content").String(), "SKILL LIST REMINDER")
+	require.NotContains(t, gjson.GetBytes(payload, "conversationState.history.0.userInputMessage.content").String(), "SKILL LIST REMINDER")
 }
 
 func TestBuildKiroPayloadMidConversationSystemMergesAndKeepsAlternation(t *testing.T) {
@@ -3474,12 +3476,11 @@ func TestBuildKiroPayloadMidConversationSystemMergesAndKeepsAlternation(t *testi
 	require.NoError(t, err)
 	payload := result.Payload
 
-	// alpha 与 bravo 过滤 system 后相邻，应被合并为当前消息
+	// system 原地变成提醒，与前后两条 user 合并为当前消息，顺序不变
 	current := gjson.GetBytes(payload, "conversationState.currentMessage.userInputMessage.content").String()
-	require.Contains(t, current, "alpha")
-	require.Contains(t, current, "bravo")
-	// MID NOTE 折叠进前置注入
-	require.Contains(t, gjson.GetBytes(payload, "conversationState.history.0.userInputMessage.content").String(), "MID NOTE")
+	require.Equal(t, "alpha\n\n<system-reminder>\nMID NOTE\n</system-reminder>\n\nbravo", current)
+	// 开头的 system 前缀不受中途 system 影响
+	require.NotContains(t, gjson.GetBytes(payload, "conversationState.history.0.userInputMessage.content").String(), "MID NOTE")
 	// history 中不应出现裸 system 角色
 	for _, msg := range gjson.GetBytes(payload, "conversationState.history").Array() {
 		require.NotEqual(t, "system", msg.Get("userInputMessage.role").String())
@@ -3499,8 +3500,8 @@ func TestBuildKiroPayloadInlineSystemBlockArrayExtracted(t *testing.T) {
 	require.NoError(t, err)
 	payload := result.Payload
 
-	require.Equal(t, "hi", gjson.GetBytes(payload, "conversationState.currentMessage.userInputMessage.content").String())
-	require.Contains(t, gjson.GetBytes(payload, "conversationState.history.0.userInputMessage.content").String(), "BLOCK NOTE")
+	require.Equal(t, "hi\n\n<system-reminder>\nBLOCK NOTE\n</system-reminder>", gjson.GetBytes(payload, "conversationState.currentMessage.userInputMessage.content").String())
+	require.NotContains(t, gjson.GetBytes(payload, "conversationState.history.0.userInputMessage.content").String(), "BLOCK NOTE")
 }
 
 func TestBuildKiroPayloadTrailingAssistantThenSystemStillAttachesTools(t *testing.T) {
@@ -3520,8 +3521,104 @@ func TestBuildKiroPayloadTrailingAssistantThenSystemStillAttachesTools(t *testin
 	require.NoError(t, err)
 	payload := result.Payload
 
-	// 末尾过滤后变 assistant，走 Continue 兜底，但 tools 仍应挂载
-	require.Equal(t, "Continue", gjson.GetBytes(payload, "conversationState.currentMessage.userInputMessage.content").String())
+	// assistant 之后的 system 成为当前消息（不再退化成 Continue），tools 仍应挂载
+	require.Equal(t, "<system-reminder>\nTRAILING NOTE\n</system-reminder>", gjson.GetBytes(payload, "conversationState.currentMessage.userInputMessage.content").String())
 	require.Greater(t, gjson.GetBytes(payload, "conversationState.currentMessage.userInputMessage.userInputMessageContext.tools.#").Int(), int64(0))
-	require.Contains(t, gjson.GetBytes(payload, "conversationState.history.0.userInputMessage.content").String(), "TRAILING NOTE")
+	history := gjson.GetBytes(payload, "conversationState.history").Array()
+	require.Equal(t, "done", history[len(history)-1].Get("assistantResponseMessage.content").String())
+	require.NotContains(t, history[0].Get("userInputMessage.content").String(), "TRAILING NOTE")
+}
+
+// 桌面版每轮都可能追加新的中途 system 消息。Kiro 上游按前缀缓存，下一轮的 history 必须是
+// 上一轮 history + 上一轮当前消息的原样延续，开头不能因新的 system 消息而变化。
+func TestBuildKiroPayloadInlineSystemKeepsHistoryPrefixStable(t *testing.T) {
+	turn1 := []byte(`{
+		"model":"claude-sonnet-4-5",
+		"system":"base instructions",
+		"messages":[
+			{"role":"user","content":"start"},
+			{"role":"assistant","content":"OK"},
+			{"role":"system","content":"REMINDER_ONE"},
+			{"role":"user","content":"question one"}
+		]
+	}`)
+	turn2 := []byte(`{
+		"model":"claude-sonnet-4-5",
+		"system":"base instructions",
+		"messages":[
+			{"role":"user","content":"start"},
+			{"role":"assistant","content":"OK"},
+			{"role":"system","content":"REMINDER_ONE"},
+			{"role":"user","content":"question one"},
+			{"role":"assistant","content":"OK again"},
+			{"role":"system","content":"REMINDER_TWO"},
+			{"role":"user","content":"question two"}
+		]
+	}`)
+
+	r1, err := BuildKiroPayloadWithContext(turn1, "claude-sonnet-4.5", "", "AI_EDITOR", nil)
+	require.NoError(t, err)
+	r2, err := BuildKiroPayloadWithContext(turn2, "claude-sonnet-4.5", "", "AI_EDITOR", nil)
+	require.NoError(t, err)
+
+	h1 := gjson.GetBytes(r1.Payload, "conversationState.history").Array()
+	h2 := gjson.GetBytes(r2.Payload, "conversationState.history").Array()
+	require.Greater(t, len(h2), len(h1))
+	for i := range h1 {
+		require.JSONEq(t, h1[i].Raw, h2[i].Raw, "history[%d] changed between turns", i)
+	}
+	// 上一轮的当前消息原样成为下一轮的 history
+	current1 := gjson.GetBytes(r1.Payload, "conversationState.currentMessage.userInputMessage.content").String()
+	require.Equal(t, current1, h2[len(h1)].Get("userInputMessage.content").String())
+	require.Contains(t, current1, "REMINDER_ONE")
+
+	for _, prefix := range []string{h1[0].Get("userInputMessage.content").String(), h2[0].Get("userInputMessage.content").String()} {
+		require.NotContains(t, prefix, "REMINDER_ONE")
+		require.NotContains(t, prefix, "REMINDER_TWO")
+	}
+}
+
+func TestBuildKiroPayloadDropsEmptyInlineSystemMessages(t *testing.T) {
+	body := []byte(`{
+		"model":"claude-sonnet-4-5",
+		"messages":[
+			{"role":"user","content":"hi"},
+			{"role":"system","content":[],"output_config":{"effort":"low"}},
+			{"role":"assistant","content":"hello"},
+			{"role":"user","content":"go"},
+			{"role":"system","content":[],"output_config":{"effort":"low"}}
+		]
+	}`)
+
+	result, err := BuildKiroPayloadWithContext(body, "claude-sonnet-4.5", "", "AI_EDITOR", nil)
+	require.NoError(t, err)
+	payload := result.Payload
+
+	require.Equal(t, "go", gjson.GetBytes(payload, "conversationState.currentMessage.userInputMessage.content").String())
+	require.NotContains(t, string(payload), "system-reminder")
+}
+
+func TestBuildKiroPayloadInlineSystemBetweenToolUseAndResultKeepsPairing(t *testing.T) {
+	body := []byte(`{
+		"model":"claude-sonnet-4-5",
+		"messages":[
+			{"role":"user","content":"read it"},
+			{"role":"assistant","content":[{"type":"tool_use","id":"toolu_9","name":"read","input":{"path":"a.txt"}}]},
+			{"role":"system","content":"NOTE_TOOL"},
+			{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_9","content":"file body"}]}
+		],
+		"tools":[
+			{"name":"read","description":"read a file","input_schema":{"type":"object","properties":{"path":{"type":"string"}}}}
+		]
+	}`)
+
+	result, err := BuildKiroPayloadWithContext(body, "claude-sonnet-4.5", "", "AI_EDITOR", nil)
+	require.NoError(t, err)
+	payload := result.Payload
+
+	ctx := "conversationState.currentMessage.userInputMessage"
+	require.Equal(t, "toolu_9", gjson.GetBytes(payload, ctx+".userInputMessageContext.toolResults.0.toolUseId").String())
+	require.Contains(t, gjson.GetBytes(payload, ctx+".content").String(), "<system-reminder>\nNOTE_TOOL\n</system-reminder>")
+	history := gjson.GetBytes(payload, "conversationState.history").Array()
+	require.Equal(t, "toolu_9", history[len(history)-1].Get("assistantResponseMessage.toolUses.0.toolUseId").String())
 }
