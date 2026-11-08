@@ -51,9 +51,9 @@ func (h *GatewayHandler) LeonardoImages(c *gin.Context) {
 
 	body, err := pkghttputil.ReadRequestBodyWithPrealloc(c.Request)
 	if err != nil {
-		if maxErr, ok := extractMaxBytesError(err); ok {
+		if failure := pkghttputil.DescribeRequestBodyReadFailure(c.Request, err); failure.Kind == pkghttputil.RequestBodyReadErrorMaxBytes {
 			leonardoImagesError(c, http.StatusRequestEntityTooLarge, "invalid_request_error",
-				buildBodyTooLargeMessage(maxErr.Limit))
+				buildBodyTooLargeMessage(failure.MaxBytesLimit))
 			return
 		}
 		leonardoImagesError(c, http.StatusBadRequest, "invalid_request_error", "Failed to read request body")

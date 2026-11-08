@@ -47,9 +47,9 @@ func (h *GatewayHandler) FishImages(c *gin.Context) {
 
 	body, err := pkghttputil.ReadRequestBodyWithPrealloc(c.Request)
 	if err != nil {
-		if maxErr, ok := extractMaxBytesError(err); ok {
+		if failure := pkghttputil.DescribeRequestBodyReadFailure(c.Request, err); failure.Kind == pkghttputil.RequestBodyReadErrorMaxBytes {
 			fishImagesError(c, http.StatusRequestEntityTooLarge, "invalid_request_error",
-				buildBodyTooLargeMessage(maxErr.Limit))
+				buildBodyTooLargeMessage(failure.MaxBytesLimit))
 			return
 		}
 		fishImagesError(c, http.StatusBadRequest, "invalid_request_error", "Failed to read request body")
