@@ -808,6 +808,7 @@ type GatewayService struct {
 	kiroTokenProvider        *KiroTokenProvider
 	kiroCooldownStore        KiroCooldownStore
 	kiroCacheEmulationRemote KiroCacheEmulationRemoteStore // Kiro 缓存模拟跨节点共享存储；nil = 纯内存
+	kiroPromptCacheRemote    KiroPromptCacheRemoteStore    // Kiro 提示词缓存推断的跨节点存储；nil = 仅本地内存
 	sessionLimitCache        SessionLimitCache             // 会话数量限制缓存（仅 Anthropic OAuth/SetupToken）
 	rpmCache                 RPMCache                      // RPM 计数缓存（仅 Anthropic OAuth/SetupToken）
 	userGroupRateResolver    *userGroupRateResolver
@@ -853,6 +854,7 @@ func NewGatewayService(
 	leonardoTokenProvider *LeonardoTokenProvider,
 	kiroCooldownStore KiroCooldownStore,
 	kiroCacheEmulationRemote KiroCacheEmulationRemoteStore,
+	kiroPromptCacheRemote KiroPromptCacheRemoteStore,
 	sessionLimitCache SessionLimitCache,
 	rpmCache RPMCache,
 	digestStore *DigestSessionStore,
@@ -890,6 +892,7 @@ func NewGatewayService(
 		kiroTokenProvider:        kiroTokenProvider,
 		kiroCooldownStore:        kiroCooldownStore,
 		kiroCacheEmulationRemote: kiroCacheEmulationRemote,
+		kiroPromptCacheRemote:    kiroPromptCacheRemote,
 		sessionLimitCache:        sessionLimitCache,
 		rpmCache:                 rpmCache,
 		userGroupRateCache:       gocache.New(userGroupRateTTL, time.Minute),

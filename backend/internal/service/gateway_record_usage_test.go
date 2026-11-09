@@ -38,7 +38,7 @@ func newGatewayRecordUsageServiceForTest(usageRepo UsageLogRepository, userRepo 
 		nil,                         // claudeTokenProvider
 		nil, nil,
 		// kiroTokenProvider
-		nil, nil, // kiroCooldownStore
+		nil, nil, nil, // kiroCooldownStore
 		nil, // sessionLimitCache
 		nil, // rpmCache
 		nil, // digestStore

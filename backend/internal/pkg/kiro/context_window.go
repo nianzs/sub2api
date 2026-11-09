@@ -13,13 +13,7 @@ import (
 // 与自动压缩阈值。漏配一个 1M 模型会让该模型的 input 少报 5 倍——新增 1M
 // 上下文模型时务必同步此表。
 func KiroContextWindowTokens(model string) int {
-	normalized := strings.TrimSpace(strings.ToLower(model))
-	// MapModel 对「点号版 + -thinking」（如 claude-opus-4.8-thinking）没有
-	// 单独条目，先剪掉后缀再映射。
-	normalized = strings.TrimSuffix(normalized, "-thinking")
-	if mapped := MapModel(normalized); mapped != "" {
-		normalized = mapped
-	}
+	normalized := normalizeKiroModelKey(model)
 	switch normalized {
 	case "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna":
 		return 1_000_000
@@ -33,6 +27,19 @@ func KiroContextWindowTokens(model string) int {
 		return 272_000
 	}
 	return 200_000
+}
+
+// normalizeKiroModelKey 把客户端或上游模型名归一成 Kiro 模型 ID（如
+// claude-opus-5-5 → claude-opus-5.5），供按模型查表的地方共用。
+func normalizeKiroModelKey(model string) string {
+	normalized := strings.TrimSpace(strings.ToLower(model))
+	// MapModel 对「点号版 + -thinking」（如 claude-opus-4.8-thinking）没有
+	// 单独条目，先剪掉后缀再映射。
+	normalized = strings.TrimSuffix(normalized, "-thinking")
+	if mapped := MapModel(normalized); mapped != "" {
+		normalized = mapped
+	}
+	return normalized
 }
 
 // kiroContextTokensFromPercentage 把 contextUsageEvent 的使用百分比换算成 token。

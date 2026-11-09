@@ -119,7 +119,7 @@ func newGatewayModelsHandlerForTest(repo service.AccountRepository, routeRepo ..
 			nil, // claudeTokenProvider
 			nil, nil,
 			// kiroTokenProvider
-			nil, nil, // kiroCooldownStore
+			nil, nil, nil, // kiroCooldownStore
 			nil,      // sessionLimitCache
 			nil,      // rpmCache
 			nil,      // digestStore
