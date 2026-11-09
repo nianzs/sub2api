@@ -262,6 +262,7 @@ func (s *GatewayService) forwardKiroMessages(ctx context.Context, c *gin.Context
 	requestCtx.CacheEmulationUsage = cacheUsage.toKiroUsage()
 	requestCtx.EstimatedInputTokens = inputTokens
 	requestCtx.TokenizerAlgorithm = s.kiroMeteringAlgorithm(ctx)
+	s.resolveKiroPromptCache(ctx, account, &requestCtx)
 	parseResult, err := kiropkg.ParseNonStreamingEventStreamWithContext(resp.Body, originalModel, requestCtx)
 	if err != nil {
 		c.JSON(http.StatusBadGateway, gin.H{
@@ -273,6 +274,8 @@ func (s *GatewayService) forwardKiroMessages(ctx context.Context, c *gin.Context
 		})
 		return nil, err
 	}
+	s.recordKiroPromptCache(account, requestCtx, parseResult.OutputEstimate)
+	logKiroOutputEstimate(ctx, account, mappedModel, requestCtx, parseResult.OutputEstimate)
 
 	c.Header("Content-Type", "application/json")
 	requestID := buildKiroRequestID(resp)
@@ -353,6 +356,7 @@ func (s *GatewayService) openKiroAnthropicStreamResponse(ctx context.Context, ac
 	plan.commit()
 	requestCtx.CacheEmulationUsage = plan.result().toKiroUsage()
 	requestCtx.TokenizerAlgorithm = s.kiroMeteringAlgorithm(ctx)
+	s.resolveKiroPromptCache(ctx, account, &requestCtx)
 
 	pr, pw := io.Pipe()
 	wrappedHeaders := resp.Header.Clone()
@@ -363,12 +367,16 @@ func (s *GatewayService) openKiroAnthropicStreamResponse(ctx context.Context, ac
 
 	go func() {
 		defer func() { _ = resp.Body.Close() }()
-		_, streamErr := kiropkg.StreamEventStreamAsAnthropicWithContext(upstreamCtx, resp.Body, pw, requestModel, inputTokens, requestCtx)
+		streamResult, streamErr := kiropkg.StreamEventStreamAsAnthropicWithContext(upstreamCtx, resp.Body, pw, requestModel, inputTokens, requestCtx)
 		if streamErr != nil {
 			logKiroStreamInterrupted(upstreamCtx, account, mappedModel, requestModel, streamErr)
 			_, _ = io.WriteString(pw, "event: error\ndata: {\"type\":\"error\",\"error\":{\"type\":\"api_error\",\"message\":\"stream interrupted\"}}\n\n")
 			_ = pw.CloseWithError(streamErr)
 			return
+		}
+		if streamResult != nil {
+			s.recordKiroPromptCache(account, requestCtx, streamResult.OutputEstimate)
+			logKiroOutputEstimate(upstreamCtx, account, mappedModel, requestCtx, streamResult.OutputEstimate)
 		}
 		_ = pw.Close()
 	}()
@@ -426,6 +434,8 @@ func (s *GatewayService) executeKiroUpstreamWithParsed(ctx context.Context, acco
 				return nil, requestCtx, err
 			}
 
+			// Kiro 提示词缓存 5 分钟有效期从实际发出时算，重试/换端点后以最后一次为准。
+			requestCtx.UpstreamSentAt = time.Now()
 			resp, err := s.httpUpstream.DoWithTLS(req, proxyURL, account.ID, account.Concurrency, tlsProfile)
 			if err != nil {
 				if attempt < maxRetries {
@@ -834,7 +844,9 @@ func estimateKiroInputTokens(ctx context.Context, alg anthropictokenizer.Algorit
 
 func kiroUsageToClaude(usage kiropkg.Usage, fallbackInput int) ClaudeUsage {
 	inputTokens := usage.InputTokens
-	if inputTokens == 0 {
+	// 只有完全没有输入侧数据时才用本地估算兜底。缓存模拟把整段上下文划进
+	// cache_read/cache_creation 时 input 为 0 是正常的，再补估算会重复计数。
+	if inputTokens == 0 && usage.CacheReadInputTokens == 0 && usage.CacheCreationInputTokens == 0 {
 		inputTokens = fallbackInput
 	}
 	return ClaudeUsage{

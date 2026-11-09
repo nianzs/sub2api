@@ -91,12 +91,15 @@ type StreamResult struct {
 	Usage         Usage
 	StopReason    string
 	FirstDeltaDur *time.Duration
+	// OutputEstimate 记录 output 是否由 credits 反推，以及反推用到的总量/提示词/命中量。
+	OutputEstimate KiroOutputEstimate
 }
 
 type ParseResult struct {
-	ResponseBody []byte
-	Usage        Usage
-	StopReason   string
+	ResponseBody   []byte
+	Usage          Usage
+	StopReason     string
+	OutputEstimate KiroOutputEstimate
 }
 
 type KiroRequestContext struct {
@@ -120,6 +123,14 @@ type KiroRequestContext struct {
 	// UpstreamModelID 是实际发往 Kiro 的模型 ID（账号模型映射之后）。
 	// contextUsageEvent 的百分比按它的上下文窗口换算；为空时回退到响应模型名。
 	UpstreamModelID string
+	// PromptFingerprints 是按 Kiro 实际收到内容算的提示词前缀指纹（每条 user 消息
+	// 之后一个，最后一个是完整提示词），只为有 credits 单价的模型计算。
+	PromptFingerprints [][32]byte
+	// PromptCache 是调用方推断的 Kiro 提示词缓存命中量；零值表示未知，此时不用
+	// credits 反推 output。
+	PromptCache KiroPromptCacheHint
+	// UpstreamSentAt 是本次请求实际发往 Kiro 的时刻，Kiro 缓存 5 分钟有效期从这里算。
+	UpstreamSentAt time.Time
 }
 
 type KiroBuildResult struct {
@@ -528,7 +539,7 @@ func BuildKiroPayloadWithContext(claudeBody []byte, modelID, profileArn, origin 
 	}
 
 	messages := gjson.GetBytes(claudeBody, "messages")
-	inlineSystem, filteredMessages := extractInlineSystemPrompts(messages)
+	filteredMessages := normalizeInlineSystemMessages(messages)
 	thinking := deriveThinkingDirective(claudeBody, headers)
 	if hasForcedClaudeToolChoice(claudeBody) {
 		thinking = nil
@@ -549,13 +560,6 @@ func BuildKiroPayloadWithContext(claudeBody []byte, modelID, profileArn, origin 
 	structuredOutputTool, structuredOutputHint := buildStructuredOutputTool(claudeBody, &requestCtx)
 	toolChoiceHint := joinPromptHints(extractClaudeToolChoiceHint(claudeBody, &requestCtx), structuredOutputHint)
 	baseSystem := extractSystemPrompt(claudeBody)
-	if inlineSystem != "" {
-		if strings.TrimSpace(baseSystem) != "" {
-			baseSystem = baseSystem + "\n\n" + inlineSystem
-		} else {
-			baseSystem = inlineSystem
-		}
-	}
 	if IsKiroGPTModel(modelID) {
 		thinking = nil
 		requestCtx.ThinkingEnabled = false
@@ -602,6 +606,10 @@ func BuildKiroPayloadWithContext(claudeBody []byte, modelID, profileArn, origin 
 			Origin:  normalizeOrigin(origin),
 		}}
 	}
+	// 只为有 credits 单价的模型算指纹：调用方用它查 Kiro 提示词缓存命中量。
+	if _, ok := KiroCreditRatesForModel(modelID); ok {
+		requestCtx.PromptFingerprints = computeKiroPromptFingerprints(modelID, kiroTools, history, &currentMessage.UserInputMessage)
+	}
 
 	var inferenceConfig *KiroInferenceConfig
 	if maxTokens > 0 || hasTemperature || hasTopP {
@@ -643,10 +651,27 @@ func ParseNonStreamingEventStreamWithContext(body io.Reader, model string, reque
 	if err != nil {
 		return nil, err
 	}
+	var outputEstimate KiroOutputEstimate
 	// usage 终值的取舍规则见 kiroUsageSignals。
 	if signals.HasContextUsage && !signals.ProviderInputTokens {
 		contextTotal := kiroContextTokensFromPercentage(signals.ContextUsagePercentage, requestCtx, model)
 		base := kiroInputTokensExcludingOutput(contextTotal, true, requestCtx.EstimatedInputTokens, usage.OutputTokens)
+		// 能用 credits 反推时，output 换成含完整思考的值，input 以提示词大小 P 为基数。
+		// buildClaudeResponse 会按 stop sequence 截断纯文本回复，此时按客户端实际看到的计。
+		_, stopMatched := firstStopSequenceIndex(content, requestCtx.StopSequences)
+		creditOutput, prompt, est, ok := applyKiroCreditOutput(requestCtx, model, kiroCreditOutputInput{
+			Credits:         usage.KiroCredits,
+			ContextTotal:    contextTotal,
+			ContextPercent:  signals.ContextUsagePercentage,
+			ProviderOutput:  signals.ProviderOutputTokens,
+			ClientTruncated: len(toolUses) == 0 && stopMatched != "",
+			VisibleLocal:    usage.OutputTokens,
+		})
+		outputEstimate = est
+		if ok {
+			usage.OutputTokens = creditOutput
+			base = prompt
+		}
 		if requestCtx.CacheEmulationUsage != nil {
 			usage = rescaleKiroCacheUsageAgainstTotal(usage, requestCtx.CacheEmulationUsage, base, requestCtx.EstimatedInputTokens)
 		} else {
@@ -671,9 +696,10 @@ func ParseNonStreamingEventStreamWithContext(body io.Reader, model string, reque
 		usage.TotalTokens = usage.InputTokens + usage.OutputTokens
 	}
 	return &ParseResult{
-		ResponseBody: buildClaudeResponse(content, toolUses, model, usage, stopReason, requestCtx),
-		Usage:        usage,
-		StopReason:   stopReason,
+		ResponseBody:   buildClaudeResponse(content, toolUses, model, usage, stopReason, requestCtx),
+		Usage:          usage,
+		StopReason:     stopReason,
+		OutputEstimate: outputEstimate,
 	}, nil
 }
 
@@ -1414,14 +1440,30 @@ func StreamEventStreamAsAnthropicWithContext(ctx context.Context, body io.Reader
 	if err := closeThinking(); err != nil {
 		return nil, err
 	}
+	providerOutputTokens := usage.OutputTokens > 0
 	if usage.OutputTokens == 0 {
 		if est := requestCtx.TokenizerAlgorithm.CountTokens(outputTextBuf.String()); est > 0 {
 			usage.OutputTokens = est
 		}
 	}
+	var outputEstimate KiroOutputEstimate
 	// usage 终值的取舍规则见 kiroUsageSignals。
 	if contextTotal != nil && !providerInputTokens {
 		base := kiroInputTokensExcludingOutput(*contextTotal, true, inputTokens, usage.OutputTokens)
+		// 能用 credits 反推时，output 换成含完整思考的值，input 以提示词大小 P 为基数。
+		creditOutput, prompt, est, ok := applyKiroCreditOutput(requestCtx, model, kiroCreditOutputInput{
+			Credits:         usage.KiroCredits,
+			ContextTotal:    *contextTotal,
+			ContextPercent:  contextUsagePercentage,
+			ProviderOutput:  providerOutputTokens,
+			ClientTruncated: stopSequenceMatched != "",
+			VisibleLocal:    usage.OutputTokens,
+		})
+		outputEstimate = est
+		if ok {
+			usage.OutputTokens = creditOutput
+			base = prompt
+		}
 		if requestCtx.CacheEmulationUsage != nil {
 			usage = rescaleKiroCacheUsageAgainstTotal(usage, requestCtx.CacheEmulationUsage, base, inputTokens)
 		} else {
@@ -1484,9 +1526,10 @@ func StreamEventStreamAsAnthropicWithContext(ctx context.Context, body io.Reader
 	}
 
 	return &StreamResult{
-		Usage:         usage,
-		StopReason:    stopReason,
-		FirstDeltaDur: firstDelta,
+		Usage:          usage,
+		StopReason:     stopReason,
+		FirstDeltaDur:  firstDelta,
+		OutputEstimate: outputEstimate,
 	}, nil
 }
 
@@ -1510,28 +1553,38 @@ func extractTextFromContentBlocks(content gjson.Result) string {
 	return content.String()
 }
 
-// extractInlineSystemPrompts 从 messages 中提取所有 role=="system" 的中途消息文本，
-// 返回拼接后的 system 文本与剔除 system 后（顺序保留）的消息切片。
-// Claude 桌面版 beta mid-conversation-system-2026-04-07 会在 messages 中插入 system 消息，
-// Kiro/CodeWhisperer 不支持中途 system，故在此提取并折叠进顶层 systemPrompt。
-func extractInlineSystemPrompts(messages gjson.Result) (string, []gjson.Result) {
+// normalizeInlineSystemMessages 把 messages 中的 role=="system" 消息改写成 Kiro 能表达的形式。
+// Claude 桌面版 beta mid-conversation-system-2026-04-07 会在 messages 中途插入 system 消息，
+// Kiro/CodeWhisperer 不支持中途 system：
+//   - 有文本的 system 消息原地改成一条 user 消息，文本用 <system-reminder> 包住。之后
+//     processMessages 里的 mergeAdjacentMessages 会把它并进相邻的 user 消息；落在末尾时
+//     成为当前消息，tools 照常挂载。
+//   - 没有文本的 system 消息（例如只带 output_config 的控制消息）直接丢掉。
+//
+// 不能折叠进顶层 systemPrompt：它被 prependSystemHistory 放在对话最开头，Kiro 上游按前缀
+// 缓存，每多一条中途 system 消息开头就变一次，整段历史都按未命中计费（实测同样内容贵 3.7 倍）。
+func normalizeInlineSystemMessages(messages gjson.Result) []gjson.Result {
 	arr := messages.Array()
-	var sb strings.Builder
-	filtered := make([]gjson.Result, 0, len(arr))
+	out := make([]gjson.Result, 0, len(arr))
 	for _, msg := range arr {
-		if msg.Get("role").String() == "system" {
-			text := strings.TrimSpace(extractTextFromContentBlocks(msg.Get("content")))
-			if text != "" {
-				if sb.Len() > 0 {
-					_, _ = sb.WriteString("\n\n")
-				}
-				_, _ = sb.WriteString(text)
-			}
+		if msg.Get("role").String() != "system" {
+			out = append(out, msg)
 			continue
 		}
-		filtered = append(filtered, msg)
+		text := strings.TrimSpace(extractTextFromContentBlocks(msg.Get("content")))
+		if text == "" {
+			continue
+		}
+		encoded, _ := json.Marshal(map[string]any{
+			"role": "user",
+			"content": []map[string]any{{
+				"type": "text",
+				"text": "<system-reminder>\n" + text + "\n</system-reminder>",
+			}},
+		})
+		out = append(out, gjson.ParseBytes(encoded))
 	}
-	return sb.String(), filtered
+	return out
 }
 
 func deriveThinkingDirective(body []byte, headers http.Header) *thinkingDirective {
@@ -3154,6 +3207,8 @@ type kiroUsageSignals struct {
 	ContextUsagePercentage float64
 	HasContextUsage        bool
 	ProviderInputTokens    bool
+	// ProviderOutputTokens 表示上游自己给了 output token 数（此时不用 credits 反推）。
+	ProviderOutputTokens bool
 }
 
 func parseEventStream(body io.Reader, alg anthropictokenizer.Algorithm) (string, []KiroToolUse, Usage, string, kiroUsageSignals, error) {
@@ -3266,6 +3321,7 @@ func parseEventStream(body io.Reader, alg anthropictokenizer.Algorithm) (string,
 	toolUses = append(toolUses, embeddedToolUses...)
 	toolUses = deduplicateToolUses(toolUses)
 
+	signals.ProviderOutputTokens = usage.OutputTokens > 0
 	if usage.OutputTokens == 0 {
 		var outputBuf strings.Builder
 		_, _ = outputBuf.WriteString(cleanText)
