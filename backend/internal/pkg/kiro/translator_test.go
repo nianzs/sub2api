@@ -29,7 +29,7 @@ func TestBuildRuntimeUserAgentStable(t *testing.T) {
 	require.Equal(t, ua1, ua2)
 	require.Contains(t, ua1, "KiroIDE-")
 	require.Contains(t, amzUA, "KiroIDE-")
-	require.Contains(t, ua1, "KiroIDE-1.0.437")
+	require.Contains(t, ua1, "KiroIDE-1.4.121")
 	// streamingSDKVersions 是多元素池，seed 决定命中哪一条；用 fingerprint 反查而
 	// 非硬编码字面量，避免每次扩池就要改测试。
 	fp := globalRuntimeFingerprints().Get(key, machineID)

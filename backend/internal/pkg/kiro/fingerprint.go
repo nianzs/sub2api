@@ -42,9 +42,9 @@ var (
 		"win32":  {"10.0.26100", "10.0.22631"},
 	}
 	nodeVersions = []string{"22.22.0"}
-	// kiroVersions 只放已验证的真实 Kiro app 发布号（当前唯一来源：/Applications/Kiro.app 1.0.437）。
-	// 追加历史或未来 GA 版本前先在真实客户端上抓 UA 核对，避免编造的版本号反被识别。
-	kiroVersions = []string{"1.0.437"}
+	// kiroVersions 只放已验证可用的 Kiro IDE 版本号（1.4.121 经开发者反馈验证正常）。
+	// 追加历史或未来版本前先在真实客户端上抓 UA 核对，避免编造的版本号反被识别。
+	kiroVersions = []string{"1.4.121"}
 )
 
 func globalRuntimeFingerprints() *runtimeFingerprintManager {
@@ -197,7 +197,7 @@ var kiroIDEUserAgentVersion = func() string {
 	if v := strings.TrimSpace(os.Getenv("KIRO_IDE_VERSION")); v != "" {
 		return v
 	}
-	return "1.0.437"
+	return "1.4.121"
 }()
 
 // BuildKiroIDERuntimeUserAgent 构造 KRS endpoint 的 User-Agent，格式为
