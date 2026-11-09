@@ -43,14 +43,47 @@ func TestEstimateKiroOutputFromCredits(t *testing.T) {
 	require.False(t, ok)
 }
 
-func TestResolveKiroCreditOutputFallsBackWhenCacheExceedsPrompt(t *testing.T) {
-	// 实际全部未命中；推断的命中量 140K 会让提示词小于命中量，应退到 C=0。
-	credits := kiroCreditsFor(opus55Rates, 145000, 0, 5000)
-	o, est, ok := resolveKiroCreditOutput(opus55Rates, credits, 150000, KiroPromptCacheHint{Resolved: true, CachedTokens: 140000}, 1000)
+func TestResolveKiroCreditOutputUsesAllCachedWhenHintExceedsPrompt(t *testing.T) {
+	// 上一轮提示词 97K 已缓存，本轮新增 3K，真实输出 15K。推断值 112K 偏大（上一轮按
+	// "总量 - 可见输出"记录，含了隐藏思考），超过本轮提示词：应按整个提示词命中计算，
+	// 误差只有约 4.3% × 新增的 3K，而不是退到 C=0 少算约 4.3% × 97K。
+	credits := kiroCreditsFor(opus55Rates, 100000, 97000, 15000)
+	o, est, ok := resolveKiroCreditOutput(opus55Rates, credits, 115000, KiroPromptCacheHint{Resolved: true, CachedTokens: 112000}, 500)
 	require.True(t, ok)
-	require.InDelta(t, 5000, o, 1)
-	require.Equal(t, 0, est.CachedPromptTokens)
-	require.InDelta(t, 145000, est.PromptTokens, 1)
+	require.InDelta(t, 15000, o, 200)
+	require.Equal(t, est.PromptTokens, est.CachedPromptTokens, "整个提示词都按命中计")
+	require.InDelta(t, 100000, est.PromptTokens, 200)
+}
+
+// 一轮没用上 credits（例如被 stop sequence 截断）后，按"总量 - 可见输出"记录的提示词
+// 偏大。后续每轮都应在一轮内恢复准确，而不是一直少算。
+func TestKiroCreditOutputRecoversAfterFallbackTurn(t *testing.T) {
+	const (
+		firstPrompt  = 100000
+		perTurnAdded = 2500
+		trueOutput   = 15000
+		visibleLocal = 483 // 下发的思考摘要 + 正文，本地计数
+		turns        = 8
+	)
+	prevPrompt, prompt := 0, firstPrompt
+	recorded := 0
+	for turn := 1; turn <= turns; turn++ {
+		credits := kiroCreditsFor(opus55Rates, prompt, prevPrompt, trueOutput)
+		total := prompt + trueOutput
+		if turn == 1 {
+			recorded = total - visibleLocal // 旧算法下的记录方式（见 recordKiroPromptCache）
+		} else {
+			o, est, ok := resolveKiroCreditOutput(opus55Rates, credits, total, KiroPromptCacheHint{Resolved: true, CachedTokens: recorded}, visibleLocal)
+			require.True(t, ok, "turn %d", turn)
+			if turn == 2 {
+				require.InDelta(t, trueOutput, o, 200, "turn %d", turn)
+			} else {
+				require.InDelta(t, trueOutput, o, 10, "turn %d", turn)
+			}
+			recorded = est.PromptTokens
+		}
+		prevPrompt, prompt = prompt, prompt+perTurnAdded
+	}
 }
 
 func TestResolveKiroCreditOutputUsesCacheHint(t *testing.T) {
