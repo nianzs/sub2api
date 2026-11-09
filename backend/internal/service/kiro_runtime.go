@@ -183,8 +183,19 @@ func (s *GatewayService) forwardKiroMessages(ctx context.Context, c *gin.Context
 			return nil, s.handleKiroHTTPError(ctx, resp, c, account, mappedModel, body)
 		}
 		upstreamModel := resolveKiroUpstreamModel(mappedModel)
+		writerSizeBeforeStream := c.Writer.Size()
 		streamResult, err := s.handleStreamingResponse(ctx, resp, c, account, startTime, originalModel, mappedModel, false)
 		if err != nil {
+			var sseErr *sseStreamErrorEventError
+			if errors.As(err, &sseErr) {
+				// 流里的 error 事件不计费。客户端还没收到任何字节且是上游异常时，
+				// 按 Kiro 直接回对应 HTTP 错误处理：可换号的换号，请求本身的问题（如输入太长）直接回 4xx。
+				outputStarted := c.Writer.Size() != writerSizeBeforeStream
+				if exc := kiroUpstreamExceptionFromSSE(sseErr.RawData); exc != nil && !outputStarted {
+					return nil, s.handleKiroUpstreamException(ctx, c, account, mappedModel, body, exc, resp.Header)
+				}
+				return nil, s.sseStreamErrorEventFailover(ctx, c, account, resp, sseErr.RawData, mappedModel, outputStarted)
+			}
 			return nil, err
 		}
 		if streamResult.usage == nil {
@@ -265,6 +276,12 @@ func (s *GatewayService) forwardKiroMessages(ctx context.Context, c *gin.Context
 	s.resolveKiroPromptCache(ctx, account, &requestCtx)
 	parseResult, err := kiropkg.ParseNonStreamingEventStreamWithContext(resp.Body, originalModel, requestCtx)
 	if err != nil {
+		var exc *kiropkg.KiroUpstreamException
+		if errors.As(err, &exc) {
+			// 上游在流里报了失败：还没写响应，按 Kiro 直接回对应 HTTP 错误处理（换号或回 4xx），不计费。
+			logKiroUpstreamException(ctx, account, mappedModel, originalModel, exc, false)
+			return nil, s.handleKiroUpstreamException(ctx, c, account, mappedModel, body, exc, resp.Header)
+		}
 		c.JSON(http.StatusBadGateway, gin.H{
 			"type": "error",
 			"error": gin.H{
@@ -276,6 +293,9 @@ func (s *GatewayService) forwardKiroMessages(ctx context.Context, c *gin.Context
 	}
 	s.recordKiroPromptCache(account, requestCtx, parseResult.OutputEstimate)
 	logKiroOutputEstimate(ctx, account, mappedModel, requestCtx, parseResult.OutputEstimate)
+	if parseResult.NoOutput {
+		logKiroEmptyResponse(ctx, account, mappedModel, parseResult.Usage, parseResult.StopReason)
+	}
 
 	c.Header("Content-Type", "application/json")
 	requestID := buildKiroRequestID(resp)
@@ -367,8 +387,18 @@ func (s *GatewayService) openKiroAnthropicStreamResponse(ctx context.Context, ac
 
 	go func() {
 		defer func() { _ = resp.Body.Close() }()
-		streamResult, streamErr := kiropkg.StreamEventStreamAsAnthropicWithContext(upstreamCtx, resp.Body, pw, requestModel, inputTokens, requestCtx)
+		out := &kiroCountingWriter{w: pw}
+		streamResult, streamErr := kiropkg.StreamEventStreamAsAnthropicWithContext(upstreamCtx, resp.Body, out, requestModel, inputTokens, requestCtx)
 		if streamErr != nil {
+			var exc *kiropkg.KiroUpstreamException
+			if errors.As(streamErr, &exc) {
+				// 上游在流里报了失败：以 SSE error 收尾（不计费）。输出开始前，调用方据事件里的
+				// 原始异常按对应 HTTP 错误处理（见 forwardKiroMessages）。
+				logKiroUpstreamException(upstreamCtx, account, mappedModel, requestModel, exc, out.n > 0)
+				_, _ = io.WriteString(pw, kiroUpstreamExceptionSSE(exc))
+				_ = pw.Close()
+				return
+			}
 			logKiroStreamInterrupted(upstreamCtx, account, mappedModel, requestModel, streamErr)
 			_, _ = io.WriteString(pw, "event: error\ndata: {\"type\":\"error\",\"error\":{\"type\":\"api_error\",\"message\":\"stream interrupted\"}}\n\n")
 			_ = pw.CloseWithError(streamErr)
@@ -377,6 +407,9 @@ func (s *GatewayService) openKiroAnthropicStreamResponse(ctx context.Context, ac
 		if streamResult != nil {
 			s.recordKiroPromptCache(account, requestCtx, streamResult.OutputEstimate)
 			logKiroOutputEstimate(upstreamCtx, account, mappedModel, requestCtx, streamResult.OutputEstimate)
+			if streamResult.NoOutput {
+				logKiroEmptyResponse(upstreamCtx, account, mappedModel, streamResult.Usage, streamResult.StopReason)
+			}
 		}
 		_ = pw.Close()
 	}()

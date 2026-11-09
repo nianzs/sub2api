@@ -93,6 +93,8 @@ type StreamResult struct {
 	FirstDeltaDur *time.Duration
 	// OutputEstimate 记录 output 是否由 credits 反推，以及反推用到的总量/提示词/命中量。
 	OutputEstimate KiroOutputEstimate
+	// NoOutput 表示上游正常结束却没有任何正文、思考或工具输出，供调用方打日志排查。
+	NoOutput bool
 }
 
 type ParseResult struct {
@@ -100,6 +102,7 @@ type ParseResult struct {
 	Usage          Usage
 	StopReason     string
 	OutputEstimate KiroOutputEstimate
+	NoOutput       bool // 同 StreamResult.NoOutput
 }
 
 type KiroRequestContext struct {
@@ -242,7 +245,13 @@ type toolUseState struct {
 
 type eventStreamMessage struct {
 	EventType string
-	Payload   []byte
+	// MessageType 是 :message-type 头："event"（或缺省）为普通事件；"exception" / "error"
+	// 是上游在流中下发的失败，这两类帧不带 :event-type，见 upstreamExceptionFromFrame。
+	MessageType   string
+	ExceptionType string // :exception-type（exception 帧）
+	ErrorCode     string // :error-code（error 帧）
+	ErrorMessage  string // :error-message（error 帧）
+	Payload       []byte
 }
 
 type kiroSemanticEventType string
@@ -700,6 +709,7 @@ func ParseNonStreamingEventStreamWithContext(body io.Reader, model string, reque
 		Usage:          usage,
 		StopReason:     stopReason,
 		OutputEstimate: outputEstimate,
+		NoOutput:       strings.TrimSpace(content) == "" && len(toolUses) == 0,
 	}, nil
 }
 
@@ -1374,6 +1384,18 @@ func StreamEventStreamAsAnthropicWithContext(ctx context.Context, body io.Reader
 		if err != nil {
 			return nil, err
 		}
+		if exc := upstreamExceptionFromFrame(msg); exc != nil {
+			if exc.Type == KiroContentLengthExceededException {
+				// 输出达到上限：按 max_tokens 正常收尾（stop_sequence 是客户端终态，不覆盖）。
+				if stopReason != "stop_sequence" {
+					stopReason = "max_tokens"
+				}
+				continue
+			}
+			// 其余上游失败原样返回。message_start 是惰性发送的，首个输出之前失败时
+			// 客户端还没收到任何字节，调用方可以按 HTTP 错误处理（换号或回 4xx）。
+			return nil, exc
+		}
 		if msg == nil || len(msg.Payload) == 0 {
 			continue
 		}
@@ -1500,6 +1522,8 @@ func StreamEventStreamAsAnthropicWithContext(ctx context.Context, body io.Reader
 			stopReason = "end_turn"
 		}
 	}
+	// message_start 惰性发送：到这里还没发过，说明整个流没有任何输出。
+	noOutput := !messageStartSent
 	if err := ensureMessageStart(); err != nil {
 		return nil, err
 	}
@@ -1530,6 +1554,7 @@ func StreamEventStreamAsAnthropicWithContext(ctx context.Context, body io.Reader
 		StopReason:     stopReason,
 		FirstDeltaDur:  firstDelta,
 		OutputEstimate: outputEstimate,
+		NoOutput:       noOutput,
 	}, nil
 }
 
@@ -3218,6 +3243,9 @@ func parseEventStream(body io.Reader, alg anthropictokenizer.Algorithm) (string,
 	var usage Usage
 	var signals kiroUsageSignals
 	stopReason := ""
+	// 上游 ContentLengthExceededException：输出达到上限，收尾时按 max_tokens 结束。
+	// 单独记标志，避免被之后事件里的 stopReason 覆盖。
+	contentLengthExceeded := false
 	processedIDs := make(map[string]bool)
 	var currentTool *toolUseState
 	reasoningOpen := false
@@ -3236,6 +3264,13 @@ func parseEventStream(body io.Reader, alg anthropictokenizer.Algorithm) (string,
 		}
 		if err != nil {
 			return "", nil, usage, stopReason, signals, err
+		}
+		if exc := upstreamExceptionFromFrame(msg); exc != nil {
+			if exc.Type == KiroContentLengthExceededException {
+				contentLengthExceeded = true
+				continue
+			}
+			return "", nil, usage, stopReason, signals, exc
 		}
 		if msg == nil || len(msg.Payload) == 0 {
 			continue
@@ -3305,6 +3340,9 @@ func parseEventStream(body io.Reader, alg anthropictokenizer.Algorithm) (string,
 		}
 	}
 	closeReasoning()
+	if contentLengthExceeded && stopReason != "stop_sequence" {
+		stopReason = "max_tokens"
+	}
 
 	if currentTool != nil && currentTool.ToolUseID != "" && !processedIDs[currentTool.ToolUseID] {
 		completed, _ := processToolUseEvent(map[string]any{
@@ -3820,19 +3858,25 @@ func readEventStreamMessage(reader *bufio.Reader) (*eventStreamMessage, error) {
 	if _, err := io.ReadFull(reader, remaining); err != nil {
 		return nil, err
 	}
-	eventType := extractEventType(remaining[:headersLength])
+	headers := parseEventStreamStringHeaders(remaining[:headersLength])
+	msg := &eventStreamMessage{
+		EventType:     headers[":event-type"],
+		MessageType:   headers[":message-type"],
+		ExceptionType: headers[":exception-type"],
+		ErrorCode:     headers[":error-code"],
+		ErrorMessage:  headers[":error-message"],
+	}
 	payloadStart := headersLength
 	payloadEnd := uint32(len(remaining)) - 4
-	if payloadStart >= payloadEnd {
-		return &eventStreamMessage{EventType: eventType}, nil
+	if payloadStart < payloadEnd {
+		msg.Payload = remaining[payloadStart:payloadEnd]
 	}
-	return &eventStreamMessage{
-		EventType: eventType,
-		Payload:   remaining[payloadStart:payloadEnd],
-	}, nil
+	return msg, nil
 }
 
-func extractEventType(headers []byte) string {
+// parseEventStreamStringHeaders 返回帧头里所有字符串类型（type 7）的头，其余类型跳过。
+func parseEventStreamStringHeaders(headers []byte) map[string]string {
+	out := make(map[string]string, 4)
 	offset := 0
 	for offset < len(headers) {
 		nameLen := int(headers[offset])
@@ -3856,11 +3900,8 @@ func extractEventType(headers []byte) string {
 			if offset+valueLen > len(headers) {
 				break
 			}
-			value := string(headers[offset : offset+valueLen])
+			out[name] = string(headers[offset : offset+valueLen])
 			offset += valueLen
-			if name == ":event-type" {
-				return value
-			}
 			continue
 		}
 		next, ok := skipHeaderValue(headers, offset, valueType)
@@ -3869,7 +3910,7 @@ func extractEventType(headers []byte) string {
 		}
 		offset = next
 	}
-	return ""
+	return out
 }
 
 func skipHeaderValue(headers []byte, offset int, valueType byte) (int, bool) {
