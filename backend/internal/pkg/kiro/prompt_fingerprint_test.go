@@ -2,6 +2,7 @@ package kiro
 
 import (
 	"encoding/json"
+	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -97,12 +98,40 @@ func TestPromptFingerprintOnlyForModelsWithRates(t *testing.T) {
 	require.Nil(t, buildFingerprints(t, "claude-opus-5.5", fpBody(t, "claude-opus-5-5", fpTools, turnN())))
 }
 
-func TestPromptFingerprintKeepsDeepestBoundaries(t *testing.T) {
+// 复刻 2026-11-09 的探针：在只有一条 user 消息的请求之后追加 20 条消息仍命中，追加 22 条不命中。
+func TestPromptFingerprintLookbackLimit(t *testing.T) {
+	first := []map[string]any{{"role": "user", "content": "big prompt"}}
+	n := buildFingerprints(t, "claude-opus-5.5", fpBody(t, "claude-opus-5-5", nil, first))
+	require.NotEmpty(t, n)
+	full := n[len(n)-1]
+
+	appendRounds := func(rounds int) [][32]byte {
+		msgs := append([]map[string]any{}, first...)
+		for i := 0; i < rounds; i++ {
+			msgs = append(msgs,
+				map[string]any{"role": "assistant", "content": "OK"},
+				map[string]any{"role": "user", "content": fmt.Sprintf("reply %d", i)},
+			)
+		}
+		return buildFingerprints(t, "claude-opus-5.5", fpBody(t, "claude-opus-5-5", nil, msgs))
+	}
+	require.True(t, containsFingerprint(appendRounds(10), full), "追加 20 条消息应仍能匹配")
+	require.False(t, containsFingerprint(appendRounds(11), full), "追加 22 条消息不应再匹配")
+}
+
+func TestPromptFingerprintBoundaryCount(t *testing.T) {
 	var msgs []map[string]any
 	for i := 0; i < 30; i++ {
 		msgs = append(msgs, map[string]any{"role": "user", "content": "q"}, map[string]any{"role": "assistant", "content": "a"})
 	}
 	msgs = append(msgs, map[string]any{"role": "user", "content": "last"})
 	fps := buildFingerprints(t, "claude-opus-5.5", fpBody(t, "claude-opus-5-5", nil, msgs))
-	require.Len(t, fps, kiroPromptFingerprintKeep)
+	// 之后 0、2、…、20 条消息的 user 边界，共 11 个。
+	require.Len(t, fps, kiroPromptCacheLookbackMessages/2+1)
+
+	full := buildFingerprints(t, "claude-opus-5.5", fpBody(t, "claude-opus-5-5", nil, append(msgs,
+		map[string]any{"role": "assistant", "content": "a"},
+		map[string]any{"role": "user", "content": "next"},
+	)))
+	require.True(t, containsFingerprint(full, fps[len(fps)-1]), "最后一个指纹应是完整提示词")
 }
