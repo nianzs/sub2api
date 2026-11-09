@@ -28,6 +28,10 @@ func TestKiroUpstreamExceptionStatus(t *testing.T) {
 		{"throttling", kiropkg.KiroUpstreamException{Type: "ThrottlingException", Message: "Rate exceeded"}, http.StatusTooManyRequests},
 		{"input too long", kiropkg.KiroUpstreamException{Type: "ValidationException", Message: "Input is too long."}, http.StatusBadRequest},
 		{"monthly quota", kiropkg.KiroUpstreamException{Type: "ServiceQuotaExceededException", Payload: []byte(`{"reason":"MONTHLY_REQUEST_COUNT"}`)}, http.StatusPaymentRequired},
+		{"overage code", kiropkg.KiroUpstreamException{Type: "AccessDeniedException", Payload: []byte(`{"reason":"OVERAGE_REQUEST_LIMIT_EXCEEDED"}`)}, http.StatusPaymentRequired},
+		{"explicit code wins over throttling", kiropkg.KiroUpstreamException{Type: "ThrottlingException", Payload: []byte(`{"reason":"MONTHLY_REQUEST_COUNT"}`)}, http.StatusPaymentRequired},
+		{"service quota without code only cools down", kiropkg.KiroUpstreamException{Type: "ServiceQuotaExceededException", Message: "Quota exceeded for this request"}, http.StatusTooManyRequests},
+		{"usage limit wording only cools down", kiropkg.KiroUpstreamException{Type: "ValidationException", Message: "You have reached your usage limit for this month."}, http.StatusTooManyRequests},
 		{"access denied stays account-safe", kiropkg.KiroUpstreamException{Type: "AccessDeniedException", Message: "denied"}, http.StatusInternalServerError},
 		{"internal", kiropkg.KiroUpstreamException{Type: "InternalServerException"}, http.StatusInternalServerError},
 		{"unknown", kiropkg.KiroUpstreamException{Type: "UnknownUpstreamError"}, http.StatusInternalServerError},
@@ -70,6 +74,13 @@ func TestKiroUpstreamExceptionSSERoundTrip(t *testing.T) {
 	require.Equal(t, string(exc.Payload), string(back.Payload))
 
 	require.Nil(t, kiroUpstreamExceptionFromSSE(`{"type":"error","error":{"type":"overloaded_error","message":"x"}}`))
+	require.Nil(t, back.PartialUsage)
+
+	exc.PartialUsage = &kiropkg.Usage{InputTokens: 10, OutputTokens: 5, CacheReadInputTokens: 90, KiroCredits: 0.42}
+	sse = kiroUpstreamExceptionSSE(exc)
+	back = kiroUpstreamExceptionFromSSE(sse[len("event: error\ndata: ") : len(sse)-2])
+	require.NotNil(t, back.PartialUsage)
+	require.Equal(t, *exc.PartialUsage, *back.PartialUsage)
 }
 
 func newKiroExceptionTestContext() (*gin.Context, *httptest.ResponseRecorder) {
@@ -211,16 +222,38 @@ func TestForwardKiroStreamThrottlingBeforeOutputFailsOver(t *testing.T) {
 	require.Zero(t, rec.Body.Len())
 }
 
-func TestForwardKiroStreamExceptionAfterOutputEndsStream(t *testing.T) {
+// 已有输出时不能换号：按流中断返回普通错误（handler 补写终止错误），并带上截至异常的用量
+// 入账（含已收到的 credits），不能当成 403 failover。
+func TestForwardKiroStreamExceptionAfterOutputRecordsPartialUsage(t *testing.T) {
 	result, err, rec, _ := forwardKiroWithUpstreamFrames(t, true,
 		buildKiroEventStreamFrame(t, "assistantResponseEvent", map[string]any{
 			"assistantResponseEvent": map[string]any{"content": "partial"},
 		}),
+		buildKiroEventStreamFrame(t, "meteringEvent", map[string]any{"meteringEvent": map[string]any{"usage": 0.3}}),
 		buildKiroExceptionFrame(t, "InternalServerException", `{"message":"boom"}`),
 	)
-	require.Nil(t, result, "a failed request must not be billed")
+	require.Error(t, err)
 	var failoverErr *UpstreamFailoverError
-	require.ErrorAs(t, err, &failoverErr)
+	require.NotErrorAs(t, err, &failoverErr, "output already reached the client; must not be a failover")
+	require.NotNil(t, result, "usage produced before the exception must be recorded")
+	require.True(t, result.Stream)
+	require.Positive(t, result.Usage.OutputTokens)
+	require.InDelta(t, 0.3, result.Usage.KiroCredits, 1e-9)
+	require.Contains(t, rec.Body.String(), "partial")
+}
+
+// 非 Kiro 异常的流中断（转换失败时补的 "stream interrupted"）保持原行为：普通错误，不转 403 failover。
+func TestForwardKiroStreamInterruptedIsNotFailover(t *testing.T) {
+	result, err, rec, _ := forwardKiroWithUpstreamFrames(t, true,
+		buildKiroEventStreamFrame(t, "assistantResponseEvent", map[string]any{
+			"assistantResponseEvent": map[string]any{"content": "partial"},
+		}),
+		[]byte{0, 0, 0, 5, 0, 0, 0, 0, 0, 0, 0, 0}, // 非法帧长度：转换中途失败
+	)
+	require.Error(t, err)
+	require.Nil(t, result)
+	var failoverErr *UpstreamFailoverError
+	require.NotErrorAs(t, err, &failoverErr)
 	require.Contains(t, rec.Body.String(), "partial")
 }
 

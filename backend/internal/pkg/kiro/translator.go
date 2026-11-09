@@ -1394,6 +1394,18 @@ func StreamEventStreamAsAnthropicWithContext(ctx context.Context, body io.Reader
 			}
 			// 其余上游失败原样返回。message_start 是惰性发送的，首个输出之前失败时
 			// 客户端还没收到任何字节，调用方可以按 HTTP 错误处理（换号或回 4xx）。
+			// 已有输出时附上截至此刻的用量（含已收到的 credits），调用方按流中断记账。
+			if messageStartSent {
+				partial := usage
+				if est := requestCtx.TokenizerAlgorithm.CountTokens(outputTextBuf.String()); est > partial.OutputTokens {
+					partial.OutputTokens = est
+				}
+				if requestCtx.CacheEmulationUsage != nil {
+					partial = mergeKiroCacheEmulationUsage(partial, requestCtx.CacheEmulationUsage)
+				}
+				partial.TotalTokens = partial.InputTokens + partial.OutputTokens + partial.CacheReadInputTokens + partial.CacheCreationInputTokens
+				exc.PartialUsage = &partial
+			}
 			return nil, exc
 		}
 		if msg == nil || len(msg.Payload) == 0 {
