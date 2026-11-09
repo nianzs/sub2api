@@ -674,6 +674,9 @@ const (
 	// （official/charclass/weighted），仅影响 usage 与计费口径，不影响上游
 	// 请求与 max_tokens 截断行为。默认 official。
 	SettingKeyGatewayKiroTokenizer = "gateway_kiro_tokenizer"
+	// SettingKeyGatewayKiroCacheScopeClient 打开后 Kiro 缓存模拟按「API key + 会话」分桶，
+	// 切换上游账号不丢缓存命中；关闭（默认）时按 Kiro 账号分桶。仅影响计费口径。
+	SettingKeyGatewayKiroCacheScopeClient = "gateway_kiro_cache_scope_client"
 	// SettingKeyEnableFingerprintUnification 是否统一 OAuth 账号的 X-Stainless-* 指纹头（默认 true）
 	SettingKeyEnableFingerprintUnification = "enable_fingerprint_unification"
 	// SettingKeyEnableMetadataPassthrough 是否透传客户端原始 metadata.user_id（默认 false）

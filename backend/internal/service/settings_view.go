@@ -238,6 +238,7 @@ type SystemSettings struct {
 	// Gateway forwarding behavior
 	OpenAITTFTMode                         string                            // Responses first_token_ms 统计口径（默认 semantic）
 	GatewayKiroTokenizer                   string                            // Kiro 计量算法（official/charclass/weighted，默认 official）
+	GatewayKiroCacheScopeClient            bool                              // Kiro 缓存模拟按 API key + 会话分桶（默认 false）
 	EnableFingerprintUnification           bool                              // 是否统一 OAuth 账号的指纹头（默认 true）
 	EnableMetadataPassthrough              bool                              // 是否透传客户端原始 metadata（默认 false）
 	EnableCCHSigning                       bool                              // 已废弃 no-op：新版 CLI 取消 cch 签名后网关不再注入/签名 cch，开关无效果

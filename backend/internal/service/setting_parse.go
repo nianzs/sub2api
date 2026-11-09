@@ -864,6 +864,7 @@ func (s *SettingService) parseSettings(settings map[string]string) *SystemSettin
 	// cch_signing=false, claude_oauth_system_prompt_injection=true)
 	result.OpenAITTFTMode = normalizeOpenAITTFTMode(settings[SettingKeyOpenAITTFTMode])
 	result.GatewayKiroTokenizer = string(anthropictokenizer.ParseAlgorithm(settings[SettingKeyGatewayKiroTokenizer]))
+	result.GatewayKiroCacheScopeClient = settings[SettingKeyGatewayKiroCacheScopeClient] == "true"
 	if v, ok := settings[SettingKeyEnableFingerprintUnification]; ok && v != "" {
 		result.EnableFingerprintUnification = v == "true"
 	} else {

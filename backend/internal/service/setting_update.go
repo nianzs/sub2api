@@ -480,6 +480,7 @@ func (s *SettingService) buildSystemSettingsUpdates(ctx context.Context, setting
 		return nil, err
 	}
 	updates[SettingKeyGatewayKiroTokenizer] = kiroTokenizer
+	updates[SettingKeyGatewayKiroCacheScopeClient] = strconv.FormatBool(settings.GatewayKiroCacheScopeClient)
 	// fish 原生号动态尺寸规划阈值：crop 允许 0（=不裁剪仅缩放）；factor 0
 	// 视为未设置按默认写入。
 	fishCrop := settings.FishImageMaxCropPixels
@@ -762,6 +763,7 @@ func (s *SettingService) refreshCachedSettings(settings *SystemSettings) {
 	gatewayForwardingCache.Store(&cachedGatewayForwardingSettings{
 		openAITTFTMode:                   normalizeOpenAITTFTMode(settings.OpenAITTFTMode),
 		kiroTokenizer:                    anthropictokenizer.ParseAlgorithm(settings.GatewayKiroTokenizer),
+		kiroCacheScopeClient:             settings.GatewayKiroCacheScopeClient,
 		fingerprintUnification:           settings.EnableFingerprintUnification,
 		metadataPassthrough:              settings.EnableMetadataPassthrough,
 		cchSigning:                       settings.EnableCCHSigning,

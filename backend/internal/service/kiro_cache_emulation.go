@@ -5,18 +5,24 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/binary"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"hash"
 	"hash/fnv"
 	"math"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/anthropictokenizer"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/apicompat"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/ctxkey"
 	kiropkg "github.com/Wei-Shaw/sub2api/internal/pkg/kiro"
+
+	"github.com/tidwall/gjson"
 )
 
 const (
@@ -98,7 +104,7 @@ func (s *GatewayService) prepareKiroCacheEmulationUsage(ctx context.Context, acc
 	if !ok {
 		return nil
 	}
-	return s.prepareKiroCacheEmulationPlanFromProfile(ctx, account, group, profile, inputTokens)
+	return s.prepareKiroCacheEmulationPlanFromProfile(ctx, account, group, profile, body, inputTokens)
 }
 
 func (s *GatewayService) buildKiroResponsesCacheEmulationUsage(ctx context.Context, account *Account, group *Group, body []byte, model string, inputTokens int) *kiroCacheEmulationUsage {
@@ -116,7 +122,7 @@ func (s *GatewayService) prepareKiroResponsesCacheEmulationUsage(ctx context.Con
 	if !ok {
 		return nil
 	}
-	return s.prepareKiroCacheEmulationPlanFromProfile(ctx, account, group, profile, inputTokens)
+	return s.prepareKiroCacheEmulationPlanFromProfile(ctx, account, group, profile, body, inputTokens)
 }
 
 func (s *GatewayService) buildKiroChatCompletionsCacheEmulationUsage(ctx context.Context, account *Account, group *Group, body []byte, model string, inputTokens int) *kiroCacheEmulationUsage {
@@ -138,14 +144,14 @@ func (s *GatewayService) prepareKiroChatCompletionsCacheEmulationUsage(ctx conte
 	if effectiveInputTokens <= 0 {
 		effectiveInputTokens = profile.totalInputTokens
 	}
-	return s.prepareKiroCacheEmulationPlanFromProfile(ctx, account, group, profile, effectiveInputTokens)
+	return s.prepareKiroCacheEmulationPlanFromProfile(ctx, account, group, profile, body, effectiveInputTokens)
 }
 
-func (s *GatewayService) prepareKiroCacheEmulationPlanFromProfile(ctx context.Context, account *Account, group *Group, profile *kiroCacheProfile, inputTokens int) *kiroCacheEmulationPlan {
+func (s *GatewayService) prepareKiroCacheEmulationPlanFromProfile(ctx context.Context, account *Account, group *Group, profile *kiroCacheProfile, body []byte, inputTokens int) *kiroCacheEmulationPlan {
 	if group == nil || account == nil || account.ID <= 0 || profile == nil {
 		return nil
 	}
-	cacheKey := kiroCacheCredentialKey(account)
+	cacheKey := s.kiroCacheScopeKey(ctx, account, body)
 	if cacheKey == 0 {
 		return nil
 	}
@@ -1394,5 +1400,143 @@ func (u *kiroCacheEmulationUsage) toKiroUsage() *kiropkg.Usage {
 		CacheCreationInputTokens:   u.CacheCreationInputTokens,
 		CacheCreation5mInputTokens: u.CacheCreation5mInputTokens,
 		CacheCreation1hInputTokens: u.CacheCreation1hInputTokens,
+	}
+}
+
+// kiroCacheScopeKey 返回缓存模拟的分桶 key。默认按 Kiro 账号分桶；网关设置
+// gateway_kiro_cache_scope_client 打开且请求带 API key 时改按客户端分桶（与 kiro.rs
+// 的 isolation_seed 一致），切换上游账号不会丢缓存命中：
+//   - 有会话标识时按「API key + 会话」；
+//   - 没有时按「API key + 派生会话」（系统提示 + 第一条 user 消息）。同一个 API key
+//     可能被很多终端用户共用（如上游转售平台），只按 key 分桶会把别人的前缀记成命中。
+//
+// 内部探测、账号测试等没有 API key 的请求始终按账号，避免互相串缓存。
+func (s *GatewayService) kiroCacheScopeKey(ctx context.Context, account *Account, body []byte) uint64 {
+	if s == nil || s.settingService == nil || ctx == nil || !s.settingService.IsGatewayKiroCacheScopeClientEnabled(ctx) {
+		return kiroCacheCredentialKey(account)
+	}
+	apiKeyID, _ := ctx.Value(ctxkey.APIKeyID).(int64)
+	if apiKeyID <= 0 {
+		return kiroCacheCredentialKey(account)
+	}
+	seed := "client|key:" + strconv.FormatInt(apiKeyID, 10)
+	if session := kiroCacheSessionID(body); session != "" {
+		seed += "|sess:" + session
+	} else if derived := kiroCacheDerivedConversation(body); derived != "" {
+		seed += "|conv:" + derived
+	}
+	return kiroCacheSeedKey(seed)
+}
+
+// kiroCacheSeedKey 把分桶种子哈希成 key；种子带 "client|" 前缀，与账号 key 的输入隔开。
+func kiroCacheSeedKey(seed string) uint64 {
+	h := fnv.New64a()
+	_, _ = h.Write([]byte(seed))
+	if sum := h.Sum64(); sum != 0 {
+		return sum
+	}
+	return 1
+}
+
+// kiroCacheSessionID 从请求体提取会话标识，metadata.user_id 的解析规则与 kiro.rs
+// extract_session_id 一致：
+//   - 合法 JSON 时只取 session_id，没有就当作无会话，不再按字符串匹配（否则会把
+//     `"session_id":""` 里的 `session_` 误判为会话标识）；
+//   - 否则取第一个 `session_` 之后的全部内容，覆盖 Claude Code 的 `..._session_<uuid>`
+//     与 Codex 的 `session_<uuid>`，不限字符集、不要求位于末尾。
+//
+// user_id 取不到时再看 OpenAI 格式请求的 prompt_cache_key（kiro.rs 没有这一步）。
+func kiroCacheSessionID(body []byte) string {
+	if len(body) == 0 {
+		return ""
+	}
+	if userID := strings.TrimSpace(gjson.GetBytes(body, "metadata.user_id").String()); userID != "" {
+		if gjson.Valid(userID) {
+			if sid := strings.TrimSpace(gjson.Get(userID, "session_id").String()); sid != "" {
+				return sid
+			}
+		} else if _, sid, ok := strings.Cut(userID, "session_"); ok {
+			if sid = strings.TrimSpace(sid); sid != "" {
+				return sid
+			}
+		}
+	}
+	return strings.TrimSpace(gjson.GetBytes(body, "prompt_cache_key").String())
+}
+
+// kiroCacheDerivedConversation 在请求没有会话标识时按内容派生稳定的会话指纹，规则同
+// kiro.rs derive_conversation_id：系统提示 + 第一条 user 消息。两者在同一会话后续轮次
+// 中不变，所以每轮得到同一个值；只取文本与图片数据，不受客户端每轮挪动 cache_control
+// 断点的影响，纯字符串内容与单个 text 块得到同一个值。
+//
+// 兼容 Anthropic Messages（system + messages）、Chat Completions（messages 里的
+// system/developer 消息）与 Responses（instructions + input）。没有 user 消息时返回空串。
+func kiroCacheDerivedConversation(body []byte) string {
+	if len(body) == 0 {
+		return ""
+	}
+	root := gjson.ParseBytes(body)
+	h := sha256.New()
+	_, _ = h.Write([]byte("sub2api.kiro-cache.derived-conversation.v1\x00"))
+	hashKiroCacheContentParts(h, root.Get("system"))
+	hashKiroCacheContentParts(h, root.Get("instructions"))
+	items := root.Get("messages")
+	if !items.Exists() {
+		items = root.Get("input")
+	}
+	var firstUser gjson.Result
+	found := false
+	if items.Type == gjson.String {
+		// Responses 的 input 为纯字符串时，它就是第一条 user 消息。
+		firstUser, found = items, true
+	} else {
+		items.ForEach(func(_, item gjson.Result) bool {
+			switch item.Get("role").String() {
+			case "system", "developer":
+				hashKiroCacheContentParts(h, item.Get("content"))
+			case "user":
+				firstUser, found = item.Get("content"), true
+				return false
+			}
+			return true
+		})
+	}
+	if !found {
+		return ""
+	}
+	_, _ = h.Write([]byte{1})
+	hashKiroCacheContentParts(h, firstUser)
+	return hex.EncodeToString(h.Sum(nil))
+}
+
+// hashKiroCacheContentParts 把一段内容（字符串或块数组）的文本与图片数据写进哈希，每块以 \0 结尾。
+func hashKiroCacheContentParts(h hash.Hash, content gjson.Result) {
+	write := func(s string) {
+		_, _ = h.Write([]byte(s))
+		_, _ = h.Write([]byte{0})
+	}
+	switch {
+	case content.Type == gjson.String:
+		write(content.String())
+	case content.IsArray():
+		content.ForEach(func(_, part gjson.Result) bool {
+			switch {
+			case part.Type == gjson.String:
+				write(part.String())
+			case part.Get("text").Type == gjson.String:
+				write(part.Get("text").String())
+			case part.Get("source.data").Exists():
+				write(part.Get("source.data").String())
+			case part.Get("source.url").Exists():
+				write(part.Get("source.url").String())
+			case part.Get("image_url.url").Exists():
+				write(part.Get("image_url.url").String())
+			case part.Get("image_url").Type == gjson.String:
+				write(part.Get("image_url").String())
+			default:
+				write(part.Get("type").String())
+			}
+			return true
+		})
 	}
 }

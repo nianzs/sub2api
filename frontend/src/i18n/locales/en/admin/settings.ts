@@ -551,6 +551,8 @@ export default {
         kiroTokenizerCharClass: 'Character-class estimate',
         kiroTokenizerWeighted: 'Weighted-character estimate',
         kiroTokenizerHint: 'Controls the token counting basis for Kiro usage and billing. The default matches Anthropic\'s reference tokenizer; the two estimates count higher on CJK, JSON, and code-heavy content. Metering only — upstream requests and output truncation are unaffected.',
+        kiroCacheScopeClient: 'Scope Kiro cache emulation by API key + session',
+        kiroCacheScopeClientHint: 'When on, cache emulation is bucketed by API key and client session (the session in metadata.user_id), so switching upstream Kiro accounts keeps cache hits; without a session, a conversation id is derived from the system prompt and first user message so different conversations never share entries. When off, buckets are per Kiro account. Metering only; upstream requests are unaffected.',
         fishImageMaxCropPixels: 'Fish native size-fit max crop',
         fishImageMaxCropPixelsHint: 'Off-whitelist sizes are served by the nearest native tier with a centered crop. This caps the crop in delivered-image pixels (0-64). 0 disables cropping and only allows same-ratio scaling; default 4. Sizes that cannot be planned still fall back to relay. Native Fish accounts only.',
         fishImageMaxUpscaleFactor: 'Fish native size-fit max upscale factor',

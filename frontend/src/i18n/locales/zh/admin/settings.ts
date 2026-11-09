@@ -544,6 +544,8 @@ export default {
         kiroTokenizerCharClass: '字符分类估算',
         kiroTokenizerWeighted: '字符加权估算',
         kiroTokenizerHint: '控制 Kiro 渠道 usage 与计费的 token 计数口径。默认官方精确，与 Anthropic 参考分词器一致；两种估算口径在中文、JSON、代码等内容上计数更高。仅影响计量，不改变上游请求与输出截断行为。',
+        kiroCacheScopeClient: 'Kiro 缓存模拟按 API key + 会话隔离',
+        kiroCacheScopeClientHint: '打开后缓存模拟按 API key 与客户端会话（metadata.user_id 中的 session）分桶，切换上游 Kiro 账号不会丢失缓存命中；取不到会话时按系统提示与第一条用户消息派生会话，不同对话互不命中。关闭时按 Kiro 账号分桶。仅影响计费口径，不影响上游请求。',
         fishImageMaxCropPixels: 'Fish 原生号尺寸自适应最大裁剪',
         fishImageMaxCropPixelsHint: '非白名单尺寸就近挑原生档出图后居中裁剪，此为按交付图计的最大裁剪量（像素，0-64）。0 表示不裁剪、仅同比例缩放；默认 4。规划不出的尺寸仍走中转。只影响 Fish 原生号。',
         fishImageMaxUpscaleFactor: 'Fish 原生号尺寸自适应最大放大倍数',
