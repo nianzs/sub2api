@@ -229,12 +229,16 @@ func (s *GatewayService) ForwardAsChatCompletions(
 		var sseErr *sseStreamErrorEventError
 		switch {
 		case errors.As(handleErr, &sseErr):
-			return nil, s.sseStreamErrorEventFailover(ctx, c, account, resp, sseErr.RawData, mappedModel, c.Writer.Size() != writerSizeBeforeStream)
+			return nil, s.handleCompatStreamErrorEvent(ctx, c, account, resp, anthropicBody, mappedModel, sseErr.RawData, c.Writer.Size() != writerSizeBeforeStream, writeKiroCCError)
 		case errors.Is(handleErr, errAnthropicNativeStreamIdle) && s.rateLimitService != nil:
 			s.rateLimitService.HandleStreamTimeout(ctx, account, originalModel)
 		}
 	} else {
 		result, handleErr = s.handleCCBufferedFromAnthropic(resp, c, originalModel, mappedModel, reasoningEffort, startTime)
+		if exc := kiroUpstreamExceptionFromError(handleErr); exc != nil {
+			// 非流式客户端还没收到任何字节：与 /v1/messages 非流式一致，按 Kiro HTTP 错误处理。
+			return nil, s.handleKiroUpstreamException(ctx, c, account, mappedModel, anthropicBody, exc, resp.Header, writeKiroCCError)
+		}
 	}
 
 	return result, handleErr
@@ -358,6 +362,10 @@ func (s *GatewayService) handleCCBufferedFromAnthropic(
 	streamStatus.readErr = scanner.Err()
 	if failure := streamStatus.failure(); failure != nil {
 		_ = resp.Body.Close()
+		if kiroUpstreamExceptionFromError(failure.err) != nil {
+			// Kiro 流内异常：不写响应、不计费，由调用方按 Kiro HTTP 错误处理（换号或回 4xx）。
+			return nil, failure.err
+		}
 		writeGatewayCCError(c, http.StatusBadGateway, "server_error", failure.message)
 		return &ForwardResult{
 			RequestID: requestID, UpstreamHeaders: resp.Header, Usage: usage,

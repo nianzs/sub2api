@@ -192,7 +192,7 @@ func (s *GatewayService) forwardKiroMessages(ctx context.Context, c *gin.Context
 				// 按 Kiro 直接回对应 HTTP 错误处理：可换号的换号，请求本身的问题（如输入太长）直接回 4xx。
 				outputStarted := c.Writer.Size() != writerSizeBeforeStream
 				if exc := kiroUpstreamExceptionFromSSE(sseErr.RawData); exc != nil && !outputStarted {
-					return nil, s.handleKiroUpstreamException(ctx, c, account, mappedModel, body, exc, resp.Header)
+					return nil, s.handleKiroUpstreamException(ctx, c, account, mappedModel, body, exc, resp.Header, writeKiroMessagesError)
 				}
 				return nil, s.sseStreamErrorEventFailover(ctx, c, account, resp, sseErr.RawData, mappedModel, outputStarted)
 			}
@@ -280,7 +280,7 @@ func (s *GatewayService) forwardKiroMessages(ctx context.Context, c *gin.Context
 		if errors.As(err, &exc) {
 			// 上游在流里报了失败：还没写响应，按 Kiro 直接回对应 HTTP 错误处理（换号或回 4xx），不计费。
 			logKiroUpstreamException(ctx, account, mappedModel, originalModel, exc, false)
-			return nil, s.handleKiroUpstreamException(ctx, c, account, mappedModel, body, exc, resp.Header)
+			return nil, s.handleKiroUpstreamException(ctx, c, account, mappedModel, body, exc, resp.Header, writeKiroMessagesError)
 		}
 		c.JSON(http.StatusBadGateway, gin.H{
 			"type": "error",
@@ -815,8 +815,11 @@ func (s *GatewayService) markKiroQuotaExhaustedRateLimited(ctx context.Context, 
 		return
 	}
 	subject, reason := "kiro monthly request count", "kiro monthly request count exhausted (402): MONTHLY_REQUEST_COUNT"
-	if category == kiroErrorOverageExhausted {
+	switch category {
+	case kiroErrorOverageExhausted:
 		subject, reason = "kiro overage limit", "kiro overage limit exhausted (402): OVERAGE_REQUEST_LIMIT_EXCEEDED"
+	case kiroErrorQuotaExhausted:
+		subject, reason = "kiro quota", "kiro quota exhausted (402)"
 	}
 	resetAt := nextKiroMonthlyResetUTC(time.Now())
 	if err := s.accountRepo.SetRateLimited(ctx, account.ID, resetAt); err != nil {
@@ -914,7 +917,45 @@ func (s *GatewayService) markKiroInvalidModelRateLimited(ctx context.Context, ac
 	)
 }
 
+// kiroClientErrorWriter 按入口协议写出不换号的 Kiro 错误；upstreamStatus 是上游（或等价的）状态码。
+type kiroClientErrorWriter func(c *gin.Context, upstreamStatus int, message string)
+
+// writeKiroMessagesError 写 Anthropic Messages 格式的错误。
+func writeKiroMessagesError(c *gin.Context, upstreamStatus int, message string) {
+	c.JSON(mapUpstreamStatusCode(upstreamStatus), gin.H{
+		"type": "error",
+		"error": gin.H{
+			"type":    claudeErrorType(upstreamStatus),
+			"message": message,
+		},
+	})
+}
+
+// kiroOpenAICompatErrorType 与 compat 入口处理 HTTP 错误时的类型一致：请求本身的问题报
+// invalid_request_error，其余报 server_error。
+func kiroOpenAICompatErrorType(upstreamStatus int) string {
+	if upstreamStatus == http.StatusBadRequest {
+		return "invalid_request_error"
+	}
+	return "server_error"
+}
+
+// writeKiroCCError 写 Chat Completions 格式的错误。
+func writeKiroCCError(c *gin.Context, upstreamStatus int, message string) {
+	writeGatewayCCError(c, mapUpstreamStatusCode(upstreamStatus), kiroOpenAICompatErrorType(upstreamStatus), message)
+}
+
+// writeKiroResponsesError 写 Responses 格式的错误。
+func writeKiroResponsesError(c *gin.Context, upstreamStatus int, message string) {
+	writeResponsesError(c, mapUpstreamStatusCode(upstreamStatus), kiroOpenAICompatErrorType(upstreamStatus), message)
+}
+
 func (s *GatewayService) handleKiroHTTPError(ctx context.Context, resp *http.Response, c *gin.Context, account *Account, mappedModel string, requestBody []byte) error {
+	return s.handleKiroHTTPErrorWith(ctx, resp, c, account, mappedModel, requestBody, writeKiroMessagesError)
+}
+
+// handleKiroHTTPErrorWith 同 handleKiroHTTPError，不换号时用 writeError 按入口协议写出错误。
+func (s *GatewayService) handleKiroHTTPErrorWith(ctx context.Context, resp *http.Response, c *gin.Context, account *Account, mappedModel string, requestBody []byte, writeError kiroClientErrorWriter) error {
 	respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 2<<20))
 	upstreamMsg := strings.TrimSpace(extractUpstreamErrorMessage(respBody))
 	upstreamMsg = sanitizeUpstreamErrorMessage(upstreamMsg)
@@ -953,7 +994,10 @@ func (s *GatewayService) handleKiroHTTPError(ctx context.Context, resp *http.Res
 		// 指数退避 + DB rate_limit_reset_at 同步）。这里再走 HandleUpstreamError 会进入
 		// handle429 → apply429FallbackRateLimit，把 DB cooldown 反写成 5s flat，
 		// 直接抹掉我们刚算好的退避时长。所以 429 跳过通用 handler。
-		if s.rateLimitService != nil && resp.StatusCode != http.StatusTooManyRequests {
+		// 402 同理：额度用尽已由上面的 markKiroQuotaExhaustedRateLimited 停到月度重置
+		// （与 executeKiroUpstreamWithParsed 的 HTTP 402 一致），通用 handler 的 402 分支
+		// 会 SetError 把账号永久停用，下月也不会自动恢复。
+		if s.rateLimitService != nil && resp.StatusCode != http.StatusTooManyRequests && resp.StatusCode != http.StatusPaymentRequired {
 			s.rateLimitService.HandleUpstreamError(ctx, account, resp.StatusCode, resp.Header, respBody)
 		}
 		return &UpstreamFailoverError{
@@ -977,13 +1021,7 @@ func (s *GatewayService) handleKiroHTTPError(ctx context.Context, resp *http.Res
 	if fixed, ok := kiroContextLengthClientMessage(resp.StatusCode, respBody); ok {
 		message = fixed
 	}
-	c.JSON(mapUpstreamStatusCode(resp.StatusCode), gin.H{
-		"type": "error",
-		"error": gin.H{
-			"type":    claudeErrorType(resp.StatusCode),
-			"message": message,
-		},
-	})
+	writeError(c, resp.StatusCode, message)
 	return fmt.Errorf("kiro upstream error: %d %s", resp.StatusCode, upstreamMsg)
 }
 

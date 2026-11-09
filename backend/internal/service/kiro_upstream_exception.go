@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"strings"
@@ -18,8 +19,10 @@ import (
 // Kiro 在事件流里下发的失败（exception / error 帧，见 kiropkg.KiroUpstreamException）。
 //
 // 首个输出之前失败时客户端还没收到任何字节，按 Kiro 直接回了对应 HTTP 错误处理：
-// 构造等价的错误响应交给 handleKiroHTTPError，换号、限流/额度标记、ops 事件和客户端
-// 文案都走现有逻辑。已有输出时只能在流里以 SSE error 收尾。两种情况都不计费。
+// 构造等价的错误响应交给 handleKiroHTTPErrorWith，换号、限流冷却、ops 事件和客户端
+// 文案都走现有逻辑；额度用尽（402）单独处理，见 handleKiroUpstreamQuotaException。
+// Messages / Chat Completions / Responses 三个入口共用，各自传入协议对应的错误写出函数。
+// 已有输出时只能在流里以 SSE error 收尾。两种情况都不计费。
 
 // kiroUpstreamExceptionSSEField 是 SSE error 事件里携带原始异常的私有字段，
 // forwardKiroMessages 据此在输出开始前还原异常。
@@ -74,25 +77,69 @@ func kiroUpstreamExceptionResponse(exc *kiropkg.KiroUpstreamException, header ht
 }
 
 // handleKiroUpstreamException 处理首个输出之前的流内失败，返回值同 handleKiroHTTPError
-// （可换号时为 *UpstreamFailoverError，否则已写好错误响应）。
-func (s *GatewayService) handleKiroUpstreamException(ctx context.Context, c *gin.Context, account *Account, mappedModel string, requestBody []byte, exc *kiropkg.KiroUpstreamException, header http.Header) error {
+// （可换号时为 *UpstreamFailoverError，否则已用 writeError 按入口协议写好错误响应）。
+func (s *GatewayService) handleKiroUpstreamException(ctx context.Context, c *gin.Context, account *Account, mappedModel string, requestBody []byte, exc *kiropkg.KiroUpstreamException, header http.Header, writeError kiroClientErrorWriter) error {
 	resp := kiroUpstreamExceptionResponse(exc, header)
 	defer func() { _ = resp.Body.Close() }()
-	if resp.StatusCode == http.StatusTooManyRequests && account != nil {
-		// HTTP 429 在 executeKiroUpstreamWithParsed 里已做冷却，handleKiroHTTPError 因此跳过；
-		// 流内限流没走那里，这里补上。
-		if _, err := s.markKiro429(ctx, account.ID, buildKiroAccountKey(account)); err != nil {
-			logger.FromContext(ctx).Warn("kiro.upstream_exception_mark_429_failed", zap.Int64("account_id", account.ID), zap.Error(err))
-		}
-	}
-	// handleStreamingResponse 已设好 SSE 响应头（尚未写出）；直接回 JSON 错误时去掉，
+	// 流式处理已设好 SSE 响应头（尚未写出）；直接回 JSON 错误时去掉，
 	// 否则 gin 会保留 text/event-stream。
 	if c != nil && c.Writer != nil && !c.Writer.Written() {
 		for _, h := range []string{"Content-Type", "Cache-Control", "Connection", "X-Accel-Buffering"} {
 			c.Writer.Header().Del(h)
 		}
 	}
-	return s.handleKiroHTTPError(ctx, resp, c, account, mappedModel, requestBody)
+	switch resp.StatusCode {
+	case http.StatusTooManyRequests:
+		// HTTP 429 在 executeKiroUpstreamWithParsed 里已做冷却，handleKiroHTTPError 因此跳过；
+		// 流内限流没走那里，这里补上。
+		if account != nil {
+			if _, err := s.markKiro429(ctx, account.ID, buildKiroAccountKey(account)); err != nil {
+				logger.FromContext(ctx).Warn("kiro.upstream_exception_mark_429_failed", zap.Int64("account_id", account.ID), zap.Error(err))
+			}
+		}
+	case http.StatusPaymentRequired:
+		return s.handleKiroUpstreamQuotaException(ctx, c, account, resp)
+	}
+	return s.handleKiroHTTPErrorWith(ctx, resp, c, account, mappedModel, requestBody, writeError)
+}
+
+// handleCompatStreamErrorEvent 处理 compat 入口（Chat Completions / Responses）流式转换返回的
+// error 事件：输出开始前的 Kiro 异常与 /v1/messages 一致，按 Kiro HTTP 错误处理（换号或按入口
+// 协议回 4xx）；已有输出或非 Kiro 的 error 事件照旧转 sseStreamErrorEventFailover。
+func (s *GatewayService) handleCompatStreamErrorEvent(ctx context.Context, c *gin.Context, account *Account, resp *http.Response, requestBody []byte, mappedModel, rawData string, outputStarted bool, writeError kiroClientErrorWriter) error {
+	if exc := kiroUpstreamExceptionFromSSE(rawData); exc != nil && !outputStarted {
+		return s.handleKiroUpstreamException(ctx, c, account, mappedModel, requestBody, exc, resp.Header, writeError)
+	}
+	return s.sseStreamErrorEventFailover(ctx, c, account, resp, rawData, mappedModel, outputStarted)
+}
+
+// handleKiroUpstreamQuotaException 处理映射成 402 的流内失败（ServiceQuotaExceeded、
+// 额度/用量/积分/超刷用尽）。这些信号都表示本计费周期额度已用尽，不再细分是否
+// MONTHLY_REQUEST_COUNT，一律停到月度重置后换号。不交给 handleKiroHTTPError：
+// 那里的通用 402 处理是为 HTTP 402 准备的，也不能让流内信号碰账号状态。
+func (s *GatewayService) handleKiroUpstreamQuotaException(ctx context.Context, c *gin.Context, account *Account, resp *http.Response) error {
+	body, _ := io.ReadAll(resp.Body)
+	category := classifyKiroHTTPError(resp.StatusCode, string(body)).Category
+	if category != kiroErrorMonthlyRequest && category != kiroErrorOverageExhausted {
+		category = kiroErrorQuotaExhausted
+	}
+	s.markKiroQuotaExhaustedRateLimited(ctx, account, category, string(body))
+	if account != nil {
+		appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
+			Platform:           account.Platform,
+			AccountID:          account.ID,
+			AccountName:        account.Name,
+			UpstreamStatusCode: resp.StatusCode,
+			UpstreamRequestID:  buildKiroRequestID(resp),
+			Kind:               "failover",
+			Message:            sanitizeUpstreamErrorMessage(strings.TrimSpace(extractUpstreamErrorMessage(body))),
+		})
+	}
+	return &UpstreamFailoverError{
+		StatusCode:      resp.StatusCode,
+		ResponseBody:    body,
+		ResponseHeaders: resp.Header.Clone(),
+	}
 }
 
 // kiroUpstreamExceptionSSE 是转换流里以 Anthropic 格式下发的 SSE error 事件，
@@ -116,6 +163,35 @@ func kiroUpstreamExceptionSSE(exc *kiropkg.KiroUpstreamException) string {
 		},
 	})
 	return "event: error\ndata: " + string(payload) + "\n\n"
+}
+
+// kiroUpstreamExceptionFromError 从流处理返回的 sseStreamErrorEventError 里还原 Kiro 异常；
+// 其它错误（含非 Kiro 的 error 事件）返回 nil。
+func kiroUpstreamExceptionFromError(err error) *kiropkg.KiroUpstreamException {
+	var sseErr *sseStreamErrorEventError
+	if !errors.As(err, &sseErr) {
+		return nil
+	}
+	return kiroUpstreamExceptionFromSSE(sseErr.RawData)
+}
+
+// kiroException 返回 compat 流失败里携带的 Kiro 异常；不是 Kiro 异常（或没有失败）时为 nil。
+func (f *anthropicCompatStreamFailure) kiroException() *kiropkg.KiroUpstreamException {
+	if f == nil {
+		return nil
+	}
+	return kiroUpstreamExceptionFromError(f.err)
+}
+
+// kiroUpstreamExceptionIsContextLength 判断异常是否为「输入太长」（与 HTTP 400 同口径）。
+func kiroUpstreamExceptionIsContextLength(exc *kiropkg.KiroUpstreamException) bool {
+	if exc == nil {
+		return false
+	}
+	resp := kiroUpstreamExceptionResponse(exc, nil)
+	body, _ := io.ReadAll(resp.Body)
+	_, ok := kiroContextLengthClientMessage(resp.StatusCode, body)
+	return ok
 }
 
 // kiroUpstreamExceptionFromSSE 从 kiroUpstreamExceptionSSE 生成的事件里还原异常；其它 error 事件返回 nil。
