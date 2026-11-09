@@ -188,13 +188,12 @@ func (s *GatewayService) forwardKiroMessages(ctx context.Context, c *gin.Context
 		if err != nil {
 			var sseErr *sseStreamErrorEventError
 			if errors.As(err, &sseErr) {
-				// 流里的 error 事件不计费。客户端还没收到任何字节且是上游异常时，
-				// 按 Kiro 直接回对应 HTTP 错误处理：可换号的换号，请求本身的问题（如输入太长）直接回 4xx。
+				// Kiro 上游异常见 handleKiroStreamErrorEvent。其它 error 事件（转换中断时补的
+				// "stream interrupted"）照旧原样返回，由 handler 补写终止错误。
 				outputStarted := c.Writer.Size() != writerSizeBeforeStream
-				if exc := kiroUpstreamExceptionFromSSE(sseErr.RawData); exc != nil && !outputStarted {
-					return nil, s.handleKiroUpstreamException(ctx, c, account, mappedModel, body, exc, resp.Header, writeKiroMessagesError)
+				if result, handled, kiroErr := s.handleKiroStreamErrorEvent(ctx, c, account, resp, body, originalModel, mappedModel, upstreamModel, startTime, sseErr.RawData, outputStarted, writeKiroMessagesError); handled {
+					return result, kiroErr
 				}
-				return nil, s.sseStreamErrorEventFailover(ctx, c, account, resp, sseErr.RawData, mappedModel, outputStarted)
 			}
 			return nil, err
 		}

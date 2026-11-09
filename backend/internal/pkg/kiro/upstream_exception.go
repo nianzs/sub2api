@@ -14,6 +14,9 @@ type KiroUpstreamException struct {
 	// Payload 是帧载荷原文（通常是 {"message":...,"reason":...}），调用方据此按 HTTP 错误
 	// 体复用现有分类；超过 kiroUpstreamExceptionPayloadLimit 时截断。
 	Payload []byte
+	// PartialUsage 只在流式转换已向客户端输出后才有：截至异常的用量（输入估算与缓存模拟、
+	// 已输出内容的本地计数、已收到的 credits）。此时不能换号，调用方按流中断记录这部分用量。
+	PartialUsage *Usage
 }
 
 func (e *KiroUpstreamException) Error() string {

@@ -235,3 +235,25 @@ func TestCompactionInterruptedStreamFailsInsteadOfPartialSummary(t *testing.T) {
 		})
 	}
 }
+
+// compat 入口与 /v1/messages 一致：已有输出后的 Kiro 异常不转 403 failover，按流中断返回普通错误并记录用量。
+func TestKiroCompatStreamExceptionAfterOutputRecordsPartialUsage(t *testing.T) {
+	for _, endpoint := range []string{"chat_completions", "responses"} {
+		t.Run(endpoint, func(t *testing.T) {
+			result, err, rec, _, _ := forwardKiroCompatWithUpstreamFrames(t, endpoint, true,
+				buildKiroEventStreamFrame(t, "assistantResponseEvent", map[string]any{
+					"assistantResponseEvent": map[string]any{"content": "partial"},
+				}),
+				buildKiroEventStreamFrame(t, "meteringEvent", map[string]any{"meteringEvent": map[string]any{"usage": 0.2}}),
+				buildKiroExceptionFrame(t, "InternalServerException", `{"message":"boom"}`),
+			)
+			require.Error(t, err)
+			var failoverErr *UpstreamFailoverError
+			require.NotErrorAs(t, err, &failoverErr)
+			require.NotNil(t, result)
+			require.Positive(t, result.Usage.OutputTokens)
+			require.InDelta(t, 0.2, result.Usage.KiroCredits, 1e-9)
+			require.Contains(t, rec.Body.String(), "partial")
+		})
+	}
+}

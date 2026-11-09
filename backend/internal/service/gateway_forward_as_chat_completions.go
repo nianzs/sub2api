@@ -229,7 +229,11 @@ func (s *GatewayService) ForwardAsChatCompletions(
 		var sseErr *sseStreamErrorEventError
 		switch {
 		case errors.As(handleErr, &sseErr):
-			return nil, s.handleCompatStreamErrorEvent(ctx, c, account, resp, anthropicBody, mappedModel, sseErr.RawData, c.Writer.Size() != writerSizeBeforeStream, writeKiroCCError)
+			outputStarted := c.Writer.Size() != writerSizeBeforeStream
+			if kiroResult, handled, kiroErr := s.handleKiroStreamErrorEvent(ctx, c, account, resp, anthropicBody, originalModel, mappedModel, mappedModel, startTime, sseErr.RawData, outputStarted, writeKiroCCError); handled {
+				return kiroResult, kiroErr
+			}
+			return nil, s.sseStreamErrorEventFailover(ctx, c, account, resp, sseErr.RawData, mappedModel, outputStarted)
 		case errors.Is(handleErr, errAnthropicNativeStreamIdle) && s.rateLimitService != nil:
 			s.rateLimitService.HandleStreamTimeout(ctx, account, originalModel)
 		}

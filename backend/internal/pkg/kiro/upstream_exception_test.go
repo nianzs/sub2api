@@ -61,11 +61,13 @@ func TestStreamReturnsUpstreamExceptionBeforeAnyOutput(t *testing.T) {
 	require.Equal(t, "Input is too long.", exc.Message)
 	require.Contains(t, string(exc.Payload), "CONTENT_LENGTH_EXCEEDS_THRESHOLD")
 	require.Zero(t, out.Len(), "nothing may reach the client before the first output")
+	require.Nil(t, exc.PartialUsage, "no partial usage before any output")
 }
 
 func TestStreamReturnsUpstreamExceptionAfterPartialOutput(t *testing.T) {
 	stream := bytes.NewBuffer(nil)
 	_, _ = stream.Write(textFrame(t, "partial answer"))
+	_, _ = stream.Write(buildEventStreamFrame(t, "meteringEvent", map[string]any{"meteringEvent": map[string]any{"usage": 0.25}}))
 	_, _ = stream.Write(exceptionFrame(t, "InternalServerException", `{"message":"boom"}`))
 
 	var out bytes.Buffer
@@ -75,6 +77,12 @@ func TestStreamReturnsUpstreamExceptionAfterPartialOutput(t *testing.T) {
 	require.Equal(t, "InternalServerException", exc.Type)
 	require.Contains(t, out.String(), "message_start")
 	require.Contains(t, out.String(), "partial answer")
+
+	// 已有输出：附上截至异常的用量，供调用方按流中断记账。
+	require.NotNil(t, exc.PartialUsage)
+	require.Equal(t, 100, exc.PartialUsage.InputTokens)
+	require.Positive(t, exc.PartialUsage.OutputTokens)
+	require.InDelta(t, 0.25, exc.PartialUsage.KiroCredits, 1e-9)
 }
 
 func TestStreamContentLengthExceededEndsWithMaxTokens(t *testing.T) {

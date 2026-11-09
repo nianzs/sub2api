@@ -5,9 +5,11 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"strings"
+	"time"
 
 	kiropkg "github.com/Wei-Shaw/sub2api/internal/pkg/kiro"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
@@ -28,20 +30,30 @@ import (
 // forwardKiroMessages 据此在输出开始前还原异常。
 const kiroUpstreamExceptionSSEField = "kiro_exception"
 
+// kiroOverageLimitExceededCode 是 Kiro 超刷额度用尽的明确原因码。
+const kiroOverageLimitExceededCode = "OVERAGE_REQUEST_LIMIT_EXCEEDED"
+
 // kiroUpstreamExceptionStatus 把流内失败映射成 Kiro 直接返回时的 HTTP 状态。
 // 不映射成 401/403：账号级的鉴权问题在流开始前就以 HTTP 错误返回，流内的
 // AccessDenied 等更可能只针对本次请求/模型，按 403 处理会走 handle403 停用账号，
 // 所以归入默认的 500（换号重试，不动账号状态）。
+//
+// 402（停到月度重置）只认明确的额度码 MONTHLY_REQUEST_COUNT / OVERAGE_REQUEST_LIMIT_EXCEEDED，
+// 与 HTTP 402 的口径（kiroQuotaExhausted）一致。其余像额度的措辞（ServiceQuotaExceeded、
+// "quota exceeded"、"usage limit reached" 等）可能只针对本次请求，而换号会把同一请求发给下一个
+// 账号：按 402 停到月底会让一个请求停掉一串账号，所以按 429 冷却几分钟再换号。
 func kiroUpstreamExceptionStatus(exc *kiropkg.KiroUpstreamException) int {
 	typ := strings.ToLower(exc.Type)
 	raw := exc.Type + " " + exc.Message + " " + string(exc.Payload)
 	text := strings.ToLower(raw)
 	switch {
+	case looksLikeKiroMonthlyRequestCountError(raw) || strings.Contains(raw, kiroOverageLimitExceededCode):
+		return http.StatusPaymentRequired
 	case strings.Contains(typ, "throttl") || strings.Contains(text, "too many requests") || strings.Contains(text, "rate exceeded"):
 		return http.StatusTooManyRequests
 	case strings.Contains(typ, "servicequotaexceeded") || looksLikeKiroOverageExhaustedError(text) ||
-		looksLikeKiroQuotaExhaustedError(text) || looksLikeKiroMonthlyRequestCountError(raw):
-		return http.StatusPaymentRequired
+		looksLikeKiroQuotaExhaustedError(text):
+		return http.StatusTooManyRequests
 	case strings.Contains(typ, "validation"):
 		return http.StatusBadRequest
 	default:
@@ -103,14 +115,37 @@ func (s *GatewayService) handleKiroUpstreamException(ctx context.Context, c *gin
 	return s.handleKiroHTTPErrorWith(ctx, resp, c, account, mappedModel, requestBody, writeError)
 }
 
-// handleCompatStreamErrorEvent 处理 compat 入口（Chat Completions / Responses）流式转换返回的
-// error 事件：输出开始前的 Kiro 异常与 /v1/messages 一致，按 Kiro HTTP 错误处理（换号或按入口
-// 协议回 4xx）；已有输出或非 Kiro 的 error 事件照旧转 sseStreamErrorEventFailover。
-func (s *GatewayService) handleCompatStreamErrorEvent(ctx context.Context, c *gin.Context, account *Account, resp *http.Response, requestBody []byte, mappedModel, rawData string, outputStarted bool, writeError kiroClientErrorWriter) error {
-	if exc := kiroUpstreamExceptionFromSSE(rawData); exc != nil && !outputStarted {
-		return s.handleKiroUpstreamException(ctx, c, account, mappedModel, requestBody, exc, resp.Header, writeError)
+// handleKiroStreamErrorEvent 处理流式转换返回的 error 事件，Messages / Chat Completions /
+// Responses 三个入口共用。handled=false 表示不是 Kiro 异常，由调用方按入口原有逻辑处理。
+//   - 客户端还没收到任何字节：按 Kiro HTTP 错误处理（换号或按入口协议回 4xx）。
+//   - 已有输出（或保活 ping）：不能换号，按流中断返回普通错误（不是 failover 错误），
+//     handler 补写协议内的终止错误，并记录截至异常的用量（与流中断的部分入账一致）。
+//     交给 sseStreamErrorEventFailover 会被当成 403，客户端看到"无权访问"且这部分用量漏记。
+func (s *GatewayService) handleKiroStreamErrorEvent(ctx context.Context, c *gin.Context, account *Account, resp *http.Response, requestBody []byte, originalModel, mappedModel, upstreamModel string, startTime time.Time, rawData string, outputStarted bool, writeError kiroClientErrorWriter) (result *ForwardResult, handled bool, err error) {
+	exc := kiroUpstreamExceptionFromSSE(rawData)
+	if exc == nil {
+		return nil, false, nil
 	}
-	return s.sseStreamErrorEventFailover(ctx, c, account, resp, rawData, mappedModel, outputStarted)
+	if !outputStarted {
+		return nil, true, s.handleKiroUpstreamException(ctx, c, account, mappedModel, requestBody, exc, resp.Header, writeError)
+	}
+	return kiroPartialForwardResult(resp, exc, originalModel, upstreamModel, startTime), true,
+		fmt.Errorf("kiro upstream exception after output started: %w", exc)
+}
+
+// kiroPartialForwardResult 用异常携带的截至此刻用量构造部分结果；没有用量时返回 nil。
+func kiroPartialForwardResult(resp *http.Response, exc *kiropkg.KiroUpstreamException, model, upstreamModel string, startTime time.Time) *ForwardResult {
+	if exc == nil || exc.PartialUsage == nil {
+		return nil
+	}
+	return &ForwardResult{
+		RequestID:     buildKiroRequestID(resp),
+		Usage:         kiroUsageToClaude(*exc.PartialUsage, exc.PartialUsage.InputTokens),
+		Model:         model,
+		UpstreamModel: upstreamModel,
+		Stream:        true,
+		Duration:      time.Since(startTime),
+	}
 }
 
 // handleKiroUpstreamQuotaException 处理映射成 402 的流内失败（ServiceQuotaExceeded、
@@ -156,13 +191,21 @@ func kiroUpstreamExceptionSSE(exc *kiropkg.KiroUpstreamException) string {
 			"type":    claudeErrorType(status),
 			"message": truncateString(sanitizeUpstreamErrorMessage(message), 500),
 		},
-		kiroUpstreamExceptionSSEField: map[string]any{
-			"type":    exc.Type,
-			"message": exc.Message,
-			"payload": string(exc.Payload),
-		},
+		kiroUpstreamExceptionSSEField: kiroExceptionSSEField(exc),
 	})
 	return "event: error\ndata: " + string(payload) + "\n\n"
+}
+
+func kiroExceptionSSEField(exc *kiropkg.KiroUpstreamException) map[string]any {
+	field := map[string]any{
+		"type":    exc.Type,
+		"message": exc.Message,
+		"payload": string(exc.Payload),
+	}
+	if exc.PartialUsage != nil {
+		field["usage"] = exc.PartialUsage
+	}
+	return field
 }
 
 // kiroUpstreamExceptionFromError 从流处理返回的 sseStreamErrorEventError 里还原 Kiro 异常；
@@ -200,11 +243,18 @@ func kiroUpstreamExceptionFromSSE(rawData string) *kiropkg.KiroUpstreamException
 	if !field.IsObject() || field.Get("type").String() == "" {
 		return nil
 	}
-	return &kiropkg.KiroUpstreamException{
+	exc := &kiropkg.KiroUpstreamException{
 		Type:    field.Get("type").String(),
 		Message: field.Get("message").String(),
 		Payload: []byte(field.Get("payload").String()),
 	}
+	if usage := field.Get("usage"); usage.IsObject() {
+		var partial kiropkg.Usage
+		if err := json.Unmarshal([]byte(usage.Raw), &partial); err == nil {
+			exc.PartialUsage = &partial
+		}
+	}
+	return exc
 }
 
 func logKiroUpstreamException(ctx context.Context, account *Account, mappedModel, requestModel string, exc *kiropkg.KiroUpstreamException, outputStarted bool) {
