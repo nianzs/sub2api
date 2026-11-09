@@ -45,6 +45,13 @@ const kiroMaxOutputTokens = 131072
 // KiroOutputMethodCredits 表示本次 output 由 credits 反推得出。
 const KiroOutputMethodCredits = "credits"
 
+// credits 反推采用的命中量假设（KiroOutputEstimate.CacheAssumption）。
+const (
+	KiroCacheAssumptionHint      = "hint"       // 采用调用方推断的命中量
+	KiroCacheAssumptionAllCached = "all_cached" // 推断值不成立，按整个提示词都命中
+	KiroCacheAssumptionNone      = "none"       // 按全部未命中
+)
+
 // KiroCreditRatesForModel 返回模型的 credits 单价；未实测的模型或已关闭时返回 false。
 func KiroCreditRatesForModel(model string) (KiroCreditRates, bool) {
 	if !kiroCreditsOutputEnabled() {
@@ -82,6 +89,9 @@ type KiroOutputEstimate struct {
 	CachedPromptTokens  int // 采用的命中量 C
 	VisibleOutputTokens int // 本地 tokenizer 数的下发内容（正文 + 工具参数 + 思考摘要）
 	OutputTokens        int // 最终 output
+
+	// CacheAssumption 是 credits 反推采用的命中量假设（KiroCacheAssumption*）。
+	CacheAssumption string
 }
 
 // kiroCreditOutputInput 是收尾时判断能否用 credits 反推 output 所需的信号。
@@ -168,8 +178,9 @@ func estimateKiroOutputAllCached(r KiroCreditRates, credits float64, total int) 
 
 // kiroCacheCandidate 是反推时尝试的一种命中量假设。
 type kiroCacheCandidate struct {
-	cached    int  // 命中量
-	allCached bool // 假设整个提示词都命中（命中量 = P，由反推结果决定）
+	cached     int    // 命中量
+	allCached  bool   // 假设整个提示词都命中（命中量 = P，由反推结果决定）
+	assumption string // KiroCacheAssumption*
 }
 
 // resolveKiroCreditOutput 依次尝试命中量假设，取第一个通过合理性检查的反推结果：
@@ -190,9 +201,13 @@ type kiroCacheCandidate struct {
 // 都不通过时返回 ok=false，调用方沿用旧算法。
 func resolveKiroCreditOutput(r KiroCreditRates, credits float64, total int, hint KiroPromptCacheHint, visibleLocal int) (int, KiroOutputEstimate, bool) {
 	est := KiroOutputEstimate{Credits: credits, ContextTokens: total, VisibleOutputTokens: visibleLocal}
-	candidates := []kiroCacheCandidate{{cached: 0}}
+	candidates := []kiroCacheCandidate{{cached: 0, assumption: KiroCacheAssumptionNone}}
 	if hint.CachedTokens > 0 {
-		candidates = []kiroCacheCandidate{{cached: hint.CachedTokens}, {allCached: true}, {cached: 0}}
+		candidates = []kiroCacheCandidate{
+			{cached: hint.CachedTokens, assumption: KiroCacheAssumptionHint},
+			{allCached: true, assumption: KiroCacheAssumptionAllCached},
+			{cached: 0, assumption: KiroCacheAssumptionNone},
+		}
 	}
 	floor := int(math.Floor(0.7 * float64(visibleLocal)))
 	// 单价 1% 的误差折算到输出上的偏差，用作下限容差。
@@ -232,6 +247,7 @@ func resolveKiroCreditOutput(r KiroCreditRates, credits float64, total int, hint
 		est.Method = KiroOutputMethodCredits
 		est.PromptTokens = p
 		est.CachedPromptTokens = c
+		est.CacheAssumption = cand.assumption
 		est.OutputTokens = o
 		return o, est, true
 	}

@@ -52,7 +52,18 @@ func TestResolveKiroCreditOutputUsesAllCachedWhenHintExceedsPrompt(t *testing.T)
 	require.True(t, ok)
 	require.InDelta(t, 15000, o, 200)
 	require.Equal(t, est.PromptTokens, est.CachedPromptTokens, "整个提示词都按命中计")
+	require.Equal(t, KiroCacheAssumptionAllCached, est.CacheAssumption)
 	require.InDelta(t, 100000, est.PromptTokens, 200)
+}
+
+func TestResolveKiroCreditOutputFallsBackToUncachedWhenOtherAssumptionsFail(t *testing.T) {
+	// 实际全部未命中、输出接近上限：按推断值或整段命中反推都会超过输出上限，应退到 C=0。
+	credits := kiroCreditsFor(opus55Rates, 300000, 0, 128000)
+	o, est, ok := resolveKiroCreditOutput(opus55Rates, credits, 428000, KiroPromptCacheHint{Resolved: true, CachedTokens: 290000}, 500)
+	require.True(t, ok)
+	require.InDelta(t, 128000, o, 1)
+	require.Equal(t, 0, est.CachedPromptTokens)
+	require.Equal(t, KiroCacheAssumptionNone, est.CacheAssumption)
 }
 
 // 一轮没用上 credits（例如被 stop sequence 截断）后，按"总量 - 可见输出"记录的提示词
@@ -92,6 +103,7 @@ func TestResolveKiroCreditOutputUsesCacheHint(t *testing.T) {
 	require.True(t, ok)
 	require.InDelta(t, 1200, o, 1)
 	require.Equal(t, 280000, est.CachedPromptTokens)
+	require.Equal(t, KiroCacheAssumptionHint, est.CacheAssumption)
 	require.Equal(t, KiroOutputMethodCredits, est.Method)
 }
 
@@ -106,9 +118,10 @@ func TestResolveKiroCreditOutputRejectsBelowFloor(t *testing.T) {
 func TestResolveKiroCreditOutputClampsSmallShortfall(t *testing.T) {
 	// 单价略有偏差导致反推出一点负数：在容差内截到下限 0，而不是放弃。
 	credits := kiroCreditsFor(opus55Rates, 80000, 0, 0) * 0.997
-	o, _, ok := resolveKiroCreditOutput(opus55Rates, credits, 80000, KiroPromptCacheHint{Resolved: true}, 0)
+	o, est, ok := resolveKiroCreditOutput(opus55Rates, credits, 80000, KiroPromptCacheHint{Resolved: true}, 0)
 	require.True(t, ok)
 	require.Equal(t, 0, o)
+	require.Equal(t, KiroCacheAssumptionNone, est.CacheAssumption, "没有推断值时按全部未命中")
 }
 
 func TestApplyKiroCreditOutputReasons(t *testing.T) {
