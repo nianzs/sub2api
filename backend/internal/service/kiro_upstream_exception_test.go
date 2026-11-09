@@ -89,7 +89,7 @@ func TestHandleKiroUpstreamExceptionInputTooLongReturns400(t *testing.T) {
 	svc := &GatewayService{}
 	exc := &kiropkg.KiroUpstreamException{Type: "ValidationException", Message: "Input is too long.", Payload: []byte(`{"message":"Input is too long."}`)}
 
-	err := svc.handleKiroUpstreamException(context.Background(), c, account, "claude-opus-4.7", []byte(`{"model":"claude-opus-4-7"}`), exc, http.Header{})
+	err := svc.handleKiroUpstreamException(context.Background(), c, account, "claude-opus-4.7", []byte(`{"model":"claude-opus-4-7"}`), exc, http.Header{}, writeKiroMessagesError)
 	require.Error(t, err)
 	var failoverErr *UpstreamFailoverError
 	require.NotErrorAs(t, err, &failoverErr)
@@ -113,7 +113,7 @@ func TestHandleKiroUpstreamExceptionRetryableFailsOver(t *testing.T) {
 			svc := &GatewayService{}
 			exc := tc.exc
 
-			err := svc.handleKiroUpstreamException(context.Background(), c, account, "claude-opus-4.7", []byte(`{}`), &exc, http.Header{})
+			err := svc.handleKiroUpstreamException(context.Background(), c, account, "claude-opus-4.7", []byte(`{}`), &exc, http.Header{}, writeKiroMessagesError)
 			var failoverErr *UpstreamFailoverError
 			require.ErrorAs(t, err, &failoverErr)
 			require.Equal(t, tc.status, failoverErr.StatusCode)

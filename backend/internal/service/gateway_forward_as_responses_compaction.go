@@ -55,8 +55,10 @@ func (s *GatewayService) handleResponsesCompactionResponse(
 // 摘要的结束原因定终态（与 kiro.rs responses_compaction.rs 的 validate 一致）：
 //   - max_tokens：摘要被截断，不当成功，返回 incomplete；
 //   - model_context_window_exceeded：上下文已满。retry 非空（Kiro）时截断工具输出重试一次，
-//     否则返回 failed / context_length_exceeded；
-//   - refusal：返回 failed / content_filter。
+//     否则返回 failed / context_length_exceeded；Kiro 流内「输入太长」异常同样处理；
+//   - refusal：返回 failed / content_filter；
+//   - 流没有正常结束：返回 failed。例外是还没向客户端写过字节的 Kiro 异常，原样返回
+//     sseStreamErrorEventError，由调用方按 Kiro HTTP 错误处理（换号或回 4xx）。
 func (s *GatewayService) handleResponsesCompactionResponseWithRetry(
 	resp *http.Response,
 	c *gin.Context,
@@ -79,9 +81,15 @@ func (s *GatewayService) handleResponsesCompactionResponseWithRetry(
 		heartbeat = hb.tick
 	}
 
-	finalResp, usage, _ := s.collectAnthropicResponseFromSSE(resp.Body, requestID, heartbeat)
-	if finalResp != nil && retry != nil &&
-		apicompat.AnthropicStopReasonString(finalResp.StopReason) == compactionStopContextWindowExceeded {
+	writerSizeBefore := c.Writer.Size()
+	finalResp, usage, stream := s.collectAnthropicResponseFromSSE(resp.Body, requestID, heartbeat)
+	failure := stream.failure()
+	exc := failure.kiroException()
+	// Kiro 在流里报「输入太长」与 HTTP 400 同义，和上下文已满一样先截断工具输出重试一次。
+	contextFull := kiroUpstreamExceptionIsContextLength(exc) ||
+		(failure == nil && finalResp != nil &&
+			apicompat.AnthropicStopReasonString(finalResp.StopReason) == compactionStopContextWindowExceeded)
+	if contextFull && retry != nil {
 		retryResp, err := retry()
 		switch {
 		case errors.Is(err, errKiroCompactionNoRetry):
@@ -98,10 +106,28 @@ func (s *GatewayService) handleResponsesCompactionResponseWithRetry(
 				}
 				return nil, s.failCompaction(c, clientStream, mapUpstreamStatusCode(retryResp.StatusCode), "Upstream request failed", requestID)
 			}
-			retryFinal, retryUsage, _ := s.collectAnthropicResponseFromSSE(retryResp.Body, requestID, heartbeat)
+			retryFinal, retryUsage, retryStream := s.collectAnthropicResponseFromSSE(retryResp.Body, requestID, heartbeat)
 			usage = addClaudeUsage(usage, retryUsage)
 			finalResp = retryFinal
+			failure = retryStream.failure()
+			exc = failure.kiroException()
 		}
+	}
+	if failure != nil {
+		// 流没有正常结束（上游 error 事件、读错误、缺结束事件）：半截摘要不能当成功交给 Codex。
+		if kiroUpstreamExceptionIsContextLength(exc) {
+			return nil, s.failCompactionWithCode(c, clientStream, http.StatusBadRequest,
+				"context_length_exceeded", kiroCompactionOverflowMessage, requestID)
+		}
+		if exc != nil && c.Writer.Size() == writerSizeBefore {
+			// 客户端还没收到任何字节（心跳也没发过）：交回调用方按 Kiro HTTP 错误处理（换号或回 4xx）。
+			return nil, failure.err
+		}
+		status := http.StatusBadGateway
+		if exc != nil {
+			status = mapUpstreamStatusCode(kiroUpstreamExceptionStatus(exc))
+		}
+		return nil, s.failCompaction(c, clientStream, status, failure.message, requestID)
 	}
 	if finalResp == nil {
 		return nil, s.failCompaction(c, clientStream, http.StatusBadGateway,
