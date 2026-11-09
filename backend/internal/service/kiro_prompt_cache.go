@@ -178,8 +178,8 @@ func (s *GatewayService) recordKiroPromptCache(account *Account, requestCtx kiro
 }
 
 // logKiroOutputEstimate 记录 output 的来源。
-//   - credits 反推被合理性检查否决时打 warn：比例升高通常意味着 Kiro 调价，需要用
-//     tools/kiro_credit_rates.py 重测单价。
+//   - credits 反推被合理性检查否决时打 warn：比例升高通常意味着 Kiro 调价，需要重测
+//     kiroCreditRateTable 里的单价。
 //   - 有推断的命中量却没用上（改按整段命中或全部未命中）时打 info：多是上一轮没用上
 //     credits、记录的提示词偏大，属正常自愈；但如果是 Kiro 实际没命中缓存，按整段命中
 //     会让这一轮 output 多算约 4.3% × 缓存量。这条日志的占比用来估计后者有多常见。

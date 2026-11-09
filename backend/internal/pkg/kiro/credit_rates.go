@@ -21,8 +21,9 @@ type KiroCreditRates struct {
 	Output float64 // 输出 token（含未下发的完整思考）
 }
 
-// kiroCreditRateTable 是实测单价，2026-11-09 用 tools/kiro_credit_rates.py 的方法测得：
-// 唯一前缀的冷请求得 Cold，60 秒内原样重发得 Cached，追加一轮长回答得 Output。
+// kiroCreditRateTable 是实测单价（2026-11-09）。测法：唯一前缀的冷请求得 Cold，
+// 60 秒内原样重发得 Cached，追加一轮长回答得 Output；max_tokens 要足够大，避免报出的
+// output 被截断导致 usage 总和小于 Kiro 总量。
 // 命中/输出单价按 Kiro 官方倍率成比例，但 5.5 代的未命中单价比倍率推算高约 1.8–1.9 倍，
 // 所以只能按模型实测，不能用倍率推导。Kiro 调价后需要重测（未命中/输出被否决的
 // warn 日志变多就是信号）。未列出的模型不用 credits 反推，沿用旧算法。
