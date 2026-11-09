@@ -11,7 +11,11 @@ import (
 	"time"
 
 	kiropkg "github.com/Wei-Shaw/sub2api/internal/pkg/kiro"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
+	"go.uber.org/zap/zaptest/observer"
 )
 
 type fakeKiroPromptCacheRemote struct {
@@ -190,4 +194,45 @@ func TestKiroPromptCacheMemoryPruneIsThrottledAndCapped(t *testing.T) {
 	kiroPromptCacheMemoryHardCap = 3
 	m.store(1, kiroTestFP(6), fresh) // 超过硬上限：整表清空后只剩这一条
 	require.Len(t, m.entries, 1)
+}
+
+func TestLogKiroOutputEstimateFlagsOverriddenCacheHint(t *testing.T) {
+	account := &Account{ID: 7}
+	hinted := kiropkg.KiroRequestContext{
+		PromptFingerprints: [][32]byte{kiroTestFP(1)},
+		PromptCache:        kiropkg.KiroPromptCacheHint{Resolved: true, CachedTokens: 112000},
+	}
+	credited := func(assumption string) kiropkg.KiroOutputEstimate {
+		return kiropkg.KiroOutputEstimate{Method: kiropkg.KiroOutputMethodCredits, CacheAssumption: assumption, CachedPromptTokens: 100000}
+	}
+	cases := []struct {
+		name       string
+		requestCtx kiropkg.KiroRequestContext
+		est        kiropkg.KiroOutputEstimate
+		wantMsg    string
+		wantLevel  zapcore.Level
+	}{
+		{"整段命中兜底", hinted, credited(kiropkg.KiroCacheAssumptionAllCached), "kiro.output_cache_hint_overridden", zap.InfoLevel},
+		{"全部未命中兜底", hinted, credited(kiropkg.KiroCacheAssumptionNone), "kiro.output_cache_hint_overridden", zap.InfoLevel},
+		{"采用推断值", hinted, credited(kiropkg.KiroCacheAssumptionHint), "", zap.DebugLevel},
+		{"没有推断值", kiropkg.KiroRequestContext{PromptFingerprints: hinted.PromptFingerprints, PromptCache: kiropkg.KiroPromptCacheHint{Resolved: true}}, credited(kiropkg.KiroCacheAssumptionNone), "", zap.DebugLevel},
+		{"反推被否决", hinted, kiropkg.KiroOutputEstimate{Reason: "out_of_bounds"}, "kiro.output_from_credits_rejected", zap.WarnLevel},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			core, logs := observer.New(zap.InfoLevel)
+			ctx := logger.IntoContext(context.Background(), zap.New(core))
+			logKiroOutputEstimate(ctx, account, "claude-opus-5.5", tc.requestCtx, tc.est)
+			if tc.wantMsg == "" {
+				require.Zero(t, logs.Len(), "只应打 debug 日志")
+				return
+			}
+			require.Equal(t, 1, logs.Len())
+			entry := logs.All()[0]
+			require.Equal(t, tc.wantMsg, entry.Message)
+			require.Equal(t, tc.wantLevel, entry.Level)
+			require.Equal(t, tc.est.CacheAssumption, entry.ContextMap()["cache_assumption"])
+			require.EqualValues(t, 112000, entry.ContextMap()["hinted_cached_tokens"])
+		})
+	}
 }

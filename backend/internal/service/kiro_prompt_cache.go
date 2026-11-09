@@ -177,8 +177,12 @@ func (s *GatewayService) recordKiroPromptCache(account *Account, requestCtx kiro
 	}
 }
 
-// logKiroOutputEstimate 记录 output 的来源。credits 反推被合理性检查否决时打 warn：
-// 比例升高通常意味着 Kiro 调价，需要用 tools/kiro_credit_rates.py 重测单价。
+// logKiroOutputEstimate 记录 output 的来源。
+//   - credits 反推被合理性检查否决时打 warn：比例升高通常意味着 Kiro 调价，需要用
+//     tools/kiro_credit_rates.py 重测单价。
+//   - 有推断的命中量却没用上（改按整段命中或全部未命中）时打 info：多是上一轮没用上
+//     credits、记录的提示词偏大，属正常自愈；但如果是 Kiro 实际没命中缓存，按整段命中
+//     会让这一轮 output 多算约 4.3% × 缓存量。这条日志的占比用来估计后者有多常见。
 func logKiroOutputEstimate(ctx context.Context, account *Account, model string, requestCtx kiropkg.KiroRequestContext, est kiropkg.KiroOutputEstimate) {
 	if len(requestCtx.PromptFingerprints) == 0 || account == nil {
 		return
@@ -193,11 +197,17 @@ func logKiroOutputEstimate(ctx context.Context, account *Account, model string, 
 		zap.Int("prompt_tokens", est.PromptTokens),
 		zap.Int("hinted_cached_tokens", requestCtx.PromptCache.CachedTokens),
 		zap.Int("cached_tokens", est.CachedPromptTokens),
+		zap.String("cache_assumption", est.CacheAssumption),
 		zap.Int("visible_output_tokens", est.VisibleOutputTokens),
 		zap.Int("output_tokens", est.OutputTokens),
 	}
 	if est.Reason == "out_of_bounds" {
 		logger.FromContext(ctx).Warn("kiro.output_from_credits_rejected", fields...)
+		return
+	}
+	if est.Method == kiropkg.KiroOutputMethodCredits && requestCtx.PromptCache.CachedTokens > 0 &&
+		est.CacheAssumption != kiropkg.KiroCacheAssumptionHint {
+		logger.FromContext(ctx).Info("kiro.output_cache_hint_overridden", fields...)
 		return
 	}
 	logger.FromContext(ctx).Debug("kiro.output_estimate", fields...)
