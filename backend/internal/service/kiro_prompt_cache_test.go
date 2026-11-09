@@ -167,3 +167,27 @@ func TestKiroPromptCacheChainAcrossTurns(t *testing.T) {
 	require.True(t, ctx2.PromptCache.Resolved)
 	require.Equal(t, 97000, ctx2.PromptCache.CachedTokens)
 }
+
+func TestKiroPromptCacheMemoryPruneIsThrottledAndCapped(t *testing.T) {
+	prevAt, prevCap, prevInterval := kiroPromptCacheMemoryPruneAt, kiroPromptCacheMemoryHardCap, kiroPromptCacheMemoryPruneInterval
+	t.Cleanup(func() {
+		kiroPromptCacheMemoryPruneAt, kiroPromptCacheMemoryHardCap, kiroPromptCacheMemoryPruneInterval = prevAt, prevCap, prevInterval
+	})
+	kiroPromptCacheMemoryPruneAt, kiroPromptCacheMemoryHardCap, kiroPromptCacheMemoryPruneInterval = 2, 100, time.Hour
+
+	m := &kiroPromptCacheMemory{entries: map[kiroPromptCacheKey]KiroPromptCacheEntry{}}
+	old := KiroPromptCacheEntry{PromptTokens: 1, StartedAt: time.Now().Add(-time.Hour)}
+	fresh := KiroPromptCacheEntry{PromptTokens: 1, StartedAt: time.Now()}
+	m.store(1, kiroTestFP(1), old)
+	m.store(1, kiroTestFP(2), old)
+	m.store(1, kiroTestFP(3), fresh) // 达到阈值：清掉两条过期的
+	require.Len(t, m.entries, 1)
+
+	m.store(1, kiroTestFP(4), old)
+	m.store(1, kiroTestFP(5), fresh) // 一小时内已清理过：不再全表扫描
+	require.Len(t, m.entries, 3, "清理应按间隔节流")
+
+	kiroPromptCacheMemoryHardCap = 3
+	m.store(1, kiroTestFP(6), fresh) // 超过硬上限：整表清空后只剩这一条
+	require.Len(t, m.entries, 1)
+}

@@ -48,11 +48,19 @@ type kiroPromptCacheKey struct {
 
 // kiroPromptCacheMemory 是进程内兜底，Redis 不可用时仍能覆盖落在同一实例的连续请求。
 type kiroPromptCacheMemory struct {
-	mu      sync.Mutex
-	entries map[kiroPromptCacheKey]KiroPromptCacheEntry
+	mu        sync.Mutex
+	entries   map[kiroPromptCacheKey]KiroPromptCacheEntry
+	lastPrune time.Time
 }
 
-const kiroPromptCacheMemoryPruneAt = 8192
+// 内存兜底的清理参数（变量便于测试覆盖）：条目数达到 pruneAt 后最多每 pruneInterval
+// 扫一次过期条目，避免每次写入都持锁全表扫描；仍超过 hardCap 时整表清空——它只是
+// Redis 的兜底，清空的代价只是少几次命中推断。
+var (
+	kiroPromptCacheMemoryPruneAt       = 8192
+	kiroPromptCacheMemoryHardCap       = 65536
+	kiroPromptCacheMemoryPruneInterval = time.Minute
+)
 
 var globalKiroPromptCacheMemory = &kiroPromptCacheMemory{entries: map[kiroPromptCacheKey]KiroPromptCacheEntry{}}
 
@@ -71,13 +79,18 @@ func (m *kiroPromptCacheMemory) lookup(accountID int64, fps [][32]byte) map[[32]
 func (m *kiroPromptCacheMemory) store(accountID int64, fp [32]byte, entry KiroPromptCacheEntry) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if len(m.entries) >= kiroPromptCacheMemoryPruneAt {
-		cutoff := time.Now().Add(-2 * kiroPromptCacheTTL)
+	now := time.Now()
+	if len(m.entries) >= kiroPromptCacheMemoryPruneAt && now.Sub(m.lastPrune) >= kiroPromptCacheMemoryPruneInterval {
+		m.lastPrune = now
+		cutoff := now.Add(-2 * kiroPromptCacheTTL)
 		for k, e := range m.entries {
 			if e.StartedAt.Before(cutoff) {
 				delete(m.entries, k)
 			}
 		}
+	}
+	if len(m.entries) >= kiroPromptCacheMemoryHardCap {
+		m.entries = make(map[kiroPromptCacheKey]KiroPromptCacheEntry)
 	}
 	m.entries[kiroPromptCacheKey{accountID, fp}] = entry
 }

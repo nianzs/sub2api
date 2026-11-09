@@ -151,25 +151,61 @@ func estimateKiroOutputFromCredits(r KiroCreditRates, credits float64, total, ca
 	return int(math.Round(o)), true
 }
 
-// resolveKiroCreditOutput 依次尝试命中量 [推断值, 0]，取第一个通过合理性检查的反推结果：
+// estimateKiroOutputAllCached 假设整个提示词都命中缓存（C = P = T - O）反推完整输出：
+//
+//	O = (credits - Cached·T) / (Output - Cached)
+func estimateKiroOutputAllCached(r KiroCreditRates, credits float64, total int) (int, bool) {
+	denom := r.Output - r.Cached
+	if denom <= 0 || credits <= 0 || total <= 0 {
+		return 0, false
+	}
+	o := (credits - r.Cached*float64(total)) / denom
+	if math.IsNaN(o) || math.IsInf(o, 0) {
+		return 0, false
+	}
+	return int(math.Round(o)), true
+}
+
+// kiroCacheCandidate 是反推时尝试的一种命中量假设。
+type kiroCacheCandidate struct {
+	cached    int  // 命中量
+	allCached bool // 假设整个提示词都命中（命中量 = P，由反推结果决定）
+}
+
+// resolveKiroCreditOutput 依次尝试命中量假设，取第一个通过合理性检查的反推结果：
+//
+//	有推断值时：[推断值, 整个提示词都命中, 0]；没有推断值时：[0]
+//
+// 推断值偏大时（例如上一轮没用上 credits，按"总量 - 可见输出"记录的提示词含了隐藏
+// 思考），真实命中量接近整个提示词，先试"整个提示词都命中"的误差只有约
+// 4.3% × 本轮新增内容；直接退到 0 会少算 output 约 4.3% × 缓存量，而且按少算的
+// output 记下的提示词又偏大，会让同一会话后续每一轮都继续偏差。
+//
+// 合理性检查：
 //   - O 不低于本地可见输出的 0.7 倍（本地 tokenizer 对旧 tokenizer 模型会高估，0.7 留余量），
 //     单价误差导致的小幅不足按下限截齐；
 //   - O 不超过 kiroMaxOutputTokens（容差内截齐）；
-//   - 提示词 P = T - O 非负，且命中量不超过 P（否则说明推断的命中量不对）。
+//   - 提示词 P = T - O 非负，且命中量不超过 P（否则说明这个命中量假设不对）。
 //
 // 都不通过时返回 ok=false，调用方沿用旧算法。
 func resolveKiroCreditOutput(r KiroCreditRates, credits float64, total int, hint KiroPromptCacheHint, visibleLocal int) (int, KiroOutputEstimate, bool) {
 	est := KiroOutputEstimate{Credits: credits, ContextTokens: total, VisibleOutputTokens: visibleLocal}
-	candidates := []int{0}
+	candidates := []kiroCacheCandidate{{cached: 0}}
 	if hint.CachedTokens > 0 {
-		candidates = []int{hint.CachedTokens, 0}
+		candidates = []kiroCacheCandidate{{cached: hint.CachedTokens}, {allCached: true}, {cached: 0}}
 	}
 	floor := int(math.Floor(0.7 * float64(visibleLocal)))
 	// 单价 1% 的误差折算到输出上的偏差，用作下限容差。
 	lowSlack := int(0.01*r.Cold*float64(total)/(r.Output-r.Cold)) + 32
 	highSlack := kiroMaxOutputTokens/50 + 64
-	for _, c := range candidates {
-		o, ok := estimateKiroOutputFromCredits(r, credits, total, c)
+	for _, cand := range candidates {
+		var o int
+		var ok bool
+		if cand.allCached {
+			o, ok = estimateKiroOutputAllCached(r, credits, total)
+		} else {
+			o, ok = estimateKiroOutputFromCredits(r, credits, total, cand.cached)
+		}
 		if !ok {
 			continue
 		}
@@ -186,6 +222,10 @@ func resolveKiroCreditOutput(r KiroCreditRates, credits float64, total int, hint
 			o = floor
 		}
 		p := total - o
+		c := cand.cached
+		if cand.allCached {
+			c = p
+		}
 		if p < 0 || c > p {
 			continue
 		}
