@@ -62,19 +62,40 @@ export async function deletePlan(id: number): Promise<void> {
  * List test results for a plan
  * @param planId - Plan ID
  * @param limit - Optional max number of results to return
+ * @param includeContent - When false, the server omits answer bodies; omit to use the server default
  * @returns List of test results
  */
-export async function listResults(planId: number, limit?: number): Promise<ScheduledTestResult[]> {
+export async function listResults(
+  planId: number,
+  limit?: number,
+  includeContent?: boolean
+): Promise<ScheduledTestResult[]> {
+  const params: Record<string, number | boolean> = {}
+  if (limit) params.limit = limit
+  if (includeContent !== undefined) params.include_content = includeContent
   const { data } = await apiClient.get<ScheduledTestResult[]>(
     `/admin/scheduled-test-plans/${planId}/results`,
     {
-      params: limit ? { limit } : undefined
+      params: Object.keys(params).length ? params : undefined
     }
   )
   return data ?? []
 }
 
+/**
+ * Get one test result with its full answer, grading and quality evidence
+ * @param planId - Plan ID
+ * @param resultId - Result ID
+ */
+export async function getResult(planId: number, resultId: number): Promise<ScheduledTestResult> {
+  const { data } = await apiClient.get<ScheduledTestResult>(
+    `/admin/scheduled-test-plans/${planId}/results/${resultId}`
+  )
+  return data
+}
+
 export const scheduledTestsAPI = {
+  getResult,
   listByAccount,
   create,
   update,
