@@ -12,9 +12,9 @@
       <div class="workspace-heading">
         <p class="workspace-subtitle">{{ t('qualityOps.workspaceHint') }}</p>
         <div class="heading-actions">
-          <span class="updated-label" aria-live="polite">{{ updatedAt ? t('qualityOps.updatedAt', { time: clock(updatedAt) }) : t('qualityOps.loading') }}</span>
           <button class="btn btn-secondary" :disabled="refreshing" @click="load"><Icon name="refresh" size="sm" :class="{ 'animate-spin': refreshing }" />{{ t('qualityOps.refresh') }}</button>
           <button class="btn btn-primary" data-testid="quality-create-rule" @click="newPlan"><Icon name="plus" size="sm" />{{ t('qualityOps.create') }}</button>
+          <span class="updated-label" aria-live="polite">{{ updatedAt ? t('qualityOps.updatedAt', { time: clock(updatedAt) }) : t('qualityOps.loading') }}</span>
         </div>
       </div>
       <div v-if="error || notice" class="workspace-message" :class="error ? 'message-error' : 'message-success'" :role="error ? 'alert' : 'status'">{{ error || notice }}<button :aria-label="t('qualityOps.dismiss')" @click="error = ''; notice = ''"><Icon name="x" size="sm" /></button></div>
@@ -619,9 +619,9 @@ onBeforeUnmount(() => {
 .quality-workspace > :not(.workspace-columns) { flex-shrink: 0; }
 .workspace-heading { @apply flex flex-wrap items-center justify-between gap-4; }
 .workspace-subtitle { @apply text-sm text-gray-500 dark:text-gray-400; }
-.heading-actions { @apply flex flex-wrap items-center gap-2; }
+.heading-actions { @apply flex flex-1 flex-wrap items-center gap-2; }
 .heading-actions .btn, .detail-footer .btn { @apply inline-flex items-center gap-2; }
-.updated-label { @apply mr-2 hidden text-xs tabular-nums text-gray-400 xl:block; }
+.updated-label { @apply ml-auto hidden text-xs tabular-nums text-gray-400 xl:block; }
 .workspace-message { @apply flex items-center justify-between gap-4 rounded-xl border px-4 py-3 text-sm; }
 .message-error, .editor-error { @apply border-red-200 bg-red-50 text-red-700 dark:border-red-900 dark:bg-red-950/30 dark:text-red-300; }
 .message-success { @apply border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900 dark:bg-emerald-950/30 dark:text-emerald-300; }
