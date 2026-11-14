@@ -145,6 +145,12 @@ export default {
           disabled: '已降智·已停调度',
           unknown: '未知'
         },
+        drawing: {
+          title: '鹈鹕骑自行车',
+          view: '查看大图',
+          failed: '未画出',
+          meta: '模型 {model} · 耗时 {seconds}s · {time}'
+        },
         details: {
           mode: '模式：{mode}',
           off: '检测已关闭',

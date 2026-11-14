@@ -1146,6 +1146,17 @@ export interface IQCheckState {
   model?: string
 }
 
+/** Latest IQ check drawing of an account (GET /admin/accounts/iq-check-drawings). */
+export interface IQCheckDrawing {
+  account_id: number
+  /** Empty when the drawing failed; see error. */
+  svg: string
+  error: string
+  model: string
+  latency_ms: number
+  drawn_at: string
+}
+
 export interface UpstreamBillingProbeSnapshot {
   status: UpstreamBillingProbeStatus
   data?: UpstreamBillingData

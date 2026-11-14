@@ -12,12 +12,13 @@ vi.mock('vue-i18n', async () => {
   }
 })
 
-const mountCell = (extra: Record<string, unknown> | undefined) =>
+const mountCell = (extra: Record<string, unknown> | undefined, drawing: Record<string, unknown> | null = null) =>
   mount(AccountIQCheckCell, {
-    props: { account: { extra } as any },
+    props: { account: { extra } as any, drawing: drawing as any },
     global: {
       stubs: {
-        HelpTooltip: { template: '<div><slot name="trigger" /><div class="details"><slot /></div></div>' }
+        HelpTooltip: { template: '<div><slot name="trigger" /><div class="details"><slot /></div></div>' },
+        BaseDialog: { props: ['show'], template: '<section v-if="show" data-testid="dialog"><slot /></section>' }
       }
     }
   })
@@ -64,5 +65,30 @@ describe('AccountIQCheckCell', () => {
     expect(wrapper.get('[data-testid="iq-check-mode"]').text()).toContain('admin.accounts.iqCheck.modes.auto')
     expect(wrapper.get('[data-testid="iq-check-accuracy"]').text()).toContain('"percent":75')
     expect(wrapper.get('[data-testid="iq-check-error"]').text()).toContain('upstream 502: bad gateway')
+  })
+
+  it('shows the latest drawing as an image thumbnail and opens it larger', async () => {
+    const svg = '<svg xmlns="http://www.w3.org/2000/svg"><circle r="4"/></svg>'
+    const wrapper = mountCell(on({ result: 'passed' }), {
+      account_id: 1, svg, error: '', model: 'gpt-5.4', latency_ms: 100700, drawn_at: at
+    })
+    const thumbnail = wrapper.get('[data-testid="iq-check-thumbnail"]')
+    expect(thumbnail.get('img').attributes('src')).toBe(`data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`)
+    expect(wrapper.get('[data-testid="iq-check-drawn-at"]').text()).toContain('100.7s')
+    expect(wrapper.find('[data-testid="iq-check-drawing-dialog"]').exists()).toBe(false)
+
+    await thumbnail.trigger('click')
+    expect(wrapper.get('[data-testid="iq-check-drawing-large"]').attributes('src')).toContain('data:image/svg+xml')
+  })
+
+  it('marks a failed drawing and shows its error', async () => {
+    const wrapper = mountCell(on({ result: 'passed' }), {
+      account_id: 1, svg: '', error: 'upstream 429: rate limited', model: 'gpt-5.4', latency_ms: 3000, drawn_at: at
+    })
+    expect(wrapper.find('[data-testid="iq-check-thumbnail"] img').exists()).toBe(false)
+    expect(wrapper.get('[data-testid="iq-check-drawing-failed"]').text()).toBe('admin.accounts.iqCheck.drawing.failed')
+    expect(wrapper.get('[data-testid="iq-check-thumbnail"]').attributes('title')).toContain('upstream 429: rate limited')
+    await wrapper.get('[data-testid="iq-check-thumbnail"]').trigger('click')
+    expect(wrapper.get('[data-testid="iq-check-drawing-dialog"]').text()).toContain('upstream 429: rate limited')
   })
 })

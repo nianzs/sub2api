@@ -1,44 +1,65 @@
 <template>
   <span v-if="status === 'off'" class="text-sm text-gray-400 dark:text-gray-500" data-testid="iq-check-off">-</span>
-  <HelpTooltip v-else width-class="w-max max-w-[calc(100vw-2rem)]" data-testid="iq-check-details">
-    <template #trigger>
-      <span
-        class="inline-flex cursor-help items-center whitespace-nowrap rounded px-1.5 py-0.5 text-xs font-medium"
-        :class="badgeClass"
-        data-testid="iq-check-status"
-      >
-        {{ label }}
-      </span>
-    </template>
-    <div class="space-y-1">
-      <p data-testid="iq-check-mode">{{ modeText }}</p>
-      <p v-if="state?.checked_at">{{ t('admin.accounts.iqCheck.details.checkedAt', { time: formatDateTime(state.checked_at) }) }}</p>
-      <p v-if="state?.total">{{ t('admin.accounts.iqCheck.details.score', { correct: state.correct ?? 0, total: state.total }) }}</p>
-      <p v-if="state?.checked_at">{{ t('admin.accounts.iqCheck.details.recent', { wrong: state.recent_wrong ?? 0 }) }}</p>
-      <p v-if="state?.answered" data-testid="iq-check-accuracy">
-        {{ t('admin.accounts.iqCheck.details.accuracy', { correct: state.answered_correct ?? 0, answered: state.answered, percent: accuracyPercent }) }}
-      </p>
-      <p v-if="state?.model">{{ t('admin.accounts.iqCheck.details.model', { model: state.model }) }}</p>
-      <p v-if="state?.error" class="break-all" data-testid="iq-check-error">{{ t('admin.accounts.iqCheck.details.error', { error: state.error }) }}</p>
-      <p v-if="enabled && state?.next_check_at">{{ t('admin.accounts.iqCheck.details.nextCheckAt', { time: formatDateTime(state.next_check_at) }) }}</p>
-    </div>
-  </HelpTooltip>
+  <div v-else class="flex flex-col items-start gap-1">
+    <button
+      v-if="drawing"
+      type="button"
+      class="flex h-12 w-16 items-center justify-center overflow-hidden rounded border border-gray-200 bg-white hover:border-primary-300 dark:border-dark-600 dark:bg-dark-800"
+      :title="drawing.error ? t('admin.accounts.iqCheck.details.error', { error: drawing.error }) : t('admin.accounts.iqCheck.drawing.view')"
+      data-testid="iq-check-thumbnail"
+      @click="showDrawing = true"
+    >
+      <!-- Only <img>: the browser runs no script and loads nothing external from an SVG image. -->
+      <img v-if="drawing.svg" :src="iqCheckDrawingSrc(drawing.svg)" alt="" class="h-full w-full object-contain" />
+      <span v-else class="px-1 text-[10px] text-gray-400" data-testid="iq-check-drawing-failed">{{ t('admin.accounts.iqCheck.drawing.failed') }}</span>
+    </button>
+    <HelpTooltip width-class="w-max max-w-[calc(100vw-2rem)]" data-testid="iq-check-details">
+      <template #trigger>
+        <span
+          class="inline-flex cursor-help items-center whitespace-nowrap rounded px-1.5 py-0.5 text-xs font-medium"
+          :class="badgeClass"
+          data-testid="iq-check-status"
+        >
+          {{ label }}
+        </span>
+      </template>
+      <div class="space-y-1">
+        <p data-testid="iq-check-mode">{{ modeText }}</p>
+        <p v-if="state?.checked_at">{{ t('admin.accounts.iqCheck.details.checkedAt', { time: formatDateTime(state.checked_at) }) }}</p>
+        <p v-if="state?.total">{{ t('admin.accounts.iqCheck.details.score', { correct: state.correct ?? 0, total: state.total }) }}</p>
+        <p v-if="state?.checked_at">{{ t('admin.accounts.iqCheck.details.recent', { wrong: state.recent_wrong ?? 0 }) }}</p>
+        <p v-if="state?.answered" data-testid="iq-check-accuracy">
+          {{ t('admin.accounts.iqCheck.details.accuracy', { correct: state.answered_correct ?? 0, answered: state.answered, percent: accuracyPercent }) }}
+        </p>
+        <p v-if="state?.model">{{ t('admin.accounts.iqCheck.details.model', { model: state.model }) }}</p>
+        <p v-if="state?.error" class="break-all" data-testid="iq-check-error">{{ t('admin.accounts.iqCheck.details.error', { error: state.error }) }}</p>
+        <p v-if="enabled && state?.next_check_at">{{ t('admin.accounts.iqCheck.details.nextCheckAt', { time: formatDateTime(state.next_check_at) }) }}</p>
+      </div>
+    </HelpTooltip>
+    <span v-if="drawing" class="whitespace-nowrap text-[11px] text-gray-400 dark:text-gray-500" data-testid="iq-check-drawn-at">
+      {{ formatRelativeTime(drawing.drawn_at) }} · {{ iqCheckDrawingSeconds(drawing) }}s
+    </span>
+    <IQCheckDrawingDialog :show="showDrawing" :drawing="drawing ?? null" @close="showDrawing = false" />
+  </div>
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import HelpTooltip from '@/components/common/HelpTooltip.vue'
-import { formatDateTime } from '@/utils/format'
-import type { Account } from '@/types'
+import IQCheckDrawingDialog from './IQCheckDrawingDialog.vue'
+import { formatDateTime, formatRelativeTime } from '@/utils/format'
+import { iqCheckDrawingSeconds, iqCheckDrawingSrc } from '@/utils/iqCheckDrawing'
+import type { Account, IQCheckDrawing } from '@/types'
 
 // Matches iqCheckWrongToDisable in backend/internal/service/iq_check_service.go.
 const WRONG_TO_DISABLE = 3
 
 type Status = 'off' | 'disabled' | 'pending' | 'triggered' | 'wrong' | 'passed' | 'unknown'
 
-const props = defineProps<{ account: Pick<Account, 'extra'> }>()
+const props = defineProps<{ account: Pick<Account, 'extra'>; drawing?: IQCheckDrawing | null }>()
 const { t } = useI18n()
+const showDrawing = ref(false)
 
 const enabled = computed(() => props.account.extra?.iq_check_enabled === true)
 const state = computed(() => props.account.extra?.iq_check_state)

@@ -312,6 +312,12 @@ export default {
           disabled: 'Downgraded · scheduling stopped',
           unknown: 'Unknown'
         },
+        drawing: {
+          title: 'Pelican riding a bicycle',
+          view: 'View larger',
+          failed: 'No drawing',
+          meta: 'Model {model} · {seconds}s · {time}'
+        },
         details: {
           mode: 'Mode: {mode}',
           off: 'Check is off',

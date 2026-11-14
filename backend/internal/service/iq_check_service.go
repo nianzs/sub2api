@@ -73,6 +73,7 @@ type iqCheckAccounts interface {
 // reasoning questions and stops scheduling accounts that keep answering wrong.
 type IQCheckService struct {
 	accounts     iqCheckAccounts
+	drawings     IQCheckDrawingRepository
 	probe        func(ctx context.Context, accountID int64, model, prompt string) (string, error)
 	newQuestions func() ([]iqCheckQuestion, error)
 	lockCache    LeaderLockCache
@@ -88,10 +89,11 @@ type IQCheckService struct {
 	stopped bool
 }
 
-func NewIQCheckService(accounts AccountRepository, tests *AccountTestService, lockCache LeaderLockCache) *IQCheckService {
+func NewIQCheckService(accounts AccountRepository, tests *AccountTestService, lockCache LeaderLockCache, drawings IQCheckDrawingRepository) *IQCheckService {
 	ctx, cancel := context.WithCancel(context.Background())
 	s := &IQCheckService{
 		accounts:     accounts,
+		drawings:     drawings,
 		newQuestions: newIQCheckQuestions,
 		lockCache:    lockCache,
 		instanceID:   uuid.NewString(),
@@ -107,8 +109,8 @@ func NewIQCheckService(accounts AccountRepository, tests *AccountTestService, lo
 }
 
 // ProvideIQCheckService starts the process-wide periodic runner.
-func ProvideIQCheckService(accounts AccountRepository, tests *AccountTestService, lockCache LeaderLockCache) *IQCheckService {
-	s := NewIQCheckService(accounts, tests, lockCache)
+func ProvideIQCheckService(accounts AccountRepository, tests *AccountTestService, lockCache LeaderLockCache, drawings IQCheckDrawingRepository) *IQCheckService {
+	s := NewIQCheckService(accounts, tests, lockCache, drawings)
 	s.Start()
 	return s
 }
@@ -229,10 +231,28 @@ func (s *IQCheckService) checkAccount(ctx context.Context, accountID int64, mode
 			logger.LegacyPrintf("service.iq_check", "check panicked: account=%d", accountID)
 		}
 	}()
+	// The drawing runs beside the questions and never affects the verdict.
+	var drawing *IQCheckDrawing
+	var drawWG sync.WaitGroup
+	if s.drawings != nil {
+		drawWG.Add(1)
+		go func() {
+			defer drawWG.Done()
+			defer func() {
+				if recover() != nil {
+					logger.LegacyPrintf("service.iq_check", "drawing panicked: account=%d", accountID)
+				}
+			}()
+			drawing = s.drawPelican(ctx, accountID, model)
+		}()
+	}
 	round := s.runRound(ctx, accountID, model)
+	drawWG.Wait()
 	if ctx.Err() != nil {
 		return // Shutting down: the account is checked again after its interval.
 	}
+	// Save the drawing first: the list reloads drawings when checked_at changes.
+	s.saveDrawing(ctx, drawing)
 	if err := s.apply(ctx, accountID, model, round); err != nil {
 		logger.LegacyPrintf("service.iq_check", "apply failed: account=%d err=%v", accountID, err)
 	}
