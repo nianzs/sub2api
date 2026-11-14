@@ -25,9 +25,6 @@ func (h *OpenAIGatewayHandler) ChatCompletions(c *gin.Context) {
 	defer h.recoverResponsesPanic(c, &streamStarted)
 
 	requestStart := time.Now()
-	// Chat Completions forwards through the native Codex protocol; BPS-only
-	// accounts have no route for it.
-	c.Request = c.Request.WithContext(service.WithBPSUnsupportedInbound(c.Request.Context()))
 
 	apiKey, ok := middleware2.GetAPIKeyFromContext(c)
 	if !ok {

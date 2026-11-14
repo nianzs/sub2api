@@ -973,10 +973,6 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 					h.gatewayService.RecordOpenAIAccountSwitch()
 					failedAccountIDs[account.ID] = struct{}{}
 					lastFailoverErr = failoverErr
-					if failoverErr.Reason == service.ExcelBPSImageUnsupportedReason {
-						// No BPS account can carry these images; only native accounts remain.
-						c.Request = c.Request.WithContext(service.WithBPSRouteExcluded(c.Request.Context()))
-					}
 					if switchCount >= maxAccountSwitches {
 						h.handleFailoverExhausted(c, failoverErr, streamStarted)
 						return
@@ -1196,9 +1192,6 @@ func (h *OpenAIGatewayHandler) Messages(c *gin.Context) {
 	defer h.recoverAnthropicMessagesPanic(c, &streamStarted)
 
 	requestStart := time.Now()
-	// Anthropic Messages forwards through the native Codex protocol; BPS-only
-	// accounts have no route for it.
-	c.Request = c.Request.WithContext(service.WithBPSUnsupportedInbound(c.Request.Context()))
 
 	apiKey, ok := middleware2.GetAPIKeyFromContext(c)
 	if !ok {
@@ -1663,14 +1656,6 @@ func (h *OpenAIGatewayHandler) anthropicStreamingAwareError(c *gin.Context, stat
 func (h *OpenAIGatewayHandler) handleAnthropicFailoverExhausted(c *gin.Context, failoverErr *service.UpstreamFailoverError, streamStarted bool) {
 	if failoverErr != nil {
 		copyFailoverRetryAfter(c, failoverErr.ResponseHeaders)
-	}
-	if status, errType, _, message, ok := service.ExcelBPSFailoverClientError(failoverErr); ok {
-		if errType != "invalid_request_error" && errType != "rate_limit_error" {
-			errType = "api_error"
-		}
-		service.SetOpsUpstreamError(c, failoverErr.StatusCode, message, "")
-		h.anthropicStreamingAwareError(c, status, errType, message, streamStarted)
-		return
 	}
 	if failoverErr != nil && failoverErr.IsCredentialFailure() {
 		status, message := credentialFailoverClientResponse(failoverErr)
@@ -3643,14 +3628,6 @@ func (h *OpenAIGatewayHandler) handleFailoverExhausted(c *gin.Context, failoverE
 			message = "previous_response_id requires an OpenAI API-key account for HTTP requests"
 		}
 		h.handleStreamingAwareError(c, http.StatusBadRequest, "invalid_request_error", message, streamStarted)
-		return
-	}
-	// BPS rejections may echo request data: keep the fixed code and message
-	// instead of passthrough rules, the upstream body or the generic
-	// credential-failure message.
-	if status, errType, code, message, ok := service.ExcelBPSFailoverClientError(failoverErr); ok {
-		service.SetOpsUpstreamError(c, failoverErr.StatusCode, message, "")
-		h.handleStreamingAwareErrorWithCode(c, status, errType, code, message, streamStarted, false)
 		return
 	}
 	if failoverErr.Reason == service.OpenAIImagesInsufficientBalanceReason {

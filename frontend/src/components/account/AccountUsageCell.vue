@@ -123,7 +123,7 @@
     </template>
 
     <!-- OpenAI Codex accounts: ticket status; usage querying remains OAuth-only. -->
-    <template v-else-if="account.platform === 'openai' && (account.type === 'oauth' || account.type === 'setup-token' || account.type === 'bps-oauth')">
+    <template v-else-if="account.platform === 'openai' && (account.type === 'oauth' || account.type === 'setup-token')">
       <div v-if="codexTurnTickets.length" class="mb-1 space-y-0.5">
         <div
           v-for="ticket in codexTurnTickets"
@@ -1126,7 +1126,7 @@ const showUsageWindows = computed(() => {
   if (isMultiProtocolApiKeyPlatform(props.account.platform)) {
     return true
   }
-  return props.account.type === 'oauth' || props.account.type === 'setup-token' || props.account.type === 'bps-oauth'
+  return props.account.type === 'oauth' || props.account.type === 'setup-token'
 })
 
 const shouldFetchUsage = computed(() => {
@@ -1147,7 +1147,7 @@ const shouldFetchUsage = computed(() => {
     return props.account.type === 'oauth'
   }
   if (props.account.platform === 'openai') {
-    return props.account.type === 'oauth' || props.account.type === 'bps-oauth'
+    return props.account.type === 'oauth'
   }
   // Leonardo Cookie 号查积分余额；中转号没有 Leonardo 用量。必须与
   // isLeonardoUsageAccount 同口径，否则积分模板永远拿不到数据。
@@ -1184,7 +1184,7 @@ const geminiUsageAvailable = computed(() => {
 })
 
 const hasOpenAIUsageFallback = computed(() => {
-  if (props.account.platform !== 'openai' || (props.account.type !== 'oauth' && props.account.type !== 'bps-oauth')) return false
+  if (props.account.platform !== 'openai' || props.account.type !== 'oauth') return false
   return !!usageInfo.value?.five_hour || !!usageInfo.value?.seven_day
 })
 
@@ -2391,7 +2391,7 @@ watch(
 
 watch(openAIUsageRefreshKey, (nextKey, prevKey) => {
   if (!prevKey || nextKey === prevKey) return
-  if (props.account.platform !== 'openai' || (props.account.type !== 'oauth' && props.account.type !== 'bps-oauth')) return
+  if (props.account.platform !== 'openai' || props.account.type !== 'oauth') return
 
   if (isBatchManaged.value) {
     requestParentBatchUsage({ force: true })

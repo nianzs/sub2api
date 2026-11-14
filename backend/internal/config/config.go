@@ -1055,12 +1055,6 @@ type GatewayConfig struct {
 	// KiroCacheEmulationRedisEnabled shares Kiro cache emulation prefix state
 	// via Redis across instances instead of per-process memory. Default false.
 	KiroCacheEmulationRedisEnabled bool `mapstructure:"kiro_cache_emulation_redis_enabled"`
-	// ExcelBPSStateRedisEnabled shares basispoints replay/catalog state via
-	// Redis across instances instead of per-process memory. Default false.
-	ExcelBPSStateRedisEnabled bool `mapstructure:"excel_bps_state_redis_enabled"`
-	// ExcelBPSStreamDataIntervalTimeout aborts a BPS stream that produces no
-	// data frames for this many seconds. 0 disables, range 30-300, default 120.
-	ExcelBPSStreamDataIntervalTimeout int `mapstructure:"excel_bps_stream_data_interval_timeout"`
 	// 等待上游响应头的超时时间（秒），0表示无超时
 	// 注意：这不影响流式数据传输，只控制等待响应头的时间
 	ResponseHeaderTimeout int `mapstructure:"response_header_timeout"`
@@ -2727,9 +2721,6 @@ func setDefaults() {
 	viper.SetDefault("gateway.client_idle_ttl_seconds", 900)
 	viper.SetDefault("gateway.concurrency_slot_ttl_minutes", 30) // 并发槽位过期时间（支持超长请求）
 	viper.SetDefault("gateway.stream_data_interval_timeout", 180)
-	// Excel BPS 流停滞保护（秒），0=禁用；未注册默认值时环境变量覆盖也不会生效。
-	viper.SetDefault("gateway.excel_bps_stream_data_interval_timeout", 120)
-	viper.SetDefault("gateway.excel_bps_state_redis_enabled", false)
 	viper.SetDefault("gateway.stream_keepalive_interval", 10)
 	viper.SetDefault("gateway.kiro_stream_keepalive_interval", 25)
 	viper.SetDefault("gateway.image_stream_data_interval_timeout", 900)
@@ -3646,9 +3637,6 @@ func (c *Config) Validate() error {
 	if c.Gateway.StreamDataIntervalTimeout != 0 &&
 		(c.Gateway.StreamDataIntervalTimeout < 30 || c.Gateway.StreamDataIntervalTimeout > 300) {
 		return fmt.Errorf("gateway.stream_data_interval_timeout must be 0 or between 30-300 seconds")
-	}
-	if n := c.Gateway.ExcelBPSStreamDataIntervalTimeout; n != 0 && (n < 30 || n > 300) {
-		return fmt.Errorf("gateway.excel_bps_stream_data_interval_timeout must be 0 or between 30-300 seconds")
 	}
 	if c.Gateway.StreamKeepaliveInterval < 0 {
 		return fmt.Errorf("gateway.stream_keepalive_interval must be non-negative")

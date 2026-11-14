@@ -722,8 +722,11 @@ func ProvideGeminiCachedContentService(repo GeminiCachedContentRepository, compa
 func ProvideScheduledTestService(
 	planRepo ScheduledTestPlanRepository,
 	resultRepo ScheduledTestResultRepository,
+	accountTests *AccountTestService,
 ) *ScheduledTestService {
-	return NewScheduledTestService(planRepo, resultRepo)
+	svc := NewScheduledTestService(planRepo, resultRepo)
+	svc.SetAccountTests(accountTests)
+	return svc
 }
 
 // ProvideScheduledTestRunnerService creates and starts ScheduledTestRunnerService.
@@ -733,8 +736,12 @@ func ProvideScheduledTestRunnerService(
 	accountTestSvc *AccountTestService,
 	rateLimitSvc *RateLimitService,
 	cfg *config.Config,
+	accountRepo AccountRepository,
+	groupRepo GroupRepository,
+	concurrency *ConcurrencyService,
 ) *ScheduledTestRunnerService {
 	svc := NewScheduledTestRunnerService(planRepo, scheduledSvc, accountTestSvc, rateLimitSvc, cfg)
+	svc.SetQualityJudge(NewQualityJudgeService(accountRepo, groupRepo, concurrency, accountTestSvc))
 	svc.Start()
 	return svc
 }

@@ -771,9 +771,14 @@ func registerScheduledTestRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 		plans.PUT("/:id", h.Admin.ScheduledTest.Update)
 		plans.DELETE("/:id", h.Admin.ScheduledTest.Delete)
 		plans.GET("/:id/results", h.Admin.ScheduledTest.ListResults)
+		plans.GET("/:id/results/:resultID", h.Admin.ScheduledTest.GetResult)
 	}
 	// Nested under accounts
 	admin.GET("/accounts/:id/scheduled-test-plans", h.Admin.ScheduledTest.ListByAccount)
+	// Account quality rules (ported from ranxi2001/sub2api).
+	admin.GET("/account-quality-plans", h.Admin.ScheduledTest.ListQualityPlans)
+	admin.POST("/account-quality-plans/:id/run", h.Admin.ScheduledTest.TriggerQuality)
+	admin.GET("/account-quality-results", h.Admin.ScheduledTest.ListQualityHistory)
 }
 
 func registerErrorPassthroughRoutes(admin *gin.RouterGroup, h *handler.Handlers) {

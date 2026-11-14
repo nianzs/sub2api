@@ -251,16 +251,9 @@ const canSyncUpstream = computed(() => {
   return false
 })
 
-// 调用方给了候选列表时，下拉候选和「填入相关模型」都只用这份列表。
-const explicitModels = computed(() =>
-  props.availableModels === undefined
-    ? undefined
-    : Array.from(new Set(props.availableModels.map(model => model.trim()).filter(Boolean)))
-)
-
 const availableOptions = computed(() => {
-  if (explicitModels.value !== undefined) {
-    return [...explicitModels.value]
+  if (props.availableModels !== undefined) {
+    return Array.from(new Set(props.availableModels.map(model => model.trim()).filter(Boolean)))
       .sort()
       .map(model => ({ value: model, label: model }))
   }
@@ -330,11 +323,12 @@ const handleEnter = () => {
 }
 
 const fillRelated = () => {
-  const related = explicitModels.value ?? normalizedPlatforms.value.flatMap(platform => getModelsByPlatform(platform))
   const newModels = [...props.modelValue]
-  for (const model of related) {
-    if (!newModels.includes(model)) {
-      newModels.push(model)
+  for (const platform of normalizedPlatforms.value) {
+    for (const model of getModelsByPlatform(platform)) {
+      if (!newModels.includes(model)) {
+        newModels.push(model)
+      }
     }
   }
   emit('update:modelValue', newModels)

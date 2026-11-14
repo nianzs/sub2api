@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
-	"github.com/Wei-Shaw/sub2api/internal/pkg/openai"
 	"github.com/stretchr/testify/require"
 )
 
@@ -4057,47 +4056,4 @@ func TestOpenAIGatewayService_SelectAccountWithScheduler_LegacyAccountModelRoute
 	if selection.ReleaseFunc != nil {
 		selection.ReleaseFunc()
 	}
-}
-
-// BPS only speaks HTTP/SSE: a BPS-only account never takes a WebSocket session,
-// whatever model is requested.
-func TestIsOpenAIAccountTransportCompatibleRejectsWebSocketForBPSModels(t *testing.T) {
-	cfg := newSchedulerTestOpenAIWSV2Config()
-	svc := &OpenAIGatewayService{cfg: cfg}
-	account := &Account{
-		ID:          8802,
-		Platform:    PlatformOpenAI,
-		Type:        AccountTypeBPSOAuth,
-		Status:      StatusActive,
-		Schedulable: true,
-		Concurrency: 1,
-		Credentials: map[string]any{"client_id": openai.ExcelClientID},
-		Extra: map[string]any{
-			"openai_oauth_responses_websockets_v2_enabled": true,
-		},
-	}
-	scheduler := &defaultOpenAIAccountScheduler{service: svc}
-
-	require.False(t, scheduler.isAccountTransportCompatible(account, OpenAIUpstreamTransportResponsesWebsocketV2, "gpt-7-new"))
-	require.False(t, scheduler.isAccountTransportCompatible(account, OpenAIUpstreamTransportResponsesWebsocketV2Ingress, "gpt-7-new"))
-	require.False(t, scheduler.isAccountTransportCompatible(account, OpenAIUpstreamTransportResponsesWebsocketV2, "gpt-native"))
-	require.True(t, scheduler.isAccountTransportCompatible(account, OpenAIUpstreamTransportHTTPSSE, "gpt-7-new"))
-}
-
-// BPS-only accounts answer text Responses only: entry points without a BPS
-// route and image requests never select them. Which models they accept is
-// their model restriction (IsModelSupported), checked separately.
-func TestAccountSupportsOpenAICapabilitiesForRequestScopesBPSOAuth(t *testing.T) {
-	account := &Account{ID: 8803, Platform: PlatformOpenAI, Type: AccountTypeBPSOAuth,
-		Credentials: map[string]any{"client_id": openai.ExcelClientID, "model_mapping": map[string]any{"gpt-7-new": "gpt-7-new"}}}
-	ctx := context.Background()
-
-	require.True(t, accountSupportsOpenAICapabilitiesForRequest(ctx, account, "gpt-7-new", OpenAIEndpointCapabilityChatCompletions, ""))
-	require.True(t, accountSupportsOpenAICapabilitiesForRequest(ctx, account, "gpt-7-new", OpenAIEndpointCapabilityResponses, ""))
-	require.True(t, account.IsModelSupported("gpt-7-new"))
-	require.False(t, account.IsModelSupported("gpt-native"), "outside the model restriction")
-	require.False(t, accountSupportsOpenAICapabilitiesForRequest(ctx, account, "gpt-7-new", OpenAIEndpointCapabilityEmbeddings, ""))
-	require.False(t, accountSupportsOpenAICapabilitiesForRequest(ctx, account, "gpt-7-new", OpenAIEndpointCapabilityResponses, OpenAIImagesCapabilityBasic))
-	require.False(t, accountSupportsOpenAICapabilitiesForRequest(WithBPSUnsupportedInbound(ctx), account, "gpt-7-new", OpenAIEndpointCapabilityChatCompletions, ""),
-		"Chat Completions / Messages have no BPS route")
 }
