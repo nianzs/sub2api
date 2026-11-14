@@ -2519,3 +2519,61 @@ describe('EditAccountModal temp-unschedulable rule scope', () => {
     wrapper.unmount()
   })
 })
+
+describe('EditAccountModal IQ check', () => {
+  beforeEach(() => {
+    authIsSimpleMode.value = true
+    updateAccountMock.mockReset()
+    checkMixedChannelRiskMock.mockReset().mockResolvedValue({ has_risk: false })
+  })
+
+  afterEach(() => vi.clearAllMocks())
+
+  it('turns the IQ check on with a model and a clamped interval, leaving its state to the backend', async () => {
+    const account = buildAccount()
+    account.type = 'oauth'
+    account.extra = { iq_check_state: { result: 'failed', disabled_by_check: true } }
+    updateAccountMock.mockResolvedValue(account)
+
+    const wrapper = mountModal(account)
+    expect(wrapper.find('[data-testid="iq-check-model"]').exists()).toBe(false)
+    await wrapper.get('[data-testid="iq-check-enabled"]').trigger('click')
+    await wrapper.get('[data-testid="iq-check-model"]').setValue(' gpt-5.5 ')
+    await wrapper.get('[data-testid="iq-check-interval"]').setValue('5')
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+
+    const extra = updateAccountMock.mock.calls[0]?.[1]?.extra
+    expect(extra).toMatchObject({ iq_check_enabled: true, iq_check_model: 'gpt-5.5', iq_check_interval_minutes: 10 })
+    wrapper.unmount()
+  })
+
+  it('loads the saved settings and removes them when the check is turned off', async () => {
+    const account = buildAccount()
+    account.extra = { iq_check_enabled: true, iq_check_model: 'gpt-5.5', iq_check_interval_minutes: 30 }
+    updateAccountMock.mockResolvedValue(account)
+
+    const wrapper = mountModal(account)
+    expect((wrapper.get('[data-testid="iq-check-model"]').element as HTMLInputElement).value).toBe('gpt-5.5')
+    expect((wrapper.get('[data-testid="iq-check-interval"]').element as HTMLInputElement).value).toBe('30')
+    await wrapper.get('[data-testid="iq-check-enabled"]').trigger('click')
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+
+    const extra = updateAccountMock.mock.calls[0]?.[1]?.extra
+    expect(extra).not.toHaveProperty('iq_check_enabled')
+    expect(extra).not.toHaveProperty('iq_check_model')
+    expect(extra).not.toHaveProperty('iq_check_interval_minutes')
+    wrapper.unmount()
+  })
+
+  it('shows the IQ check only for OpenAI accounts', () => {
+    const openai = mountModal(buildAccount())
+    expect(openai.find('[data-testid="iq-check-section"]').exists()).toBe(true)
+    openai.unmount()
+
+    const anthropic = buildAccount()
+    anthropic.platform = 'anthropic'
+    const other = mountModal(anthropic)
+    expect(other.find('[data-testid="iq-check-section"]').exists()).toBe(false)
+    other.unmount()
+  })
+})

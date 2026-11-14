@@ -1127,6 +1127,19 @@ export interface UpstreamBillingData {
 
 export type UpstreamBillingProbeStatus = 'ok' | 'unsupported' | 'failed'
 
+/** Last IQ check result, written by the backend IQ check service. */
+export interface IQCheckState {
+  checked_at?: string
+  next_check_at?: string
+  result?: 'passed' | 'failed' | 'unknown'
+  correct?: number
+  total?: number
+  error?: string
+  consecutive_failures?: number
+  disabled_by_check?: boolean
+  model?: string
+}
+
 export interface UpstreamBillingProbeSnapshot {
   status: UpstreamBillingProbeStatus
   data?: UpstreamBillingData
@@ -1321,6 +1334,10 @@ kiro_credit_unit_price_usd?: number
     upstream_billing_probe_enabled?: boolean
     upstream_billing_rate_sync_enabled?: boolean
     upstream_billing_probe?: UpstreamBillingProbeSnapshot
+    iq_check_enabled?: boolean
+    iq_check_model?: string
+    iq_check_interval_minutes?: number
+    iq_check_state?: IQCheckState
     codex_reset_credit_snapshot?: {
       available_count?: number
       credits?: { expires_at?: string }[]

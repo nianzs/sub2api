@@ -293,6 +293,27 @@ export default {
         viewTempUnschedDetails: 'View temp unschedulable details',
         tempUnschedulableUntil: 'Resumes {time}'
       },
+      iqCheck: {
+        title: 'IQ check',
+        hint: 'Periodically asks the account 2 random reasoning questions. Two failed rounds in a row stop scheduling; a later passing round turns it back on. After you toggle scheduling by hand, the check no longer restores scheduling it had stopped.',
+        model: 'Check model',
+        modelPlaceholder: 'Leave empty for the default test model',
+        interval: 'Interval (minutes, 10–1440)',
+        status: {
+          pending: 'Pending',
+          passed: 'Normal',
+          suspect: 'Suspected {count}/{limit}',
+          disabled: 'Downgraded · scheduling stopped',
+          unknown: 'Unknown'
+        },
+        details: {
+          checkedAt: 'Last check: {time}',
+          score: 'Correct {correct}/{total}',
+          model: 'Model: {model}',
+          error: 'Error: {error}',
+          nextCheckAt: 'Next check: {time}'
+        }
+      },
       columns: {
         name: 'Name',
         id: 'Account ID',
@@ -308,6 +329,7 @@ export default {
         schedulerScore: 'Scheduler Score',
         status: 'Status',
         schedulable: 'Schedulable',
+        iqCheck: 'IQ check',
         todayStats: 'Today Stats',
         groups: 'Groups',
         usageWindows: 'Usage Windows',

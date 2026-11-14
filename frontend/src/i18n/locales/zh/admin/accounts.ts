@@ -126,6 +126,27 @@ export default {
       kiroSuspended: 'Kiro 暂停中',
       kiroUsageForbidden: 'Usage 无权访问',
       kiroUsageForbiddenHint: '该账号当前无法读取 Kiro Usage，但不代表转发一定不可用',
+      iqCheck: {
+        title: '降智检测',
+        hint: '定时用 2 道随机推理题检测账号，连续两轮答错自动停止调度，之后答对自动恢复。手动切换过调度后，检测不再恢复此前停掉的调度。',
+        model: '检测模型',
+        modelPlaceholder: '留空使用默认测试模型',
+        interval: '检测间隔（分钟，10–1440）',
+        status: {
+          pending: '待检测',
+          passed: '正常',
+          suspect: '疑似降智 {count}/{limit}',
+          disabled: '已降智·已停调度',
+          unknown: '未知'
+        },
+        details: {
+          checkedAt: '最近检测：{time}',
+          score: '答对 {correct}/{total}',
+          model: '模型：{model}',
+          error: '错误：{error}',
+          nextCheckAt: '下次检测：{time}'
+        }
+      },
       columns: {
         name: '名称',
         id: '账号ID',
@@ -141,6 +162,7 @@ export default {
         schedulerScore: '调度权值',
         status: '状态',
         schedulable: '调度',
+        iqCheck: '降智检测',
         todayStats: '今日统计',
         groups: '分组',
         usageWindows: '用量窗口',
