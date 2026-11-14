@@ -190,18 +190,3 @@ func TestTeamLinkedError_SetErrorFailureDoesNotAbortRemaining(t *testing.T) {
 	// 进程内熔断先于落库执行，两个账户都已被熔断
 	require.Len(t, blocker.reasons, 2)
 }
-
-// A BPS-only account holds a credential of the same ChatGPT workspace, so a
-// deactivated team takes it down together with the Codex accounts.
-func TestTeamLinkedError_FanoutIncludesBPSOAuthSiblings(t *testing.T) {
-	bps := newTeamLinkedAccount(8, "team-A")
-	bps.Type = AccountTypeBPSOAuth
-	repo := &teamLinkedAccountRepoStub{teamAccounts: append(newTeamLinkedFixture(), bps)}
-	rl, _ := newTeamLinkedTestService(repo)
-	trigger := newTeamLinkedAccount(1, "team-A")
-
-	rl.HandleUpstreamError(context.Background(), &trigger, http.StatusPaymentRequired, http.Header{}, []byte(teamLinkedDeactivatedBody))
-
-	require.Equal(t, []int64{2, 6, 8, 1}, repo.setErrorIDs)
-	require.Contains(t, repo.setErrorMsgs[8], "team-linked error triggered by account #1")
-}

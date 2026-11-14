@@ -349,7 +349,7 @@ func TestAdminServiceBulkUpdateAccounts_NormalizesOpenAISettings(t *testing.T) {
 }
 
 func TestAdminServiceBulkUpdateAccounts_AcceptsLongContextAccountTypes(t *testing.T) {
-	for _, accountType := range []string{AccountTypeOAuth, AccountTypeSetupToken, AccountTypeBPSOAuth, AccountTypeAPIKey} {
+	for _, accountType := range []string{AccountTypeOAuth, AccountTypeSetupToken, AccountTypeAPIKey} {
 		t.Run(accountType, func(t *testing.T) {
 			repo := &accountRepoStubForBulkUpdate{getByIDsAccounts: []*Account{{
 				ID: 1, Platform: PlatformOpenAI, Type: accountType,

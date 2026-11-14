@@ -175,11 +175,6 @@ func (h *OpenAIGatewayHandler) GrokCountTokens(c *gin.Context) {
 // CountTokens handles Anthropic-compatible POST /v1/messages/count_tokens for OpenAI groups.
 // It validates billing and routes to an OpenAI token-count bridge without recording usage.
 func (h *OpenAIGatewayHandler) CountTokens(c *gin.Context) {
-	// count_tokens belongs to the Anthropic Messages entry point, which has no
-	// BPS route: never select a BPS-only account here, and never let a count
-	// request evict the native sticky binding of the Messages session.
-	c.Request = c.Request.WithContext(service.WithBPSUnsupportedInbound(c.Request.Context()))
-
 	apiKey, ok := middleware2.GetAPIKeyFromContext(c)
 	if !ok {
 		h.anthropicErrorResponse(c, http.StatusUnauthorized, "authentication_error", "Invalid API key")

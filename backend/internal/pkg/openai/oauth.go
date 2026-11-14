@@ -18,13 +18,6 @@ const (
 	// OAuth Client ID for OpenAI (Codex CLI official)
 	ClientID = "app_EMoamEEZ73f0CkXaXp7hrann"
 
-	// ExcelClientID is the production client published by the official Excel
-	// add-in. Existing Codex tokens cannot be converted into Excel sessions
-	// by changing this value.
-	ExcelClientID     = "app_fnr0pYvVwwFDocDumLG3H2Bp"
-	ExcelAuthorizeURL = "https://auth.openai.com/api/accounts/authorize"
-	ExcelRedirectURI  = "https://bps.openai.com/basispoints/extension/360590d7-f8f9-4d88-bf75-0edfe0a4b9f3/auth/callback"
-
 	// OAuth endpoints
 	AuthorizeURL = "https://auth.openai.com/oauth/authorize"
 	TokenURL     = "https://auth.openai.com/oauth/token"
@@ -186,19 +179,6 @@ func base64URLEncode(data []byte) string {
 // BuildAuthorizationURL builds the OpenAI OAuth authorization URL
 func BuildAuthorizationURL(state, codeChallenge, redirectURI string) string {
 	return BuildAuthorizationURLForPlatform(state, codeChallenge, redirectURI, OAuthPlatformOpenAI)
-}
-
-// BuildExcelAuthorizationURL follows the public add-in's browser PKCE flow.
-// The callback stays on the registered official origin; the operator returns
-// its URL to the admin UI for state validation and server-side exchange.
-func BuildExcelAuthorizationURL(state, codeChallenge string) string {
-	params := url.Values{
-		"client_id": {ExcelClientID}, "response_type": {"code"},
-		"redirect_uri": {ExcelRedirectURI}, "scope": {"openid offline_access email profile organization.read"},
-		"state": {state}, "code_challenge_method": {"S256"}, "code_challenge": {codeChallenge},
-		"audience": {"https://api.openai.com/v1"}, "platform": {"PC"},
-	}
-	return ExcelAuthorizeURL + "?" + params.Encode()
 }
 
 // BuildAuthorizationURLForPlatform builds authorization URL by platform.

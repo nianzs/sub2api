@@ -76,8 +76,6 @@ type codexImportAccount struct {
 	AccessToken     string
 	RefreshToken    string
 	IDToken         string
-	ClientID        string
-	TokenClientID   string // access token claim; only used to recognize Excel sessions
 	Email           string
 	AccountID       string
 	UserID          string
@@ -96,7 +94,6 @@ type codexImportAccount struct {
 }
 
 type codexJWTClaims struct {
-	ClientID   string                `json:"client_id"`
 	Sub        string                `json:"sub"`
 	Email      string                `json:"email"`
 	Exp        int64                 `json:"exp"`
@@ -559,13 +556,6 @@ func normalizeCodexImportEntry(entry codexImportEntry) (*codexImportAccount, err
 			[]string{"id_token"},
 			[]string{"idToken"},
 		)
-		item.ClientID = firstCodexString(raw,
-			[]string{"session_info", "client_id"},
-			[]string{"tokens", "client_id"},
-			[]string{"credentials", "client_id"},
-			[]string{"client_id"},
-			[]string{"clientId"},
-		)
 		item.Email = firstCodexString(raw, []string{"email"}, []string{"user", "email"})
 		item.AccountID = firstCodexString(raw,
 			[]string{"chatgpt_account_id"},
@@ -635,28 +625,16 @@ func normalizeCodexImportEntry(entry codexImportEntry) (*codexImportAccount, err
 		return nil, errors.New("缺少 accessToken/access_token")
 	}
 	item.Credentials["access_token"] = item.AccessToken
+	if item.RefreshToken != "" {
+		item.Credentials["refresh_token"] = item.RefreshToken
+		item.Credentials["client_id"] = openai.ClientID
+	}
 	if item.IDToken != "" {
 		item.Credentials["id_token"] = item.IDToken
 		_ = enrichCodexImportAccountFromJWT(item, item.IDToken, false, now)
 	}
 	if err := enrichCodexImportAccountFromJWT(item, item.AccessToken, true, now); err != nil {
 		return nil, err
-	}
-	// A session issued to the official Excel client only works through BPS.
-	// Imported as Codex OAuth it would send an Excel token to native Codex and
-	// could overwrite the same user's Codex account during merge.
-	if strings.TrimSpace(item.ClientID) == openai.ExcelClientID || item.TokenClientID == openai.ExcelClientID {
-		return nil, errors.New("Excel 客户端（BPS）会话不能作为 Codex 账号导入，请通过 BPS OAuth 授权或粘贴 Refresh Token 添加")
-	}
-	if item.RefreshToken != "" {
-		item.Credentials["refresh_token"] = item.RefreshToken
-		// The refresh token belongs to its issuing client; keep the legacy Codex
-		// default only when no client identity was supplied.
-		clientID := strings.TrimSpace(item.ClientID)
-		if clientID == "" {
-			clientID = openai.ClientID
-		}
-		item.Credentials["client_id"] = clientID
 	}
 	if _, ok := item.Credentials["expires_at"]; !ok {
 		item.WarningTexts = append(item.WarningTexts, "无法从 accessToken 解析过期时间，导入后需自行确认令牌有效性")
@@ -697,9 +675,6 @@ func enrichCodexImportAccountFromJWT(item *codexImportAccount, token string, val
 	}
 	if item.Email == "" {
 		item.Email = strings.TrimSpace(claims.Email)
-	}
-	if validateExpiry {
-		item.TokenClientID = strings.TrimSpace(claims.ClientID)
 	}
 	if claims.OpenAIAuth == nil {
 		if item.UserID == "" {

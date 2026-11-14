@@ -165,7 +165,7 @@ func validateBulkOpenAISettingsTargets(
 
 		if settings.longContextBilling {
 			if account.Platform != PlatformOpenAI || !supportsOpenAILongContextBilling(account.Type) {
-				return 0, invalidBulkOpenAITarget(accountID, "long-context billing requires an OpenAI OAuth, setup-token, BPS OAuth, or API-key account")
+				return 0, invalidBulkOpenAITarget(accountID, "long-context billing requires an OpenAI OAuth, setup-token, or API-key account")
 			}
 			if account.IsShadow() {
 				inheritedCount++
@@ -196,7 +196,7 @@ func validateBulkOpenAISettingsTargets(
 
 func supportsOpenAILongContextBilling(accountType string) bool {
 	switch accountType {
-	case AccountTypeOAuth, AccountTypeSetupToken, AccountTypeBPSOAuth, AccountTypeAPIKey:
+	case AccountTypeOAuth, AccountTypeSetupToken, AccountTypeAPIKey:
 		return true
 	default:
 		return false

@@ -728,21 +728,3 @@ func safeUpstreamURL(rawURL string) string {
 	}
 	return rawURL
 }
-
-// OpsClientCanceledCode is a request outcome, not an upstream rejection.
-const OpsClientCanceledCode = "client_canceled"
-
-// MarkOpsClientCancellation records a client disconnect as the request's
-// terminal outcome so a later upstream failure cannot claim ownership of the
-// connection. Existing ignore-context-canceled settings still apply. Keeping it
-// request-scoped prevents earlier upstream attempts from changing its owner.
-func MarkOpsClientCancellation(c *gin.Context, stream bool) {
-	MarkOpsStreamErrorValue(c, OpsStreamError{
-		ErrType:        OpsClientCanceledCode,
-		Code:           OpsClientCanceledCode,
-		Message:        "Client disconnected: context canceled",
-		IntendedStatus: 499,
-		RequestScoped:  true,
-		NonStream:      !stream,
-	})
-}

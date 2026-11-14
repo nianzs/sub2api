@@ -217,7 +217,7 @@ func normalizeMonitorPrimaryModel(provider, checkMode, model string) string {
 //     （deepseek coding、自定义中转、minimax payg 无法路由额度端点）
 //   - kimi/zhipu/deepseek/minimax payg：仅 kimi/deepseek 有公开余额端点
 //   - anthropic：OAuth / Setup Token（API-Key 型无 usage 通道，永久 error）
-//   - openai：OAuth / BPS OAuth（API-Key 型无 usage 通道；BPS OAuth 用 BPS 响应头快照与用量日志）
+//   - openai：OAuth（API-Key 型无 usage 通道）
 //   - gemini/grok/antigravity：本地统计/值通道降级，不会永久 error，放行
 func monitorAccountQuotaCapability(account *Account) error {
 	switch account.Platform {
@@ -240,7 +240,7 @@ func monitorAccountQuotaCapability(account *Account) error {
 		}
 		return ErrChannelMonitorAccountNotSupportable
 	case PlatformOpenAI:
-		if account.IsOpenAIOAuthCredentialAccount() {
+		if account.Type == AccountTypeOAuth {
 			return nil
 		}
 		return ErrChannelMonitorAccountNotSupportable

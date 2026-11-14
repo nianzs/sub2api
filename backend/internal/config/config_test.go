@@ -2131,16 +2131,6 @@ func TestValidateConfigErrors(t *testing.T) {
 			wantErr: "gateway.stream_data_interval_timeout must be non-negative",
 		},
 		{
-			name:    "gateway excel bps stream data interval range",
-			mutate:  func(c *Config) { c.Gateway.ExcelBPSStreamDataIntervalTimeout = 10 },
-			wantErr: "gateway.excel_bps_stream_data_interval_timeout",
-		},
-		{
-			name:    "gateway excel bps stream data interval negative",
-			mutate:  func(c *Config) { c.Gateway.ExcelBPSStreamDataIntervalTimeout = -1 },
-			wantErr: "gateway.excel_bps_stream_data_interval_timeout",
-		},
-		{
 			name:    "gateway image stream keepalive range",
 			mutate:  func(c *Config) { c.Gateway.ImageStreamKeepaliveInterval = 4 },
 			wantErr: "gateway.image_stream_keepalive_interval",
@@ -2806,12 +2796,6 @@ func TestLoad_DefaultGatewayImageStreamConfig(t *testing.T) {
 	}
 	if cfg.Gateway.StreamDataIntervalTimeout != 180 {
 		t.Fatalf("stream_data_interval_timeout = %d, want 180", cfg.Gateway.StreamDataIntervalTimeout)
-	}
-	if cfg.Gateway.ExcelBPSStreamDataIntervalTimeout != 120 {
-		t.Fatalf("excel_bps_stream_data_interval_timeout = %d, want 120", cfg.Gateway.ExcelBPSStreamDataIntervalTimeout)
-	}
-	if cfg.Gateway.ExcelBPSStateRedisEnabled {
-		t.Fatalf("excel_bps_state_redis_enabled = true, want false")
 	}
 	if cfg.Gateway.StreamKeepaliveInterval != 10 {
 		t.Fatalf("stream_keepalive_interval = %d, want 10", cfg.Gateway.StreamKeepaliveInterval)

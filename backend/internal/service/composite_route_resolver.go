@@ -14,8 +14,8 @@ const (
 	// mappings span several provider platforms.
 	CompositeRouteReasonAmbiguous = "model is exposed by multiple provider platforms"
 	// CompositeRouteReasonOAuthAmbiguous is the ambiguous case where a claimant
-	// holds an OAuth / setup-token / BPS OAuth credential that only the OpenAI
-	// gateway can carry, and the model-name fallback would also pick an OpenAI-gateway
+	// holds an OAuth / setup-token credential that only the OpenAI gateway can
+	// carry, and the model-name fallback would also pick an OpenAI-gateway
 	// platform. The unresolved request would land in the Anthropic gateway
 	// handler and select those credentials, so this group misconfiguration must
 	// be rejected instead of guessing a platform from the model name.

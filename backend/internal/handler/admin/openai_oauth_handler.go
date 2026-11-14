@@ -108,8 +108,6 @@ func NewOpenAIOAuthHandler(
 type OpenAIGenerateAuthURLRequest struct {
 	ProxyID     *int64 `json:"proxy_id"`
 	RedirectURI string `json:"redirect_uri"`
-	// OAuthClient selects the OAuth profile: "codex" (default) or "excel"
-	OAuthClient string `json:"oauth_client"`
 }
 
 // GenerateAuthURL generates OpenAI OAuth authorization URL
@@ -126,7 +124,6 @@ func (h *OpenAIOAuthHandler) GenerateAuthURL(c *gin.Context) {
 		req.ProxyID,
 		req.RedirectURI,
 		oauthPlatformFromPath(c),
-		req.OAuthClient,
 	)
 	if err != nil {
 		response.ErrorFrom(c, err)
@@ -271,8 +268,8 @@ func (h *OpenAIOAuthHandler) RefreshAccountToken(c *gin.Context) {
 		return
 	}
 
-	// Only refresh OAuth-based accounts (BPS-only accounts hold Excel-client OAuth credentials)
-	if !account.IsOAuth() && !account.IsBPSOAuth() {
+	// Only refresh OAuth-based accounts
+	if !account.IsOAuth() {
 		response.BadRequest(c, "Cannot refresh non-OAuth account credentials")
 		return
 	}
@@ -359,18 +356,11 @@ func (h *OpenAIOAuthHandler) CreateAccountFromOAuth(c *gin.Context) {
 		name = "OpenAI OAuth Account"
 	}
 
-	// An Excel-client session yields a BPS-only account; every other session a
-	// Codex OAuth account.
-	accountType := service.AccountTypeOAuth
-	if clientID, _ := credentials["client_id"].(string); strings.TrimSpace(clientID) == openai.ExcelClientID {
-		accountType = service.AccountTypeBPSOAuth
-	}
-
 	// Create account
 	account, err := h.adminService.CreateAccount(c.Request.Context(), &service.CreateAccountInput{
 		Name:        name,
 		Platform:    platform,
-		Type:        accountType,
+		Type:        "oauth",
 		Credentials: credentials,
 		Extra:       nil,
 		ProxyID:     req.ProxyID,

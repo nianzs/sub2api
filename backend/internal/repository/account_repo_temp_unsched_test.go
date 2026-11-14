@@ -292,7 +292,7 @@ func TestAccountRepository_ListOAuthRefreshCandidatePage_SQLFilter(t *testing.T)
 		"paused (schedulable=false, status=active) accounts must remain OAuth refresh candidates: excluding them lets their stored access_token expire and the usage-window probe then reports a false 'needs re-auth'; permanent rejection is already covered by status = 'active' and refresh failures are bounded by the retry-cooldown exclusion")
 	require.Contains(t, normalized, "status = 'active'")
 	// setup-token 的 access_token 同为 8h 短期令牌，必须与 oauth 一起纳入后台刷新候选
-	require.Contains(t, normalized, "type IN ('oauth', 'setup-token', 'bps-oauth')")
+	require.Contains(t, normalized, "type IN ('oauth', 'setup-token')")
 	require.Contains(t, normalized, "platform = ANY($1)")
 	require.NotContains(t, normalized, "platform IN ('anthropic'",
 		"candidate platforms must come from the refresher registry instead of a second hard-coded list")
@@ -337,8 +337,8 @@ func TestAccountRepository_ListOAuthRefreshCandidatePage_ReconciliationExcludesA
 	require.Empty(t, page.Accounts)
 
 	normalized := normalizeSQLWhitespace(capturedSQL)
-	require.Contains(t, normalized, "type IN ('oauth', 'bps-oauth')")
-	require.NotContains(t, normalized, "'setup-token'")
+	require.Contains(t, normalized, "type = 'oauth'")
+	require.NotContains(t, normalized, "type IN ('oauth', 'setup-token')")
 	require.NotContains(t, normalized, "type = 'api-key'")
 	require.NotContains(t, normalized, "credentials ? 'refresh_token'",
 		"reconciliation must be able to find structurally invalid OAuth rows")
