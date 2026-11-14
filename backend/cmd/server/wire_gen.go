@@ -140,6 +140,7 @@ func initializeApplication(buildInfo handler.BuildInfo) (*Application, error) {
 	kiroTokenProvider := service.ProvideKiroTokenProvider(accountRepository, geminiTokenCache, kiroOAuthService, oAuthRefreshAPI)
 	kiroCooldownStore := service.ProvideKiroCooldownStore(redisClient)
 	kiroCacheEmulationRemoteStore := repository.ProvideKiroCacheEmulationRemoteStore(redisClient, configConfig)
+	kiroPromptCacheRemoteStore := repository.ProvideKiroPromptCacheRemoteStore(redisClient)
 	sessionLimitCache := repository.ProvideSessionLimitCache(redisClient, configConfig)
 	rpmCache := repository.NewRPMCache(redisClient)
 	digestSessionStore := service.NewDigestSessionStore()
