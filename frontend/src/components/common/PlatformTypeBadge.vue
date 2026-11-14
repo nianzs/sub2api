@@ -9,7 +9,7 @@
       <span :class="['inline-flex items-center gap-1 px-1.5 py-1', typeClass]">
         <!-- OAuth icon -->
         <svg
-          v-if="type === 'oauth' || type === 'bps-oauth'"
+          v-if="type === 'oauth'"
           class="h-3 w-3"
           fill="none"
           viewBox="0 0 24 24"
@@ -120,8 +120,6 @@ const typeLabel = computed(() => {
   switch (props.type) {
     case 'oauth':
       return 'OAuth'
-    case 'bps-oauth':
-      return 'BPS OAuth'
     case 'setup-token':
       return 'Token'
     case 'apikey':
@@ -336,10 +334,8 @@ const expiresLabel = computed(() => {
 })
 
 // Privacy badge — shows different states for OpenAI/Antigravity OAuth privacy setting
-// (OpenAI BPS OAuth accounts get the same training opt-out on authorization)
 const privacyBadge = computed(() => {
-  const privacyCapable = props.type === 'oauth' || (props.platform === 'openai' && props.type === 'bps-oauth')
-  if (!privacyCapable || !props.privacyMode) return null
+  if (props.type !== 'oauth' || !props.privacyMode) return null
   // 支持 OpenAI 和 Antigravity 平台
   if (props.platform !== 'openai' && props.platform !== 'antigravity') return null
 

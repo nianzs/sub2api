@@ -27,8 +27,6 @@ export interface OpenAITokenInfo {
 
 export type OpenAIOAuthPlatform = 'openai'
 
-export const OPENAI_EXCEL_OAUTH_CLIENT_ID = 'app_fnr0pYvVwwFDocDumLG3H2Bp'
-
 export function useOpenAIOAuth() {
   const appStore = useAppStore()
   const { t } = useI18n()
@@ -53,8 +51,7 @@ export function useOpenAIOAuth() {
   // Generate auth URL for OpenAI OAuth
   const generateAuthUrl = async (
     proxyId?: number | null,
-    redirectUri?: string,
-    oauthClient: 'codex' | 'excel' = 'codex'
+    redirectUri?: string
   ): Promise<boolean> => {
     loading.value = true
     authUrl.value = ''
@@ -70,7 +67,6 @@ export function useOpenAIOAuth() {
       if (redirectUri) {
         payload.redirect_uri = redirectUri
       }
-      if (oauthClient === 'excel') payload.oauth_client = 'excel'
 
       const response = await adminAPI.accounts.generateAuthUrl(
         `${endpointPrefix}/generate-auth-url`,
