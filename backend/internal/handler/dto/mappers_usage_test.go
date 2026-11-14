@@ -347,14 +347,14 @@ func TestUsageLogFromServiceAdmin_UpstreamCredits(t *testing.T) {
 
 	credits := 8.0
 	log := &service.UsageLog{
-		RequestID:   "leonardo-image:1",
-		Model:       "gpt-image-2",
+		RequestID:   "kiro:1",
+		Model:       "claude-sonnet-4-5",
 		KiroCredits: &credits,
 		Account: &service.Account{
 			ID:       1,
-			Platform: service.PlatformLeonardo,
+			Platform: service.PlatformKiro,
 			Type:     service.AccountTypeOAuth,
-			Extra:    map[string]any{"leonardo_credit_unit_price_usd": 0.0012},
+			Extra:    map[string]any{"kiro_credit_unit_price_usd": 0.0012},
 		},
 	}
 

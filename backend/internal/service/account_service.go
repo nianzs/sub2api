@@ -30,10 +30,6 @@ type OAuthRefreshPageOptions struct {
 	IncludeSetupToken    bool
 	RequireRefreshToken  bool
 	ExcludeRetryCooldown bool
-	// CookieCredentialPlatforms 列出以 cookie 作为长期凭据的平台（无
-	// refresh_token）。RequireRefreshToken 时，这些平台的候选条件改为
-	// cookie 非空，否则后台永远刷不到它们。
-	CookieCredentialPlatforms []string
 }
 
 // OAuthRefreshCandidatePage keeps cursor metadata from the raw SQL ID page.

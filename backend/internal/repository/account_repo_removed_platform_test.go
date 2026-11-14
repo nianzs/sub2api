@@ -13,14 +13,17 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// removedPlatform was once registered (old migrations still allow it in the
-// accounts/groups CHECK constraints) but no longer exists in domain.Platforms.
-const removedPlatform = "adobe"
+// removedPlatforms were once registered but no longer exist in domain.Platforms
+// (old migrations still allow adobe in the accounts/groups CHECK constraints;
+// leonardo was only ever validated in the application).
+var removedPlatforms = []string{"adobe", "leonardo"}
 
 // knownPlatformPredicate binds exactly the registered concrete platforms, so a
 // leftover row on a removed platform can never satisfy it.
 func TestKnownPlatformPredicateExcludesRemovedPlatform(t *testing.T) {
-	require.False(t, domain.IsConcretePlatform(removedPlatform))
+	for _, removedPlatform := range removedPlatforms {
+		require.False(t, domain.IsConcretePlatform(removedPlatform))
+	}
 
 	selector := entsql.Dialect(dialect.Postgres).Select("*").From(entsql.Table("accounts"))
 	knownPlatformPredicate()(selector)
@@ -32,7 +35,9 @@ func TestKnownPlatformPredicateExcludesRemovedPlatform(t *testing.T) {
 		bound = append(bound, arg.(string))
 	}
 	require.ElementsMatch(t, domain.ConcretePlatformIDs(), bound)
-	require.NotContains(t, bound, removedPlatform)
+	for _, removedPlatform := range removedPlatforms {
+		require.NotContains(t, bound, removedPlatform)
+	}
 }
 
 // Every schedulable query carries the known-platform predicate, so leftover
@@ -49,19 +54,19 @@ func TestSchedulableQueriesApplyKnownPlatformPredicate(t *testing.T) {
 			return len(got), err
 		}},
 		{"ListSchedulableByPlatform", func(r *accountRepository) (int, error) {
-			got, err := r.ListSchedulableByPlatform(ctx, removedPlatform)
+			got, err := r.ListSchedulableByPlatform(ctx, removedPlatforms[0])
 			return len(got), err
 		}},
 		{"ListSchedulableByPlatforms", func(r *accountRepository) (int, error) {
-			got, err := r.ListSchedulableByPlatforms(ctx, []string{removedPlatform})
+			got, err := r.ListSchedulableByPlatforms(ctx, removedPlatforms)
 			return len(got), err
 		}},
 		{"ListSchedulableUngroupedByPlatform", func(r *accountRepository) (int, error) {
-			got, err := r.ListSchedulableUngroupedByPlatform(ctx, removedPlatform)
+			got, err := r.ListSchedulableUngroupedByPlatform(ctx, removedPlatforms[1])
 			return len(got), err
 		}},
 		{"ListSchedulableUngroupedByPlatforms", func(r *accountRepository) (int, error) {
-			got, err := r.ListSchedulableUngroupedByPlatforms(ctx, []string{removedPlatform})
+			got, err := r.ListSchedulableUngroupedByPlatforms(ctx, removedPlatforms)
 			return len(got), err
 		}},
 	}

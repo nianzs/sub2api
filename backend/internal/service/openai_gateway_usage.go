@@ -426,10 +426,7 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 		videoDurationSeconds := NormalizeVideoBillingDurationSecondsOrDefault(result.VideoDurationSeconds)
 		usageLog.VideoDurationSeconds = &videoDurationSeconds
 	}
-	// 上游积分（kiro_credits 列）：Kiro 与 Leonardo Cookie 号记录；Leonardo 中转号
-	// 走 OpenAI 兼容上游，没有 Leonardo 积分。
-	if (account.Platform == PlatformKiro || (account.Platform == PlatformLeonardo && account.Type == AccountTypeOAuth)) &&
-		result.Usage.KiroCredits > 0 {
+	if account.Platform == PlatformKiro && result.Usage.KiroCredits > 0 {
 		kiroCredits := result.Usage.KiroCredits
 		usageLog.KiroCredits = &kiroCredits
 	}
