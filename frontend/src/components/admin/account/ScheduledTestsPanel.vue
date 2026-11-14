@@ -126,6 +126,15 @@
         </div>
       </div>
 
+      <!-- Quality rules are managed in the account editor, not as plain scheduled tests. -->
+      <p
+        v-if="!loading && hiddenQualityRules"
+        class="mb-3 text-xs text-gray-500 dark:text-gray-400"
+        data-testid="scheduled-tests-quality-hidden"
+      >
+        {{ t('qualityOps.accountSection.hiddenInScheduledTests', { count: hiddenQualityRules }) }}
+      </p>
+
       <!-- Loading State -->
       <div v-if="loading" class="flex items-center justify-center py-8">
         <Icon name="refresh" size="md" class="animate-spin text-gray-400" :stroke-width="2" />
@@ -495,6 +504,7 @@ const loading = ref(false)
 const creating = ref(false)
 const loadingResults = ref(false)
 const plans = ref<ScheduledTestPlan[]>([])
+const hiddenQualityRules = ref(0)
 const results = ref<ScheduledTestResult[]>([])
 const expandedPlanId = ref<number | null>(null)
 let resultsRequestId = 0
@@ -555,7 +565,10 @@ const loadPlans = async () => {
   if (!props.accountId) return
   loading.value = true
   try {
-    plans.value = await adminAPI.scheduledTests.listByAccount(props.accountId)
+    const all = await adminAPI.scheduledTests.listByAccount(props.accountId)
+    // Editing or deleting a quality rule here would bypass its quarantine/restore logic.
+    plans.value = all.filter(plan => !plan.pelican_config?.quality)
+    hiddenQualityRules.value = all.length - plans.value.length
   } catch (error: any) {
     appStore.showError(error?.message || 'Failed to load plans')
   } finally {

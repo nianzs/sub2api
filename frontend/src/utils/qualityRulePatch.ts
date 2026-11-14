@@ -32,6 +32,13 @@ export function qualityUsesRetestRest(action?: QualityAction) {
   return action === 'remove_groups' || action === 'disable_scheduling'
 }
 
+// The backend keeps one observation rule and one quarantine rule per account
+// (unique index in migration 253).
+export type QualityRuleScope = 'observation' | 'quarantine'
+export function qualityRuleScope(action?: QualityAction): QualityRuleScope {
+  return action === 'observe_only' ? 'observation' : 'quarantine'
+}
+
 // Action cleanup and validation shared by every save path. Errors are i18n keys.
 export function qualityActionPayload(policy: QualityPolicy): QualityPolicy {
   const next: QualityPolicy = {

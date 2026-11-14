@@ -362,7 +362,8 @@ function mountModal(account = buildAccount(), renderGroupSelector = false) {
         Icon: true,
         ProxySelector: true,
         GroupSelector: renderGroupSelector ? false : GroupSelectorStub,
-        ModelWhitelistSelector: ModelWhitelistSelectorStub
+        ModelWhitelistSelector: ModelWhitelistSelectorStub,
+        AccountQualitySection: true
       }
     }
   })
@@ -374,6 +375,11 @@ describe('EditAccountModal', () => {
   })
 
   afterEach(() => vi.useRealTimers())
+
+  it('shows the quality rule section for OpenAI accounts only', () => {
+    expect(mountModal().find('account-quality-section-stub').exists()).toBe(true)
+    expect(mountModal(buildVertexAccount()).find('account-quality-section-stub').exists()).toBe(false)
+  })
 
   it('uses the Kiro direct API-key placeholder when base_url is absent', () => {
     const wrapper = mountModal(buildKiroAPIKeyAccount())

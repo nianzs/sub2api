@@ -31,6 +31,11 @@ vi.mock('@/api/admin/groups', () => {
   const groups = { getAllIncludingInactive: api.getAllIncludingInactive, getModelAllowlistCandidates: api.getModelAllowlistCandidates }
   return { ...groups, default: groups }
 })
+const routeQuery = vi.hoisted(() => ({ value: {} as Record<string, string> }))
+vi.mock('vue-router', async () => {
+  const actual = await vi.importActual<typeof import('vue-router')>('vue-router')
+  return { ...actual, useRoute: () => ({ query: routeQuery.value }) }
+})
 vi.mock('vue-i18n', async () => {
   const actual = await vi.importActual<typeof import('vue-i18n')>('vue-i18n')
   return { ...actual, useI18n: () => ({ t: (key: string) => key, te: (key: string) => key.startsWith('qualityOps.') }) }
@@ -141,6 +146,24 @@ describe('AccountQualityView', () => {
   afterEach(() => {
     wrapper?.unmount()
     wrapper = undefined
+    routeQuery.value = {}
+  })
+
+  it('opens the history of the rule named in ?plan=', async () => {
+    routeQuery.value = { plan: '11' }
+    api.listResults.mockResolvedValue([])
+    const view = mountView()
+    await flushPromises()
+    expect(api.listResults).toHaveBeenCalledWith(11, 100, false)
+    expect(view.find('[data-dialog="qualityOps.history"]').exists()).toBe(true)
+  })
+
+  it('ignores a ?plan= that is not a quality rule', async () => {
+    routeQuery.value = { plan: '999' }
+    const view = mountView()
+    await flushPromises()
+    expect(api.listResults).not.toHaveBeenCalled()
+    expect(view.find('[data-dialog="qualityOps.history"]').exists()).toBe(false)
   })
 
   it('creates one remove-groups rule per selected account', async () => {
