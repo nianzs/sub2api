@@ -84,25 +84,3 @@ describe('scheduled test result selection', () => {
     expect(wrapper.html()).toBe(current)
   })
 })
-
-describe('quality rules in the scheduled test panel', () => {
-  beforeEach(() => { vi.resetAllMocks() })
-
-  it('hides quality rules, which are managed in the account editor', async () => {
-    listByAccount.mockResolvedValue([
-      { id: 1, model_id: 'model-1', enabled: true },
-      { id: 2, model_id: 'model-2', enabled: true, pelican_config: { quality: { action: 'observe_only' } } },
-    ])
-    const wrapper = await openPanel()
-    expect(wrapper.findAll('.cursor-pointer')).toHaveLength(1)
-    expect(wrapper.text()).toContain('model-1')
-    expect(wrapper.text()).not.toContain('model-2')
-    expect(wrapper.find('[data-testid="scheduled-tests-quality-hidden"]').exists()).toBe(true)
-  })
-
-  it('shows no hint when the account has no quality rules', async () => {
-    listByAccount.mockResolvedValue([{ id: 1, model_id: 'model-1', enabled: true }])
-    const wrapper = await openPanel()
-    expect(wrapper.find('[data-testid="scheduled-tests-quality-hidden"]').exists()).toBe(false)
-  })
-})
