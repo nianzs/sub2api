@@ -14,7 +14,7 @@ import (
 // 242 号迁移起白名单改由应用层平台清单校验，不再维护数据库 CHECK 约束。
 var expectedUserPlatformQuotaPlatforms = []string{
 	"anthropic", "antigravity", "cline", "command_code", "deepseek", "fish",
-	"gemini", "grok", "kimi", "kiro", "leonardo", "minimax", "openai", "opencode_go", "typesafe", "zhipu",
+	"gemini", "grok", "kimi", "kiro", "minimax", "openai", "opencode_go", "typesafe", "zhipu",
 }
 
 // TestUserPlatformQuotasRestoreKiroMigration 校验 227 号迁移把 224 漏掉的 kiro

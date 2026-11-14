@@ -144,14 +144,6 @@ const antigravityModels = [
   'tab_flash_lite_preview'
 ]
 
-// Leonardo 平台对外模型：Cookie 原生号与 API Key 中转号同一口径（后端
-// IsModelSupported 强制，映射目标不在此列表的条目不参与调度）。
-const leonardoModels = [
-  'gpt-image-2',
-  'gpt-image-2.5-flare',
-  'gpt-image-2.5-sunburst',
-]
-
 // Fish Audio 对外模型。与其他平台的目录分开维护。
 const fishModels = [
   'gpt-image-2',
@@ -160,13 +152,6 @@ const fishModels = [
 ]
 
 const fishPresetMappings = [
-  { label: 'GPT Image 2', from: 'gpt-image-2', to: 'gpt-image-2', color: 'bg-indigo-100 text-indigo-700 hover:bg-indigo-200 dark:bg-indigo-900/30 dark:text-indigo-400' },
-  { label: 'GPT Image 2.5 Flare', from: 'gpt-image-2.5-flare', to: 'gpt-image-2.5-flare', color: 'bg-sky-100 text-sky-700 hover:bg-sky-200 dark:bg-sky-900/30 dark:text-sky-400' },
-  { label: 'GPT Image 2.5 Sunburst', from: 'gpt-image-2.5-sunburst', to: 'gpt-image-2.5-sunburst', color: 'bg-amber-100 text-amber-700 hover:bg-amber-200 dark:bg-amber-900/30 dark:text-amber-400' },
-]
-
-// Leonardo 预设映射：恒等（Cookie 号出图时后端再换成上游 slug，如 openai/gpt-image-2.5-flare）。
-const leonardoPresetMappings = [
   { label: 'GPT Image 2', from: 'gpt-image-2', to: 'gpt-image-2', color: 'bg-indigo-100 text-indigo-700 hover:bg-indigo-200 dark:bg-indigo-900/30 dark:text-indigo-400' },
   { label: 'GPT Image 2.5 Flare', from: 'gpt-image-2.5-flare', to: 'gpt-image-2.5-flare', color: 'bg-sky-100 text-sky-700 hover:bg-sky-200 dark:bg-sky-900/30 dark:text-sky-400' },
   { label: 'GPT Image 2.5 Sunburst', from: 'gpt-image-2.5-sunburst', to: 'gpt-image-2.5-sunburst', color: 'bg-amber-100 text-amber-700 hover:bg-amber-200 dark:bg-amber-900/30 dark:text-amber-400' },
@@ -633,7 +618,6 @@ export function getModelsByPlatform(platform: string): string[] {
     case 'gemini': return geminiModels
     case 'antigravity': return antigravityModels
     case 'kiro': return kiroModels
-    case 'leonardo': return leonardoModels
     case 'fish': return fishModels
     case 'zhipu': return zhipuModels
     case 'qwen': return qwenModels
@@ -679,7 +663,6 @@ export function getPresetMappingsByPlatform(platform: string) {
   if (platform === 'grok' || platform === 'xai') return grokPresetMappings
   if (platform === 'antigravity') return antigravityPresetMappings
   if (platform === 'kiro') return kiroPresetMappings
-  if (platform === 'leonardo') return leonardoPresetMappings
   if (platform === 'fish') return fishPresetMappings
   if (platform === 'bedrock') return bedrockPresetMappings
   return anthropicPresetMappings

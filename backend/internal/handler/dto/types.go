@@ -725,7 +725,7 @@ type AdminUsageLog struct {
 	AccountRateMultiplier *float64 `json:"account_rate_multiplier"`
 	// AccountStatsCost 自定义定价规则计算的账号统计费用（nil 表示使用默认公式）
 	AccountStatsCost *float64 `json:"account_stats_cost,omitempty"`
-	// UpstreamCredits 本次请求消耗的上游积分（Kiro credits / Leonardo 积分），仅管理端可见。
+	// UpstreamCredits 本次请求消耗的上游积分（Kiro credits），仅管理端可见。
 	UpstreamCredits *float64 `json:"upstream_credits,omitempty"`
 	// UpstreamCreditCost 按账号当前积分单价估算的上游成本（USD）；未设单价时为 nil。
 	UpstreamCreditCost *float64 `json:"upstream_credit_cost,omitempty"`

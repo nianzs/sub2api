@@ -301,7 +301,13 @@ func (s *GatewayService) forwardKiroMessages(ctx context.Context, c *gin.Context
 	claudeReqID := kiropkg.NewClaudeRequestID()
 	c.Header("x-request-id", claudeReqID)
 	c.Header("request-id", claudeReqID)
-	c.Data(http.StatusOK, "application/json", parseResult.ResponseBody)
+	responseBody := parseResult.ResponseBody
+	if parseResult.Usage.KiroCredits > 0 && upstreamCreditsRequested(c) {
+		if next, setErr := sjson.SetBytes(responseBody, "usage."+upstreamCreditsUsageField, parseResult.Usage.KiroCredits); setErr == nil {
+			responseBody = next
+		}
+	}
+	c.Data(http.StatusOK, "application/json", responseBody)
 
 	upstreamModel := resolveKiroUpstreamModel(mappedModel)
 

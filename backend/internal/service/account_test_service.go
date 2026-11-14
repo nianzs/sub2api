@@ -160,10 +160,6 @@ type AccountTestService struct {
 	// grokWSDialer is optional; realtime account tests use the default OpenAI-style
 	// WS dialer when nil (supports proxy + coder/websocket handshake).
 	grokWSDialer openAIWSClientDialer
-	// leonardoTokenProvider 为 nil 时 Leonardo 测试路径按需构造本地 provider。
-	leonardoTokenProvider *LeonardoTokenProvider
-	// leonardoImageService 为 nil 时用测试专用的出图服务实例（单测注入用）。
-	leonardoImageService *LeonardoImageService
 }
 
 func (s *AccountTestService) SetSettingService(settingService *SettingService) {
@@ -175,13 +171,6 @@ func (s *AccountTestService) SetSettingService(settingService *SettingService) {
 func (s *AccountTestService) SetPluginManager(pluginManager *PluginManager) {
 	if s != nil {
 		s.pluginManager = pluginManager
-	}
-}
-
-// SetLeonardoTokenProvider 注入与网关共享 OAuthRefreshAPI 的 Leonardo token provider。
-func (s *AccountTestService) SetLeonardoTokenProvider(provider *LeonardoTokenProvider) {
-	if s != nil {
-		s.leonardoTokenProvider = provider
 	}
 }
 
@@ -438,10 +427,6 @@ func (s *AccountTestService) TestAccountConnection(c *gin.Context, accountID int
 
 	if isKiroDirectModeAccount(account) {
 		return s.testKiroAccountConnection(c, account, modelID)
-	}
-
-	if account.Platform == PlatformLeonardo {
-		return s.testLeonardoAccountConnection(c, account, modelID, prompt)
 	}
 
 	if account.Platform == PlatformFish {

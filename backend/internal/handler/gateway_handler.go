@@ -82,7 +82,6 @@ type GatewayHandler struct {
 	geminiCachedContentService *service.GeminiCachedContentService
 	concurrencyHelper          *ConcurrencyHelper
 	userMsgQueueHelper         *UserMsgQueueHelper
-	leonardoImageService       *service.LeonardoImageService
 	fishImageService           *service.FishImageService
 	imageLimiter               *imageConcurrencyLimiter
 	maxAccountSwitches         int
@@ -107,7 +106,6 @@ func NewGatewayHandler(
 	promptRuleService *service.PromptRuleService,
 	contentModerationService *service.ContentModerationService,
 	userMsgQueueService *service.UserMessageQueueService,
-	leonardoImageService *service.LeonardoImageService,
 	fishImageService *service.FishImageService,
 	cfg *config.Config,
 	settingService *service.SettingService,
@@ -146,7 +144,6 @@ func NewGatewayHandler(
 		contentModerationService:  contentModerationService,
 		concurrencyHelper:         NewConcurrencyHelper(concurrencyService, SSEPingFormatClaude, pingInterval),
 		userMsgQueueHelper:        umqHelper,
-		leonardoImageService:      leonardoImageService,
 		fishImageService:          fishImageService,
 		imageLimiter:              sharedImageConcurrencyLimiter,
 		maxAccountSwitches:        maxAccountSwitches,
@@ -1574,8 +1571,6 @@ func defaultModelIDsForPlatform(platform string) []string {
 			ids = append(ids, model.ID)
 		}
 		return ids
-	case service.PlatformLeonardo:
-		return service.LeonardoModelIDs()
 	case service.PlatformFish:
 		return domain.FishModelNames()
 	case service.PlatformKiro:

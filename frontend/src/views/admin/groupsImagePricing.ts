@@ -15,7 +15,6 @@ const imageGenerationDefaultPlatforms = new Set([
   "fish",
   "gemini",
   "grok",
-  "leonardo",
 ]);
 
 export const defaultAllowImageGenerationForPlatform = (platform: string): boolean =>

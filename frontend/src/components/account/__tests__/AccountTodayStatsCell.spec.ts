@@ -12,7 +12,6 @@ vi.mock('vue-i18n', async () => {
           'admin.accounts.stats.requests': '请求',
           'admin.accounts.stats.tokens': 'Token',
           'admin.accounts.stats.kiroCredits': '消费Credits',
-          'admin.accounts.stats.leonardoCredits': '消耗积分',
           'admin.accounts.stats.approxCost': `约${params?.amount ?? ''}`,
           'usage.accountBilled': '账号计费',
           'usage.userBilled': '用户扣费'
@@ -117,77 +116,5 @@ describe('AccountTodayStatsCell', () => {
     })
 
     expect(wrapper.text()).not.toContain('消费Credits')
-  })
-
-  it('shows Leonardo cookie credits with its own label and estimated cost', () => {
-    const wrapper = mount(AccountTodayStatsCell, {
-      props: {
-        stats: {
-          ...stats,
-          kiro_credits: 500
-        },
-        platform: 'leonardo',
-        kiroCreditUnitPriceUsd: 0.0012
-      }
-    })
-
-    const row = wrapper.get('[data-testid="kiro-credits-row"]')
-    expect(row.text()).toContain('消耗积分:')
-    expect(row.text()).not.toContain('消费Credits')
-    expect(row.text()).toContain('500')
-    expect(row.text()).toContain('约$0.60')
-    expect(row.classes()).not.toContain('text-red-600')
-  })
-
-  it('highlights the Leonardo credits row when estimated credit cost exceeds user cost', () => {
-    const wrapper = mount(AccountTodayStatsCell, {
-      props: {
-        stats: {
-          ...stats,
-          user_cost: 0.5,
-          kiro_credits: 1000
-        },
-        platform: 'leonardo',
-        kiroCreditUnitPriceUsd: 0.0012
-      }
-    })
-
-    const row = wrapper.get('[data-testid="kiro-credits-row"]')
-    expect(row.classes()).toContain('text-red-600')
-    expect(row.classes()).toContain('dark:text-red-400')
-    expect(row.text()).toContain('约$1.20')
-  })
-
-  it('shows Leonardo credits without estimated cost when unit price is zero', () => {
-    const wrapper = mount(AccountTodayStatsCell, {
-      props: {
-        stats: {
-          ...stats,
-          user_cost: 0,
-          kiro_credits: 1000
-        },
-        platform: 'leonardo',
-        kiroCreditUnitPriceUsd: 0
-      }
-    })
-
-    const row = wrapper.get('[data-testid="kiro-credits-row"]')
-    expect(row.text()).toContain('消耗积分:')
-    expect(row.text()).not.toContain('约$')
-    expect(row.classes()).not.toContain('text-red-600')
-  })
-
-  it('does not show credits for Leonardo relay accounts', () => {
-    const wrapper = mount(AccountTodayStatsCell, {
-      props: {
-        stats,
-        platform: 'leonardo',
-        kiroCreditUnitPriceUsd: 0.0012,
-        isRelay: true
-      }
-    })
-
-    expect(wrapper.find('[data-testid="kiro-credits-row"]').exists()).toBe(false)
-    expect(wrapper.text()).not.toContain('消耗积分')
   })
 })

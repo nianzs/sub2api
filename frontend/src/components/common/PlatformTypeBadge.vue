@@ -290,10 +290,6 @@ const planBadgeClass = computed(() => {
     // Any other non-free Grok plan (future tiers) → amber so it still stands out
     return 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300'
   }
-  // Leonardo 套餐（Ultimate / Premium 等）→ 品牌 indigo，与全站 leonardo 配色一致
-  if (props.platform === 'leonardo' && normalizedPlanType.value) {
-    return 'bg-indigo-100 text-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-300'
-  }
   // OpenAI / other paid plan labels: keep readable distinction from free gray
   if (normalizedPlanType.value === 'plus') {
     return 'bg-sky-100 text-sky-700 dark:bg-sky-900/30 dark:text-sky-300'

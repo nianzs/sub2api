@@ -112,13 +112,6 @@ export default {
       kiroCooldown: 'Kiro Cooldown',
       kiroCreditUnitPriceUsd: 'Credit Unit Price',
       kiroCreditUnitPriceUsdHint: 'Used only to estimate Kiro Credits cost in today stats. 0 hides the estimate.',
-      leonardoCreditUnitPriceUsd: 'Credit Unit Price (USD)',
-      leonardoCreditUnitPriceUsdHint: 'Used only to estimate the cost of Leonardo credits in today stats; 0 hides the estimate. Reference (monthly fee ÷ monthly fast credits): Essential $12 / 8,500 ≈ $0.0014, Premium $30 / 25,000 = $0.0012, Ultimate $60 / 60,000 = $0.001. Annual billing is cheaper.',
-      leonardoMaxQuality: 'Max quality',
-      leonardoMaxQualityUnlimited: 'Unlimited',
-      leonardoMaxShortEdge: 'Max short edge (px)',
-      leonardoMaxUpscaleFactor: 'Max upscale factor',
-      leonardoImageLimitsHint: 'Caps Leonardo credit usage. Requests above the max quality are generated at the max quality. When the requested short edge exceeds the limit, a smaller image with the exact same aspect ratio is generated and then upscaled to the requested size (no stretching or cropping); billing follows the delivered size. 0 / Unlimited means no limit; the upscale factor defaults to 2 (1–4).',
       fishMaxQuality: 'Max quality',
       fishMaxQualityUnlimited: 'Unlimited',
       fishMaxQualityHint: 'Requests above the max quality are generated at the max quality. The response still echoes the requested quality. Unlimited means no cap. gpt-image-2.5 also supports xhigh and max; max is the highest tier.',
@@ -129,7 +122,6 @@ export default {
       kiroUsageForbidden: 'Usage Forbidden',
       kiroUsageForbiddenHint: 'Usage fetch is blocked for this account, but request forwarding may still work',
       platforms: {
-        leonardo: 'Leonardo',
         anthropic: 'Anthropic',
         claude: 'Claude',
         openai: 'OpenAI',
@@ -247,8 +239,6 @@ export default {
         grokOauth: 'Grok OAuth',
         kiroApikey: 'Connect to AWS directly via API Key',
         kiroApikeyRelay: 'Relay via external API Key + Base URL',
-        leonardoOauth: 'Leonardo web Cookie, direct GraphQL',
-        leonardoApikeyRelay: 'OpenAI-compatible relay fallback',
         fishOauthToken: 'API Key',
         fishOauth: 'Connect to Fish Audio directly with an API Key',
         fishApikeyRelay: 'OpenAI-compatible relay fallback',
@@ -1871,8 +1861,7 @@ export default {
         usageTrend: '30-Day Cost & Request Trend',
         noData: 'No usage data available for this account',
         approxCost: 'approx. {amount}',
-        kiroCredits: 'Credits Used',
-        leonardoCredits: 'Credits Used'
+        kiroCredits: 'Credits Used'
       },
       fish: {
         tokenLabel: 'API Key',
@@ -1881,22 +1870,8 @@ export default {
         relayApiKeyHint: 'API key for the relay upstream (sent as Authorization: Bearer)',
         relayBaseUrlHint: 'Handles requests fish native accounts cannot (sizes outside the allowlist, mask, n>8, webp). Channel mapping rewrites the model name, for example gpt-image-2 to gpt-image-1.'
       },
-      leonardo: {
-        cookieLabel: 'Leonardo Cookie',
-        cookieHint: 'Log in to app.leonardo.ai, then copy the full cookie string from DevTools (Application → Cookies or a request Cookie header). Must include __Secure-better-auth.session_token; session_data.* shards are recommended. A bare session token value also works. The short-lived JWT is exchanged and kept alive automatically from this cookie.',
-        cookiePlaceholder: '__Secure-better-auth.session_token=...; __Secure-better-auth.session_data.0=...',
-        cookieRequired: 'Leonardo cookie is required',
-        relayApiKeyHint: "API key for the relay upstream (sent as Authorization: Bearer)",
-        relayBaseUrlHint: 'OpenAI-compatible upstream (official https://api.openai.com or a third-party relay); fallback when native accounts fail'
-      },
 
       usageWindow: {
-        leonardoCredits: 'Credits',
-        leonardoFast: 'Fast Tokens',
-        leonardoFastDaily: 'Fast Tokens (daily)',
-        leonardoRollover: 'Rollover Bank',
-        leonardoTopUp: 'Top-up',
-        leonardoReset: 'Reset',
         statsTitle: '5-Hour Window Usage Statistics',
         statsTitleDaily: 'Daily Usage Statistics',
         geminiProDaily: 'Pro',

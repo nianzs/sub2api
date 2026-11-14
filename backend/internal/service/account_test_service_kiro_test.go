@@ -340,74 +340,107 @@ func TestBuildKiroPayloadForAccount_KiroBuilderIDWithCachedProfileArnUsesCachedA
 	require.Contains(t, string(kiroPayload), `arn:aws:codewhisperer:us-east-1:123456789012:profile/CACHED`)
 }
 
+// Kiro 积分照常入账；只有带 X-Sub2API-Upstream-Credits 时，Messages 响应（流式和非流式）
+// 才输出 usage.upstream_credits，默认响应里不出现任何积分字段。
 func TestGatewayServiceForwardRoutesKiroOAuthAndCapturesMeteringCredits(t *testing.T) {
-	gin.SetMode(gin.TestMode)
-	rec := httptest.NewRecorder()
-	c, _ := gin.CreateTestContext(rec)
-	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
+	for _, tc := range []struct {
+		name        string
+		stream      bool
+		header      string
+		wantCredits bool
+	}{
+		{name: "stream without header", stream: true},
+		{name: "stream with header", stream: true, header: "1", wantCredits: true},
+		{name: "non-stream without header", stream: false},
+		{name: "non-stream with header", stream: false, header: "1", wantCredits: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			gin.SetMode(gin.TestMode)
+			rec := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(rec)
+			c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
+			if tc.header != "" {
+				c.Request.Header.Set(upstreamCreditsRequestHeader, tc.header)
+			}
 
-	account := &Account{
-		ID:          21,
-		Name:        "kiro-stream-credits",
-		Platform:    PlatformKiro,
-		Type:        AccountTypeOAuth,
-		Status:      StatusActive,
-		Schedulable: true,
-		Concurrency: 1,
-		Credentials: map[string]any{
-			"access_token": "kiro-access-token",
-			"profile_arn":  "arn:aws:codewhisperer:us-east-1:123456789012:profile/STREAMCREDITS",
-		},
-	}
-	upstreamBody := bytes.NewBuffer(nil)
-	_, _ = upstreamBody.Write(buildKiroEventStreamFrame(t, "assistantResponseEvent", map[string]any{
-		"assistantResponseEvent": map[string]any{"content": "hello"},
-	}))
-	_, _ = upstreamBody.Write(buildKiroEventStreamFrame(t, "messageMetadataEvent", map[string]any{
-		"messageMetadataEvent": map[string]any{
-			"tokenUsage": map[string]any{
-				"uncachedInputTokens": 7,
-				"outputTokens":        3,
-			},
-		},
-	}))
-	_, _ = upstreamBody.Write(buildKiroEventStreamFrame(t, "meteringEvent", map[string]any{
-		"meteringEvent": map[string]any{"usage": 0.17},
-	}))
-	upstream := &queuedHTTPUpstream{
-		responses: []*http.Response{{
-			StatusCode: http.StatusOK,
-			Header:     http.Header{"Content-Type": []string{"application/vnd.amazon.eventstream"}},
-			Body:       io.NopCloser(upstreamBody),
-		}},
-	}
-	svc := &GatewayService{
-		httpUpstream:        upstream,
-		kiroCooldownStore:   &stubKiroCooldownStore{},
-		tlsFPProfileService: &TLSFingerprintProfileService{},
-		cfg: &config.Config{
-			Gateway: config.GatewayConfig{
-				StreamDataIntervalTimeout: 0,
-				MaxLineSize:               defaultMaxLineSize,
-			},
-		},
-		rateLimitService: &RateLimitService{},
-	}
-	requestBody := []byte(`{"model":"claude-sonnet-4-6","stream":true,"messages":[{"role":"user","content":"hi"}]}`)
-	parsed, err := ParseGatewayRequest(NewRequestBodyRef(requestBody), domain.PlatformAnthropic)
-	require.NoError(t, err)
+			account := &Account{
+				ID:          21,
+				Name:        "kiro-stream-credits",
+				Platform:    PlatformKiro,
+				Type:        AccountTypeOAuth,
+				Status:      StatusActive,
+				Schedulable: true,
+				Concurrency: 1,
+				Credentials: map[string]any{
+					"access_token": "kiro-access-token",
+					"profile_arn":  "arn:aws:codewhisperer:us-east-1:123456789012:profile/STREAMCREDITS",
+				},
+			}
+			upstreamBody := bytes.NewBuffer(nil)
+			_, _ = upstreamBody.Write(buildKiroEventStreamFrame(t, "assistantResponseEvent", map[string]any{
+				"assistantResponseEvent": map[string]any{"content": "hello"},
+			}))
+			_, _ = upstreamBody.Write(buildKiroEventStreamFrame(t, "messageMetadataEvent", map[string]any{
+				"messageMetadataEvent": map[string]any{
+					"tokenUsage": map[string]any{
+						"uncachedInputTokens": 7,
+						"outputTokens":        3,
+					},
+				},
+			}))
+			_, _ = upstreamBody.Write(buildKiroEventStreamFrame(t, "meteringEvent", map[string]any{
+				"meteringEvent": map[string]any{"usage": 0.17},
+			}))
+			upstream := &queuedHTTPUpstream{
+				responses: []*http.Response{{
+					StatusCode: http.StatusOK,
+					Header:     http.Header{"Content-Type": []string{"application/vnd.amazon.eventstream"}},
+					Body:       io.NopCloser(upstreamBody),
+				}},
+			}
+			svc := &GatewayService{
+				httpUpstream:        upstream,
+				kiroCooldownStore:   &stubKiroCooldownStore{},
+				tlsFPProfileService: &TLSFingerprintProfileService{},
+				cfg: &config.Config{
+					Gateway: config.GatewayConfig{
+						StreamDataIntervalTimeout: 0,
+						MaxLineSize:               defaultMaxLineSize,
+					},
+				},
+				rateLimitService: &RateLimitService{},
+			}
+			streamFlag := "false"
+			if tc.stream {
+				streamFlag = "true"
+			}
+			requestBody := []byte(`{"model":"claude-sonnet-4-6","stream":` + streamFlag + `,"messages":[{"role":"user","content":"hi"}]}`)
+			parsed, err := ParseGatewayRequest(NewRequestBodyRef(requestBody), domain.PlatformAnthropic)
+			require.NoError(t, err)
 
-	result, err := svc.Forward(context.Background(), c, account, parsed)
-	require.NoError(t, err)
-	require.NotNil(t, result)
-	require.True(t, result.Stream)
-	require.InDelta(t, 0.17, result.Usage.KiroCredits, 0.000001)
-	require.Equal(t, 3, result.Usage.OutputTokens)
-	require.NotContains(t, rec.Body.String(), "_sub2api_kiro_credits")
-	require.Len(t, upstream.requests, 1)
-	require.Equal(t, "q.us-east-1.amazonaws.com", upstream.requests[0].URL.Host)
-	require.Equal(t, "/generateAssistantResponse", upstream.requests[0].URL.Path)
-	require.NotEqual(t, "api.anthropic.com", upstream.requests[0].URL.Host)
+			result, err := svc.Forward(context.Background(), c, account, parsed)
+			require.NoError(t, err)
+			require.NotNil(t, result)
+			require.Equal(t, tc.stream, result.Stream)
+			require.InDelta(t, 0.17, result.Usage.KiroCredits, 0.000001)
+			require.Equal(t, 3, result.Usage.OutputTokens)
+			body := rec.Body.String()
+			require.NotContains(t, body, "_sub2api_kiro_credits")
+			switch {
+			case !tc.wantCredits:
+				require.NotContains(t, body, "upstream_credits")
+			case tc.stream:
+				require.Contains(t, body, `"upstream_credits":0.17`)
+			default:
+				require.InDelta(t, 0.17, gjson.Get(body, "usage.upstream_credits").Float(), 0.000001)
+				require.Equal(t, int64(3), gjson.Get(body, "usage.output_tokens").Int())
+			}
+			require.Len(t, upstream.requests, 1)
+			require.Equal(t, "q.us-east-1.amazonaws.com", upstream.requests[0].URL.Host)
+			require.Equal(t, "/generateAssistantResponse", upstream.requests[0].URL.Path)
+			require.NotEqual(t, "api.anthropic.com", upstream.requests[0].URL.Host)
+		})
+	}
 }
 
 func TestGatewayServiceForwardRoutesKiroOAuthNonStreaming(t *testing.T) {

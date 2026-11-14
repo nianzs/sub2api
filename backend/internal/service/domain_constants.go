@@ -52,7 +52,6 @@ const (
 	PlatformTypeSafe    = domain.PlatformTypeSafe
 	PlatformCommandCode = domain.PlatformCommandCode
 	PlatformCline       = domain.PlatformCline
-	PlatformLeonardo    = domain.PlatformLeonardo
 	PlatformFish        = domain.PlatformFish
 	PlatformComposite   = domain.PlatformComposite
 	// PlatformKiro is retained for unsupported-platform threshold tests and legacy

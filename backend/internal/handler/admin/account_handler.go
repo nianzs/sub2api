@@ -2874,35 +2874,6 @@ func mappedOpenAIModels(mapping map[string]string) []openai.Model {
 	return models
 }
 
-// leonardoAccountTestModels 列出 Leonardo 账号测试可选的请求模型：取模型映射
-// 的键，只保留账号真能调度的（IsModelSupported 已按平台口径校验映射目标）；
-// 通配符键不能直接当请求模型，跳过。一个都不剩时回落平台默认模型。
-func leonardoAccountTestModels(account *service.Account) []openai.Model {
-	requested := make([]string, 0)
-	for model := range account.GetModelMapping() {
-		if strings.Contains(model, "*") || !account.IsModelSupported(model) {
-			continue
-		}
-		requested = append(requested, model)
-	}
-	sort.Strings(requested)
-	if len(requested) == 0 {
-		requested = service.LeonardoModelIDs()
-	}
-	models := make([]openai.Model, 0, len(requested))
-	for _, id := range requested {
-		model := openai.Model{ID: id, Object: "model", Type: "model", DisplayName: id}
-		for _, dm := range openai.DefaultModels {
-			if dm.ID == id {
-				model = dm
-				break
-			}
-		}
-		models = append(models, model)
-	}
-	return models
-}
-
 // fishAccountTestModels 列出 fish 账号测试可选的请求模型。只保留账号真能调度的
 // 对外名；通配符不能直接当请求模型。一个都不剩时回落平台默认模型。
 func fishAccountTestModels(account *service.Account) []openai.Model {
@@ -3027,13 +2998,6 @@ func (h *AccountHandler) respondAvailableModels(c *gin.Context, account *service
 			}
 		}
 		response.Success(c, models)
-		return
-	}
-
-	// Leonardo 只出图：只列账号实际能调度的请求模型（首期仅 gpt-image-2），
-	// 不能落到下面 OAuth 账号的 Claude 默认模型。
-	if account.Platform == service.PlatformLeonardo {
-		response.Success(c, leonardoAccountTestModels(account))
 		return
 	}
 

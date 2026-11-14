@@ -996,8 +996,12 @@ func (s *GatewayService) handleStreamingResponse(ctx context.Context, resp *http
 		usagePatch := s.extractSSEUsagePatch(event)
 		if eventType == "message_delta" {
 			if usageObj, ok := event["usage"].(map[string]any); ok {
-				if _, exists := usageObj["_sub2api_kiro_credits"]; exists {
+				if raw, exists := usageObj["_sub2api_kiro_credits"]; exists {
 					delete(usageObj, "_sub2api_kiro_credits")
+					// 调用方用请求头显式要积分时，改名为公开字段输出；否则照旧删除。
+					if v, ok := parseSSEUsageFloat(raw); ok && v > 0 && upstreamCreditsRequested(c) {
+						usageObj[upstreamCreditsUsageField] = raw
+					}
 					eventChanged = true
 				}
 			}
