@@ -6,7 +6,6 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	pkghttputil "github.com/Wei-Shaw/sub2api/internal/pkg/httputil"
@@ -171,7 +170,7 @@ func (h *GatewayHandler) admitLeonardoImagesRequest(
 	// 不用 wrapReleaseOnDone：提交之后上游与客户端连接脱钩，客户端断开时生成任务
 	// 仍在跑。断开即释放会让用户靠「提交后立刻断开」绕过并发上限；槽位持有到
 	// handler 返回，由 Redis 槽位 TTL 兜底异常路径。
-	if userRelease = leonardoReleaseOnce(userRelease); userRelease != nil {
+	if userRelease = imageReleaseOnce(userRelease); userRelease != nil {
 		releases = append(releases, userRelease)
 	}
 
@@ -197,24 +196,6 @@ func (h *GatewayHandler) acquireLeonardoImageSlot(c *gin.Context) (func(), bool)
 	}
 	leonardoImagesError(c, http.StatusTooManyRequests, "rate_limit_error", "Image generation concurrency limit exceeded, please retry later")
 	return nil, false
-}
-
-// leonardoImageStreamKeepaliveInterval 是假流式的 SSE 保活间隔
-// （gateway.image_stream_keepalive_interval，默认 10 秒；0 关闭）。
-func (h *GatewayHandler) leonardoImageStreamKeepaliveInterval() time.Duration {
-	if h.cfg == nil || h.cfg.Gateway.ImageStreamKeepaliveInterval <= 0 {
-		return 0
-	}
-	return time.Duration(h.cfg.Gateway.ImageStreamKeepaliveInterval) * time.Second
-}
-
-// leonardoImageNonstreamKeepaliveInterval 是非流式 JSON 空白保活间隔
-// （gateway.image_nonstream_keepalive_interval，默认 0 关闭）。
-func (h *GatewayHandler) leonardoImageNonstreamKeepaliveInterval() time.Duration {
-	if h.cfg == nil || h.cfg.Gateway.ImageNonstreamKeepaliveInterval <= 0 {
-		return 0
-	}
-	return time.Duration(h.cfg.Gateway.ImageNonstreamKeepaliveInterval) * time.Second
 }
 
 // leonardoProviderModerationRetryDelay 是上游审核拦截后重提前的等待（与 leo_proxy 一致）。
@@ -277,12 +258,12 @@ func (h *GatewayHandler) runLeonardoImagesFailover(
 
 	// 保活：stream=true 走假流式（SSE 注释保活，出图后写 completed 事件）；
 	// 非流式在 JSON 前写空白保活（与 OpenAI 出图一致，配置为 0 时关闭）。
-	var fakeStream *leonardoFakeStream
+	var fakeStream *imagesFakeStream
 	if parsed.Stream {
-		fakeStream = startLeonardoFakeStream(c, h.leonardoImageStreamKeepaliveInterval())
+		fakeStream = startImagesFakeStream(c, h.imageStreamKeepaliveInterval())
 		defer fakeStream.stop()
 	} else {
-		stopJSONKeepalive := service.StartOpenAIImagesJSONKeepalive(c, h.leonardoImageNonstreamKeepaliveInterval())
+		stopJSONKeepalive := service.StartOpenAIImagesJSONKeepalive(c, h.imageNonstreamKeepaliveInterval())
 		defer stopJSONKeepalive()
 	}
 
@@ -294,7 +275,7 @@ func (h *GatewayHandler) runLeonardoImagesFailover(
 			return
 		}
 
-		unavailable := mergeLeonardoAccountIDSets(failedAccountIDs, busyAccountIDs)
+		unavailable := mergeAccountIDSets(failedAccountIDs, busyAccountIDs)
 		excluded := service.LeonardoRelaySelectionExclusions(unavailable, requireRelay, deferredNatives)
 		if requireRelay {
 			h.gatewayService.ExcludeLeonardoNativeAccounts(requestCtx, apiKey.GroupID, excluded)
@@ -365,7 +346,7 @@ func (h *GatewayHandler) runLeonardoImagesFailover(
 			continue
 		}
 		// 每轮尝试结束就释放账号槽，不能 defer 到函数返回，否则失败的账号会一直被占着。
-		releaseAccount = leonardoReleaseOnce(releaseAccount)
+		releaseAccount = imageReleaseOnce(releaseAccount)
 		if releaseAccount == nil {
 			releaseAccount = func() {}
 		}
@@ -612,7 +593,7 @@ func (h *GatewayHandler) finishLeonardoImagesSuccess(
 		leonardoImagesError(c, http.StatusBadGateway, "api_error", "Upstream request failed")
 		return
 	}
-	if fakeStream := leonardoFakeStreamFromContext(c); fakeStream != nil {
+	if fakeStream := imagesFakeStreamFromContext(c); fakeStream != nil {
 		// 假流式：每张图一条 image_generation.completed / image_edit.completed 事件。
 		fakeStream.writeEvents(service.LeonardoImagesStreamEvents(req.parsed, result))
 	} else {
@@ -710,30 +691,6 @@ func leonardoImagesAccountsBusyError(c *gin.Context, reqLog *zap.Logger, busyAcc
 		"Too many concurrent requests for available accounts, please retry later")
 }
 
-// leonardoReleaseOnce 把槽位释放函数包成幂等的；不随请求 ctx 取消而提前释放。
-func leonardoReleaseOnce(release func()) func() {
-	if release == nil {
-		return nil
-	}
-	var once sync.Once
-	return func() { once.Do(release) }
-}
-
-// mergeLeonardoAccountIDSets 返回若干账号集合的并集副本，不改写入参。
-func mergeLeonardoAccountIDSets(sets ...map[int64]struct{}) map[int64]struct{} {
-	size := 0
-	for _, set := range sets {
-		size += len(set)
-	}
-	out := make(map[int64]struct{}, size)
-	for _, set := range sets {
-		for id := range set {
-			out[id] = struct{}{}
-		}
-	}
-	return out
-}
-
 // leonardoImagesFailoverError 把 failover 错误渲染给客户端，优先用错误自带的
 // 对外状态码与文案。
 func leonardoImagesFailoverError(c *gin.Context, failover *service.UpstreamFailoverError) {
@@ -758,24 +715,6 @@ func leonardoImagesFailoverError(c *gin.Context, failover *service.UpstreamFailo
 	leonardoImagesError(c, status, openAIErrorTypeForStatus(status), message)
 }
 
-// openAIErrorTypeForStatus 按状态码给出 OpenAI 错误对象的 type。
-func openAIErrorTypeForStatus(status int) string {
-	switch status {
-	case http.StatusBadRequest:
-		return "invalid_request_error"
-	case http.StatusUnauthorized:
-		return "authentication_error"
-	case http.StatusForbidden:
-		return "permission_error"
-	case http.StatusNotFound:
-		return "not_found_error"
-	case http.StatusTooManyRequests:
-		return "rate_limit_error"
-	default:
-		return "api_error"
-	}
-}
-
 // leonardoImagesError 渲染 OpenAI 形状的错误体——images 端点的客户端按 OpenAI 协议解析。
 // 假流式已提交 SSE 响应头时改写 SSE error 事件（状态码已是 200）。
 func leonardoImagesError(c *gin.Context, status int, errType, message string) {
@@ -785,7 +724,7 @@ func leonardoImagesError(c *gin.Context, status int, errType, message string) {
 // leonardoImagesErrorWithCode 同 leonardoImagesError，额外带 error.code。与 OpenAI
 // 错误对象一致，param / code 两个键始终存在（无值时为 null）。
 func leonardoImagesErrorWithCode(c *gin.Context, status int, errType, code, message string) {
-	if fakeStream := leonardoFakeStreamFromContext(c); fakeStream != nil && fakeStream.failIfCommitted(errType, code, message) {
+	if fakeStream := imagesFakeStreamFromContext(c); fakeStream != nil && fakeStream.failIfCommitted(errType, code, message) {
 		return
 	}
 	if service.IsResponseCommitted(c) {

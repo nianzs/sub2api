@@ -8,7 +8,7 @@ import (
 
 // gptImageQualityTokens1024 是各质量档 1024x1024 出图的输出 token 数（gpt-image-1
 // 官方表）。xhigh / max 没有公开数据，按 high 计。上游不报 usage 的出图渠道
-// （Leonardo 的质量倍数、fish 原生号的估算）共用这张表。
+// （fish 原生号的估算）用这张表。
 var gptImageQualityTokens1024 = map[string]float64{
 	"low":    272,
 	"medium": 1056,

@@ -306,9 +306,3 @@ func leonardoResultUnavailableFailure(cause error) *UpstreamFailoverError {
 }
 
 // statusOrDefault 取错误携带的上游状态码，缺失时用 fallback。
-func statusOrDefault(status, fallback int) int {
-	if status > 0 {
-		return status
-	}
-	return fallback
-}

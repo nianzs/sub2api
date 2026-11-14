@@ -39,7 +39,7 @@ func NewLeonardoImageService(resolveStorage ImageStorageResolver) *LeonardoImage
 	return &LeonardoImageService{
 		clients:        &leonardoClientCache{},
 		resolveStorage: resolveStorage,
-		inputClient:    newLeonardoInputImageClient(),
+		inputClient:    newInputImageClient(),
 	}
 }
 
@@ -98,7 +98,7 @@ type LeonardoImageCall struct {
 	UsageTokensPerCredit float64
 
 	inputsOnce sync.Once
-	inputs     []*leonardoInputImage
+	inputs     []*inputImage
 	inputsErr  error
 }
 
@@ -108,11 +108,11 @@ func NewLeonardoImageCall(req *OpenAIImagesRequest, channelMappedModel string) *
 }
 
 // inputImages 懒加载 JSON 体里的参考图 URL；首个调用的 ctx 决定抓取是否被取消。
-func (call *LeonardoImageCall) inputImages(ctx context.Context, client *http.Client) ([]*leonardoInputImage, error) {
+func (call *LeonardoImageCall) inputImages(ctx context.Context, client *http.Client) ([]*inputImage, error) {
 	call.inputsOnce.Do(func() {
-		images := make([]*leonardoInputImage, 0, len(call.Request.InputImageURLs))
+		images := make([]*inputImage, 0, len(call.Request.InputImageURLs))
 		for _, rawURL := range call.Request.InputImageURLs {
-			image, err := fetchLeonardoInputImage(ctx, client, rawURL)
+			image, err := fetchInputImage(ctx, client, rawURL)
 			if err != nil {
 				// 取图失败是请求本身的问题，换账号也救不了。
 				call.inputsErr = leonardoInputImageRequestError(err)
@@ -438,12 +438,12 @@ func (s *LeonardoImageService) uploadReferenceImages(
 	if len(req.Uploads) == 0 && len(req.InputImageURLs) == 0 {
 		return nil, nil
 	}
-	inputs := make([]*leonardoInputImage, 0, len(req.Uploads)+len(req.InputImageURLs))
+	inputs := make([]*inputImage, 0, len(req.Uploads)+len(req.InputImageURLs))
 	for _, upload := range req.Uploads {
 		if len(upload.Data) == 0 {
 			continue
 		}
-		inputs = append(inputs, &leonardoInputImage{Data: upload.Data, ContentType: upload.ContentType})
+		inputs = append(inputs, &inputImage{Data: upload.Data, ContentType: upload.ContentType})
 	}
 	// JSON 体里的 URL 需要先取回字节；同一请求换号时复用已取回的字节。
 	urlImages, err := call.inputImages(ctx, s.inputClient)
@@ -468,7 +468,7 @@ func (s *LeonardoImageService) uploadReferenceImages(
 
 // uploadOneImage 执行三步上传：UploadImage(INIT) → S3 presigned POST →
 // 审核轮询至 Accepted 得 initImageId。
-func (s *LeonardoImageService) uploadOneImage(ctx context.Context, client *leonardo.Client, token string, input *leonardoInputImage) (string, error) {
+func (s *LeonardoImageService) uploadOneImage(ctx context.Context, client *leonardo.Client, token string, input *inputImage) (string, error) {
 	extension := leonardo.UploadExtensionForContentType(input.ContentType)
 	init, err := client.UploadInitImage(ctx, token, extension)
 	if err != nil {

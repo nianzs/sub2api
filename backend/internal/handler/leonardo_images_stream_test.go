@@ -24,7 +24,7 @@ func newLeonardoStreamTestContext() (*gin.Context, *httptest.ResponseRecorder) {
 // 响应头提交前出错：照常返回带原状态码的 JSON，不出现 SSE 内容。
 func TestLeonardoFakeStreamErrorBeforeCommitIsJSON(t *testing.T) {
 	c, recorder := newLeonardoStreamTestContext()
-	stream := startLeonardoFakeStream(c, time.Hour)
+	stream := startImagesFakeStream(c, time.Hour)
 	defer stream.stop()
 
 	leonardoImagesError(c, http.StatusTooManyRequests, "rate_limit_error", "busy")
@@ -38,7 +38,7 @@ func TestLeonardoFakeStreamErrorBeforeCommitIsJSON(t *testing.T) {
 // 保活触发后提交 SSE 响应头并写注释；出图完成写 completed 事件。
 func TestLeonardoFakeStreamKeepaliveThenCompleted(t *testing.T) {
 	c, recorder := newLeonardoStreamTestContext()
-	stream := startLeonardoFakeStream(c, 5*time.Millisecond)
+	stream := startImagesFakeStream(c, 5*time.Millisecond)
 	defer stream.stop()
 
 	require.Eventually(t, stream.committed, time.Second, 5*time.Millisecond)
@@ -55,7 +55,7 @@ func TestLeonardoFakeStreamKeepaliveThenCompleted(t *testing.T) {
 // 响应头提交后出错：写 SSE error 事件，状态码保持 200。
 func TestLeonardoFakeStreamErrorAfterCommitIsSSE(t *testing.T) {
 	c, recorder := newLeonardoStreamTestContext()
-	stream := startLeonardoFakeStream(c, 5*time.Millisecond)
+	stream := startImagesFakeStream(c, 5*time.Millisecond)
 	defer stream.stop()
 
 	require.Eventually(t, stream.committed, time.Second, 5*time.Millisecond)
@@ -117,7 +117,7 @@ func TestLeonardoImagesFailoverErrorUsesOpenAIShape(t *testing.T) {
 // 转交中转号期间暂停：不提交响应头、不写保活。
 func TestLeonardoFakeStreamPauseSuppressesKeepalive(t *testing.T) {
 	c, recorder := newLeonardoStreamTestContext()
-	stream := startLeonardoFakeStream(c, 5*time.Millisecond)
+	stream := startImagesFakeStream(c, 5*time.Millisecond)
 	stream.pause()
 	time.Sleep(40 * time.Millisecond)
 	stream.stop()
@@ -129,7 +129,7 @@ func TestLeonardoFakeStreamPauseSuppressesKeepalive(t *testing.T) {
 // 没有保活间隔时最终写出仍会提交 SSE。
 func TestLeonardoFakeStreamWithoutKeepaliveStillStreams(t *testing.T) {
 	c, recorder := newLeonardoStreamTestContext()
-	stream := startLeonardoFakeStream(c, 0)
+	stream := startImagesFakeStream(c, 0)
 	stream.writeEvents([]service.ImagesStreamEvent{{Name: "image_edit.completed", Payload: []byte(`{}`)}})
 
 	require.Equal(t, "text/event-stream", recorder.Header().Get("Content-Type"))

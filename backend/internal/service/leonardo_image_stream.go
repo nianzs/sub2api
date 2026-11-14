@@ -8,12 +8,6 @@ import (
 	"github.com/tidwall/sjson"
 )
 
-// ImagesStreamEvent 是一条 OpenAI Images 流式（SSE）事件。
-type ImagesStreamEvent struct {
-	Name    string
-	Payload []byte
-}
-
 // LeonardoImagesStreamEvents 把一次 Leonardo 出图结果翻译成 OpenAI Images 流式
 // 协议的 completed 事件（每张图一条，事件名 image_generation.completed /
 // image_edit.completed）。Leonardo 上游不流式：这是「假流式」，没有
@@ -65,20 +59,4 @@ func LeonardoImagesStreamEvents(req *OpenAIImagesRequest, result *LeonardoImageR
 		events = append(events, ImagesStreamEvent{Name: eventName, Payload: payload})
 	}
 	return events
-}
-
-// ImagesStreamErrorPayload 构造流式 error 事件的 data（{"type":"error","error":{…}}）。
-// 与 OpenAI 错误对象一致，param / code 两个键始终存在（无值时为 null）。
-func ImagesStreamErrorPayload(errType, code, message string) []byte {
-	payload := buildOpenAIImagesStreamErrorBody(message)
-	if errType = strings.TrimSpace(errType); errType != "" {
-		payload, _ = sjson.SetBytes(payload, "error.type", errType)
-	}
-	payload, _ = sjson.SetRawBytes(payload, "error.param", []byte("null"))
-	if code = strings.TrimSpace(code); code != "" {
-		payload, _ = sjson.SetBytes(payload, "error.code", code)
-	} else {
-		payload, _ = sjson.SetRawBytes(payload, "error.code", []byte("null"))
-	}
-	return payload
 }

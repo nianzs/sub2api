@@ -9,9 +9,8 @@ import (
 )
 
 // FishImagesStreamEvents 把一次 fish 出图结果翻译成 OpenAI Images 流式协议
-// 的 completed 事件（每张图一条）。fish 上游不流式：这是「假流式」，与
-// Leonardo 同策略（无 partial_image 事件；OpenAI 允许实际预览张数少于
-// 请求的 partial_images）。
+// 的 completed 事件（每张图一条）。fish 上游不流式：这是「假流式」，没有
+// partial_image 事件（OpenAI 允许实际预览张数少于请求的 partial_images）。
 func FishImagesStreamEvents(req *OpenAIImagesRequest, result *FishImageResult) []ImagesStreamEvent {
 	if result == nil {
 		return nil
@@ -37,7 +36,8 @@ func FishImagesStreamEvents(req *OpenAIImagesRequest, result *FishImageResult) [
 	events := make([]ImagesStreamEvent, 0, len(items))
 	for i, item := range items {
 		b64 := strings.TrimSpace(item.Get("b64_json").String())
-		// usage 是整次请求的估算用量，只挂在最后一个 completed 事件上（镜像 Leonardo）。
+		// usage 是整次请求的估算用量，只挂在最后一个 completed 事件上：n>1 时
+		// 每个事件都带会让按事件累加的客户端算成 n 倍。
 		var usage []byte
 		if i == len(items)-1 {
 			usage = result.Usage
