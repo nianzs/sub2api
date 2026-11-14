@@ -1436,6 +1436,14 @@ describe('EditAccountModal', () => {
     expect(updateAccountMock.mock.calls[0]?.[1]?.upstream_billing_probe_enabled).toBe(true)
   })
 
+  it('puts the rate sync toggle on its own row, outside the rate grid cell', () => {
+    const wrapper = mountModal(buildAccount())
+    const row = wrapper.get('[data-testid="upstream-billing-rate-sync-row"]')
+    expect(row.find('[data-testid="upstream-billing-rate-sync"]').exists()).toBe(true)
+    expect(row.element.closest('.grid')).toBeNull()
+    expect(wrapper.get('[data-testid="account-rate-multiplier"]').element.closest('.grid')).not.toBeNull()
+  })
+
   it('enabling rate sync also enables probing and stops submitting a manual rate', async () => {
     const account = buildAccount()
     updateAccountMock.mockReset()
