@@ -1135,7 +1135,13 @@ export interface IQCheckState {
   correct?: number
   total?: number
   error?: string
-  consecutive_failures?: number
+  /** Wrong answers in the last round, and in the last two rounds together. */
+  last_round_wrong?: number
+  recent_wrong?: number
+  /** Cumulative answered and correct questions for stats_model. */
+  answered?: number
+  answered_correct?: number
+  stats_model?: string
   disabled_by_check?: boolean
   model?: string
 }
@@ -1335,6 +1341,7 @@ kiro_credit_unit_price_usd?: number
     upstream_billing_rate_sync_enabled?: boolean
     upstream_billing_probe?: UpstreamBillingProbeSnapshot
     iq_check_enabled?: boolean
+    iq_check_auto_disable?: boolean
     iq_check_model?: string
     iq_check_interval_minutes?: number
     iq_check_state?: IQCheckState

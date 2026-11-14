@@ -2933,7 +2933,7 @@
         </div>
       </div>
 
-      <!-- 降智检测：后端定时出题核对答案，连续两轮答错停调度（iq_check_service.go） -->
+      <!-- 降智检测：后端定时出题核对答案，自动模式下最近两轮错 3 题停调度（iq_check_service.go） -->
       <div
         v-if="account?.platform === 'openai'"
         class="space-y-3 border-t border-gray-200 pt-4 dark:border-dark-600"
@@ -2945,6 +2945,23 @@
             <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ t('admin.accounts.iqCheck.hint') }}</p>
           </div>
           <Toggle v-model="iqCheckEnabled" data-testid="iq-check-enabled" />
+        </div>
+        <p
+          v-if="iqCheckStoppedScheduling"
+          class="rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:bg-amber-900/20 dark:text-amber-300"
+          data-testid="iq-check-stopped-warning"
+        >
+          {{ t('admin.accounts.iqCheck.stoppedWarning') }}
+        </p>
+        <div v-if="iqCheckEnabled" class="flex flex-wrap gap-4 text-sm" role="radiogroup" :aria-label="t('admin.accounts.iqCheck.title')">
+          <label class="flex items-center gap-2">
+            <input v-model="iqCheckAutoDisable" type="radio" :value="false" data-testid="iq-check-mode-record" />
+            {{ t('admin.accounts.iqCheck.modes.record') }}
+          </label>
+          <label class="flex items-center gap-2">
+            <input v-model="iqCheckAutoDisable" type="radio" :value="true" data-testid="iq-check-mode-auto" />
+            {{ t('admin.accounts.iqCheck.modes.auto') }}
+          </label>
         </div>
         <div v-if="iqCheckEnabled" class="grid grid-cols-1 gap-3 sm:grid-cols-2">
           <div>
@@ -4575,13 +4592,17 @@ const openAIEndpointCapabilities = ref<OpenAIEndpointCapability[]>(['chat_comple
 const openaiOAuthResponsesWebSocketV2Mode = ref<OpenAIWSMode>(OPENAI_WS_MODE_OFF)
 const openaiAPIKeyResponsesWebSocketV2Mode = ref<OpenAIWSMode>(OPENAI_WS_MODE_OFF)
 const codexCLIOnlyEnabled = ref(false)
-// 降智检测配置（extra: iq_check_enabled / iq_check_model / iq_check_interval_minutes）。
+// 降智检测配置（extra: iq_check_enabled / iq_check_auto_disable / iq_check_model / iq_check_interval_minutes）。
 // 间隔范围与后端 iq_check_service.go 的取值范围一致。
 const IQ_CHECK_DEFAULT_INTERVAL = 60
 const IQ_CHECK_MIN_INTERVAL = 10
 const IQ_CHECK_MAX_INTERVAL = 1440
 const iqCheckEnabled = ref(false)
+// false = 只记录（默认），true = 自动停调度
+const iqCheckAutoDisable = ref(false)
 const iqCheckModel = ref('')
+// 检测停掉的调度只有检测自己或手动切换能恢复；关闭检测不会恢复。
+const iqCheckStoppedScheduling = computed(() => props.account?.extra?.iq_check_state?.disabled_by_check === true)
 const iqCheckInterval = ref<number | ''>(IQ_CHECK_DEFAULT_INTERVAL)
 const normalizeIQCheckInterval = (value: number | ''): number => {
   const minutes = typeof value === 'number' && Number.isFinite(value) ? Math.round(value) : IQ_CHECK_DEFAULT_INTERVAL
@@ -5107,6 +5128,7 @@ const syncFormFromAccount = (newAccount: Account | null) => {
   codexCLIOnlyEnabled.value = false
   codexCLIOnlyAppServerEnabled.value = false
   iqCheckEnabled.value = false
+  iqCheckAutoDisable.value = false
   iqCheckModel.value = ''
   iqCheckInterval.value = IQ_CHECK_DEFAULT_INTERVAL
   codexTelemetryEnabled.value = false
@@ -5129,6 +5151,7 @@ const syncFormFromAccount = (newAccount: Account | null) => {
     const iqModel = extra?.iq_check_model
     const iqInterval = extra?.iq_check_interval_minutes
     iqCheckEnabled.value = extra?.iq_check_enabled === true
+    iqCheckAutoDisable.value = extra?.iq_check_auto_disable === true
     iqCheckModel.value = typeof iqModel === 'string' ? iqModel : ''
     iqCheckInterval.value = typeof iqInterval === 'number' ? iqInterval : IQ_CHECK_DEFAULT_INTERVAL
     if (newAccount.type === 'apikey') {
@@ -6920,11 +6943,14 @@ const handleSubmit = async () => {
 
       if (iqCheckEnabled.value) {
         newExtra.iq_check_enabled = true
+        if (iqCheckAutoDisable.value) newExtra.iq_check_auto_disable = true
+        else delete newExtra.iq_check_auto_disable
         if (iqCheckModel.value.trim()) newExtra.iq_check_model = iqCheckModel.value.trim()
         else delete newExtra.iq_check_model
         newExtra.iq_check_interval_minutes = normalizeIQCheckInterval(iqCheckInterval.value)
       } else {
         delete newExtra.iq_check_enabled
+        delete newExtra.iq_check_auto_disable
         delete newExtra.iq_check_model
         delete newExtra.iq_check_interval_minutes
       }

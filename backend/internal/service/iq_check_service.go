@@ -16,10 +16,12 @@ import (
 // account form. The state key is written only by the check (and cleared by a
 // manual scheduling toggle); account edits never overwrite it.
 const (
-	IQCheckEnabledExtraKey  = "iq_check_enabled"
-	IQCheckModelExtraKey    = "iq_check_model"
-	IQCheckIntervalExtraKey = "iq_check_interval_minutes"
-	IQCheckStateExtraKey    = "iq_check_state"
+	IQCheckEnabledExtraKey = "iq_check_enabled"
+	// Without this key the check only records results and never stops scheduling.
+	IQCheckAutoDisableExtraKey = "iq_check_auto_disable"
+	IQCheckModelExtraKey       = "iq_check_model"
+	IQCheckIntervalExtraKey    = "iq_check_interval_minutes"
+	IQCheckStateExtraKey       = "iq_check_state"
 
 	IQCheckResultPassed  = "passed"
 	IQCheckResultFailed  = "failed"
@@ -28,25 +30,32 @@ const (
 	iqCheckDefaultIntervalMinutes = 60
 	iqCheckMinIntervalMinutes     = 10
 	iqCheckMaxIntervalMinutes     = 24 * 60
-	// Consecutive failed rounds before scheduling stops. One wrong answer may
-	// be an unlucky miss on a hard question; two in a row is a downgrade.
-	iqCheckFailuresToDisable = 2
-	iqCheckMaxConcurrent     = 4
-	iqCheckQuestionTimeout   = 4 * time.Minute
-	iqCheckCycleInterval     = time.Minute
-	iqCheckLeaderLockTTL     = 2 * time.Minute
-	iqCheckErrorMaxRunes     = 300
+	// Wrong answers across the last two rounds (four questions) that stop
+	// scheduling. A healthy model still misses a hard question now and then.
+	iqCheckWrongToDisable  = 3
+	iqCheckMaxConcurrent   = 4
+	iqCheckQuestionTimeout = 4 * time.Minute
+	iqCheckCycleInterval   = time.Minute
+	iqCheckLeaderLockTTL   = 2 * time.Minute
+	iqCheckErrorMaxRunes   = 300
 )
 
 // IQCheckState is the last check result stored under IQCheckStateExtraKey.
 type IQCheckState struct {
-	CheckedAt           *time.Time `json:"checked_at,omitempty"`
-	NextCheckAt         *time.Time `json:"next_check_at,omitempty"`
-	Result              string     `json:"result,omitempty"`
-	Correct             int        `json:"correct"`
-	Total               int        `json:"total"`
-	Error               string     `json:"error,omitempty"`
-	ConsecutiveFailures int        `json:"consecutive_failures"`
+	CheckedAt   *time.Time `json:"checked_at,omitempty"`
+	NextCheckAt *time.Time `json:"next_check_at,omitempty"`
+	Result      string     `json:"result,omitempty"`
+	Correct     int        `json:"correct"`
+	Total       int        `json:"total"`
+	Error       string     `json:"error,omitempty"`
+	// Wrong answers in the last round and in the last two rounds together.
+	LastRoundWrong int `json:"last_round_wrong"`
+	RecentWrong    int `json:"recent_wrong"`
+	// Cumulative answered and correct questions for StatsModel: the model's
+	// real accuracy, to judge the false-stop rate before stopping automatically.
+	Answered        int    `json:"answered"`
+	AnsweredCorrect int    `json:"answered_correct"`
+	StatsModel      string `json:"stats_model,omitempty"`
 	// DisabledByCheck marks that this check turned scheduling off, so only
 	// then may a passing round turn it back on.
 	DisabledByCheck bool   `json:"disabled_by_check"`
@@ -206,10 +215,12 @@ func (s *IQCheckService) acquireCycleLock(ctx context.Context, now time.Time) bo
 }
 
 type iqCheckRound struct {
-	result  string
-	correct int
-	total   int
-	err     string
+	result   string
+	total    int
+	answered int // Questions with an answer; request errors are not answers.
+	correct  int
+	wrong    int
+	err      string
 }
 
 func (s *IQCheckService) checkAccount(ctx context.Context, accountID int64, model string) {
@@ -251,7 +262,6 @@ func (s *IQCheckService) runRound(ctx context.Context, accountID int64, model st
 	}
 	wg.Wait()
 	round := iqCheckRound{result: IQCheckResultPassed, total: len(questions)}
-	wrong := false
 	for i := range questions {
 		switch {
 		case errs[i] != nil:
@@ -261,11 +271,12 @@ func (s *IQCheckService) runRound(ctx context.Context, accountID int64, model st
 		case correct[i]:
 			round.correct++
 		default:
-			wrong = true
+			round.wrong++
 		}
 	}
+	round.answered = round.correct + round.wrong
 	// A wrong answer is evidence even if the other request failed.
-	if wrong {
+	if round.wrong > 0 {
 		round.result = IQCheckResultFailed
 	} else if round.err != "" {
 		round.result = IQCheckResultUnknown
@@ -290,14 +301,19 @@ func (s *IQCheckService) apply(ctx context.Context, accountID int64, model strin
 		next := now.Add(time.Duration(iqCheckIntervalMinutes(account.Extra)) * time.Minute)
 		state.NextCheckAt = &next
 	}
+	if state.StatsModel != model {
+		// Accuracy of another model says nothing about this one.
+		state.Answered, state.AnsweredCorrect, state.StatsModel = 0, 0, model
+	}
+	autoDisable, _ := account.Extra[IQCheckAutoDisableExtraKey].(bool)
 	before := state
-	switch decideIQCheck(&state, account.Schedulable, iqCheckAccountExpired(account, now)) {
+	switch decideIQCheck(&state, round, autoDisable, account.Schedulable, iqCheckAccountExpired(account, now)) {
 	case iqCheckDisable:
 		if err := s.accounts.SetSchedulable(ctx, accountID, false); err != nil {
 			logger.LegacyPrintf("service.iq_check", "disable scheduling failed: account=%d err=%v", accountID, err)
 			state.DisabledByCheck = before.DisabledByCheck
 		} else {
-			logger.LegacyPrintf("service.iq_check", "scheduling disabled after %d failed rounds: account=%d", state.ConsecutiveFailures, accountID)
+			logger.LegacyPrintf("service.iq_check", "scheduling disabled after %d wrong answers in two rounds: account=%d", state.RecentWrong, accountID)
 		}
 	case iqCheckEnable:
 		if err := s.accounts.SetSchedulable(ctx, accountID, true); err != nil {
@@ -318,28 +334,35 @@ const (
 	iqCheckEnable
 )
 
-// decideIQCheck updates the state for the recorded result and returns the
-// scheduling change to make. Unknown results neither count nor reset failures.
-func decideIQCheck(state *IQCheckState, schedulable, expired bool) iqCheckDecision {
+// decideIQCheck folds the round into the state and returns the scheduling
+// change to make. A round without any answer (all requests failed) changes
+// nothing. Restoring does not depend on autoDisable: an account the check
+// turned off is turned back on even after switching to record-only.
+func decideIQCheck(state *IQCheckState, round iqCheckRound, autoDisable, schedulable, expired bool) iqCheckDecision {
 	if state.DisabledByCheck && schedulable {
 		// Someone turned scheduling back on: the check no longer owns it.
 		state.DisabledByCheck = false
-		state.ConsecutiveFailures = 0
+		state.LastRoundWrong, state.RecentWrong = 0, 0
 	}
-	switch state.Result {
-	case IQCheckResultPassed:
-		state.ConsecutiveFailures = 0
-		if state.DisabledByCheck && !expired {
+	if round.answered == 0 {
+		return iqCheckNoChange
+	}
+	state.RecentWrong = state.LastRoundWrong + round.wrong
+	state.LastRoundWrong = round.wrong
+	state.Answered += round.answered
+	state.AnsweredCorrect += round.correct
+	if state.DisabledByCheck {
+		if round.total > 0 && round.correct == round.total && !expired {
 			state.DisabledByCheck = false
+			state.LastRoundWrong, state.RecentWrong = 0, 0
 			return iqCheckEnable
 		}
-	case IQCheckResultFailed:
-		state.ConsecutiveFailures++
-		// An account that was already off was turned off by someone else; leave it to them.
-		if state.ConsecutiveFailures >= iqCheckFailuresToDisable && schedulable {
-			state.DisabledByCheck = true
-			return iqCheckDisable
-		}
+		return iqCheckNoChange
+	}
+	// An account that is already off was turned off by someone else; leave it to them.
+	if autoDisable && schedulable && state.RecentWrong >= iqCheckWrongToDisable {
+		state.DisabledByCheck = true
+		return iqCheckDisable
 	}
 	return iqCheckNoChange
 }
@@ -354,17 +377,17 @@ func (s *IQCheckService) writeState(ctx context.Context, accountID int64, state 
 
 // ReleaseIQCheckScheduling hands scheduling back to the operator after a
 // manual toggle: the check will not restore an account someone turned off,
-// and an account someone turned back on needs two new failed rounds.
+// and an account someone turned back on starts a fresh two-round window.
 func ReleaseIQCheckScheduling(ctx context.Context, accounts AccountRepository, account *Account) error {
 	if account == nil {
 		return nil
 	}
 	state := decodeIQCheckState(account.Extra)
-	if !state.DisabledByCheck && state.ConsecutiveFailures == 0 {
+	if !state.DisabledByCheck && state.LastRoundWrong == 0 && state.RecentWrong == 0 {
 		return nil
 	}
 	state.DisabledByCheck = false
-	state.ConsecutiveFailures = 0
+	state.LastRoundWrong, state.RecentWrong = 0, 0
 	value, err := iqCheckStateValue(state)
 	if err != nil {
 		return err

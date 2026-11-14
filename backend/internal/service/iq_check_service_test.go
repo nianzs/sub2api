@@ -81,6 +81,10 @@ func newIQCheckHarness(t *testing.T, accounts ...*Account) *iqCheckHarness {
 			return "", errors.New("upstream 502: bad gateway")
 		case "wrong":
 			return `{"count":4,"first":"RRUU","penalty":1,"assignments":["000001"]}`, nil
+		case "one":
+			if prompt == "path?" {
+				return `{"count":4,"first":"RRUU"}`, nil
+			}
 		}
 		if prompt == "path?" {
 			return `{"count":5,"first":"RRUU"}`, nil
@@ -100,45 +104,109 @@ func (h *iqCheckHarness) round(mode string) {
 
 func iqCheckTestAccount(id int64) *Account {
 	return &Account{ID: id, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Status: StatusActive, Schedulable: true,
-		Extra: map[string]any{IQCheckEnabledExtraKey: true}}
+		Extra: map[string]any{IQCheckEnabledExtraKey: true, IQCheckAutoDisableExtraKey: true}}
 }
 
-func TestIQCheckStopsSchedulingAfterTwoFailedRoundsAndRestoresOnPass(t *testing.T) {
+func (h *iqCheckHarness) state(t *testing.T) IQCheckState {
+	t.Helper()
+	return decodeIQCheckState(h.repo.account(t, 1).Extra)
+}
+
+func (h *iqCheckHarness) setExtra(key string, value any) {
+	h.repo.mu.Lock()
+	defer h.repo.mu.Unlock()
+	if value == nil {
+		delete(h.repo.accounts[1].Extra, key)
+		return
+	}
+	h.repo.accounts[1].Extra[key] = value
+}
+
+func TestIQCheckStopsAtThreeWrongInTwoRoundsAndRestoresOnCleanRound(t *testing.T) {
 	h := newIQCheckHarness(t, iqCheckTestAccount(1))
 
 	h.round("wrong")
-	state := decodeIQCheckState(h.repo.account(t, 1).Extra)
-	require.Equal(t, IQCheckResultFailed, state.Result)
-	require.Equal(t, 1, state.ConsecutiveFailures)
-	require.True(t, h.repo.account(t, 1).Schedulable, "one failed round must not stop scheduling")
+	require.Equal(t, IQCheckResultFailed, h.state(t).Result)
+	require.Equal(t, 2, h.state(t).RecentWrong)
+	require.True(t, h.repo.account(t, 1).Schedulable, "two wrong answers must not stop scheduling")
 
-	h.round("wrong")
-	state = decodeIQCheckState(h.repo.account(t, 1).Extra)
-	require.Equal(t, 2, state.ConsecutiveFailures)
-	require.True(t, state.DisabledByCheck)
+	h.round("one")
+	require.Equal(t, 3, h.state(t).RecentWrong)
+	require.True(t, h.state(t).DisabledByCheck)
 	require.False(t, h.repo.account(t, 1).Schedulable)
 
+	h.round("one")
+	require.False(t, h.repo.account(t, 1).Schedulable, "restoring needs a fully correct round")
+
 	h.round("right")
-	state = decodeIQCheckState(h.repo.account(t, 1).Extra)
+	state := h.state(t)
 	require.Equal(t, IQCheckResultPassed, state.Result)
-	require.Equal(t, 2, state.Correct)
-	require.Equal(t, 2, state.Total)
-	require.Zero(t, state.ConsecutiveFailures)
 	require.False(t, state.DisabledByCheck)
+	require.Zero(t, state.RecentWrong)
+	require.Equal(t, 8, state.Answered)
+	require.Equal(t, 4, state.AnsweredCorrect)
 	require.True(t, h.repo.account(t, 1).Schedulable)
 	require.Equal(t, []bool{false, true}, h.repo.schedulableCalls)
 }
 
-func TestIQCheckUnknownRoundNeitherCountsNorResets(t *testing.T) {
+func TestIQCheckOneWrongAnswerPerRoundNeverStops(t *testing.T) {
+	h := newIQCheckHarness(t, iqCheckTestAccount(1))
+	for i := 0; i < 4; i++ {
+		h.round("one")
+	}
+	require.Equal(t, 2, h.state(t).RecentWrong)
+	require.True(t, h.repo.account(t, 1).Schedulable)
+	require.Empty(t, h.repo.schedulableCalls)
+}
+
+func TestIQCheckRecordOnlyCountsButNeverStops(t *testing.T) {
+	account := iqCheckTestAccount(1)
+	delete(account.Extra, IQCheckAutoDisableExtraKey)
+	h := newIQCheckHarness(t, account)
+	h.round("wrong")
+	h.round("wrong")
+	h.round("right")
+	state := h.state(t)
+	require.Equal(t, 2, state.RecentWrong)
+	require.Equal(t, 6, state.Answered)
+	require.Equal(t, 2, state.AnsweredCorrect)
+	require.Empty(t, h.repo.schedulableCalls)
+}
+
+func TestIQCheckRestoresAfterSwitchingToRecordOnly(t *testing.T) {
+	h := newIQCheckHarness(t, iqCheckTestAccount(1))
+	h.round("wrong")
+	h.round("wrong")
+	require.False(t, h.repo.account(t, 1).Schedulable)
+	h.setExtra(IQCheckAutoDisableExtraKey, nil)
+	h.round("right")
+	require.True(t, h.repo.account(t, 1).Schedulable)
+	require.False(t, h.state(t).DisabledByCheck)
+}
+
+func TestIQCheckRoundWithoutAnswersKeepsTheWindow(t *testing.T) {
 	h := newIQCheckHarness(t, iqCheckTestAccount(1))
 	h.round("wrong")
 	h.round("error")
-	state := decodeIQCheckState(h.repo.account(t, 1).Extra)
+	state := h.state(t)
 	require.Equal(t, IQCheckResultUnknown, state.Result)
 	require.Equal(t, "upstream 502: bad gateway", state.Error)
-	require.Equal(t, 1, state.ConsecutiveFailures)
-	h.round("wrong")
+	require.Equal(t, 2, state.LastRoundWrong)
+	require.Equal(t, 2, state.Answered)
+	h.round("one")
 	require.False(t, h.repo.account(t, 1).Schedulable)
+}
+
+func TestIQCheckStatsRestartWhenTheModelChanges(t *testing.T) {
+	h := newIQCheckHarness(t, iqCheckTestAccount(1))
+	h.round("right")
+	require.Equal(t, 2, h.state(t).Answered)
+	h.setExtra(IQCheckModelExtraKey, "gpt-5.5")
+	h.round("one")
+	state := h.state(t)
+	require.Equal(t, "gpt-5.5", state.StatsModel)
+	require.Equal(t, 2, state.Answered)
+	require.Equal(t, 1, state.AnsweredCorrect)
 }
 
 func TestIQCheckClaimsAccountBeforeChecking(t *testing.T) {
@@ -148,8 +216,7 @@ func TestIQCheckClaimsAccountBeforeChecking(t *testing.T) {
 	h.svc.RunDue(context.Background()) // Same minute: not due again.
 	h.svc.wg.Wait()
 	require.EqualValues(t, 2, h.probes.Load())
-	state := decodeIQCheckState(h.repo.account(t, 1).Extra)
-	require.Equal(t, h.now.Add(60*time.Minute), *state.NextCheckAt)
+	require.Equal(t, h.now.Add(60*time.Minute), *h.state(t).NextCheckAt)
 }
 
 func TestIQCheckSkipsIneligibleAccounts(t *testing.T) {
@@ -190,16 +257,17 @@ func TestIQCheckManualToggleTakesOverScheduling(t *testing.T) {
 	admin := &adminServiceImpl{accountRepo: h.repo}
 	_, err := admin.SetAccountSchedulable(context.Background(), 1, false)
 	require.NoError(t, err)
-	require.False(t, decodeIQCheckState(h.repo.account(t, 1).Extra).DisabledByCheck)
+	require.False(t, h.state(t).DisabledByCheck)
+	require.Zero(t, h.state(t).RecentWrong)
 	h.round("right")
 	require.False(t, h.repo.account(t, 1).Schedulable)
 
-	// Turned back on by hand, it needs two new failed rounds to stop again.
+	// Turned back on by hand, it starts a fresh window.
 	_, err = admin.SetAccountSchedulable(context.Background(), 1, true)
 	require.NoError(t, err)
 	h.round("wrong")
 	require.True(t, h.repo.account(t, 1).Schedulable)
-	h.round("wrong")
+	h.round("one")
 	require.False(t, h.repo.account(t, 1).Schedulable)
 }
 
@@ -213,18 +281,18 @@ func TestIQCheckClearsOwnershipWhenSchedulingWasTurnedOnElsewhere(t *testing.T) 
 		account.Schedulable = true
 		return account
 	}()))
-	h.round("wrong")
-	state := decodeIQCheckState(h.repo.account(t, 1).Extra)
+	h.round("one")
+	state := h.state(t)
 	require.False(t, state.DisabledByCheck)
-	require.Equal(t, 1, state.ConsecutiveFailures)
+	require.Equal(t, 1, state.RecentWrong)
 	require.True(t, h.repo.account(t, 1).Schedulable)
 }
 
 func TestDecideIQCheckDoesNotRestoreExpiredAccounts(t *testing.T) {
-	state := IQCheckState{Result: IQCheckResultPassed, DisabledByCheck: true, ConsecutiveFailures: 2}
-	require.Equal(t, iqCheckNoChange, decideIQCheck(&state, false, true))
+	state := IQCheckState{DisabledByCheck: true, LastRoundWrong: 2, RecentWrong: 4}
+	round := iqCheckRound{result: IQCheckResultPassed, total: 2, answered: 2, correct: 2}
+	require.Equal(t, iqCheckNoChange, decideIQCheck(&state, round, true, false, true))
 	require.True(t, state.DisabledByCheck)
-	require.Zero(t, state.ConsecutiveFailures)
 }
 
 func TestIQCheckIntervalAndModelDefaults(t *testing.T) {

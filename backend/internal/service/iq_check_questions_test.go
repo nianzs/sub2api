@@ -47,6 +47,10 @@ func TestGradeIQCheckAnswer(t *testing.T) {
 		{"xor unordered assignments", xor, `{"penalty":3,"assignments":["110100","001011"]}`, true},
 		{"xor missing assignment", xor, `{"penalty":3,"assignments":["001011"]}`, false},
 		{"xor wrong penalty", xor, `{"penalty":2,"assignments":["001011","110100"]}`, false},
+		{"braces in the explanation", path, "思路：动作集合{R,U}，按{转向}计数。\n{\"count\":12,\"first\":\"RRURU\"}", true},
+		{"last complete object wins", path, `格式 {"count":0,"first":""}，答案 {"count":12,"first":"RRURU"}`, true},
+		{"trailing object without fields is ignored", path, `{"count":12,"first":"RRURU"} {"note":"done"}`, true},
+		{"xor after braces", xor, `{penalty} = 3: {"penalty":3,"assignments":["001011","110100"]}`, true},
 		{"not json", path, "12, RRURU", false},
 		{"empty", xor, "", false},
 	}

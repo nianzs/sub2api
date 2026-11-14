@@ -1174,7 +1174,7 @@ func reconcileCRSUpstreamBillingProbeExtra(
 		return
 	}
 	// The IQ check is configured here, not in CRS: keep its settings and last result.
-	for _, key := range []string{IQCheckEnabledExtraKey, IQCheckModelExtraKey, IQCheckIntervalExtraKey, IQCheckStateExtraKey} {
+	for _, key := range []string{IQCheckEnabledExtraKey, IQCheckAutoDisableExtraKey, IQCheckModelExtraKey, IQCheckIntervalExtraKey, IQCheckStateExtraKey} {
 		delete(extra, key)
 		if value, ok := existing.Extra[key]; ok {
 			extra[key] = value

@@ -50,40 +50,63 @@ func generateIQCheckQuestions(source io.Reader) ([]iqCheckQuestion, error) {
 }
 
 // gradeIQCheckAnswer reports whether the model output matches the reference.
-// Output that does not contain the requested JSON object counts as wrong.
+// The answer is the last JSON object in the output that has the required
+// fields, so stray braces in surrounding text do not spoil it. Output without
+// such an object counts as wrong: the question asks for JSON only.
 func gradeIQCheckAnswer(question iqCheckQuestion, output string) bool {
-	text := strings.TrimSpace(output)
-	start, end := strings.Index(text, "{"), strings.LastIndex(text, "}")
-	if start < 0 || end < start {
-		return false
-	}
-	raw := []byte(text[start : end+1])
 	switch expected := question.Expected.(type) {
 	case iqPathAnswer:
-		var got struct {
+		var answer struct {
 			Count *int   `json:"count"`
 			First string `json:"first"`
 		}
-		if json.Unmarshal(raw, &got) != nil || got.Count == nil {
+		if !lastIQCheckObject(output, func(raw json.RawMessage) bool {
+			answer.Count, answer.First = nil, ""
+			return json.Unmarshal(raw, &answer) == nil && answer.Count != nil
+		}) {
 			return false
 		}
-		return *got.Count == expected.Count && strings.TrimSpace(got.First) == expected.First
+		return *answer.Count == expected.Count && strings.TrimSpace(answer.First) == expected.First
 	case iqXORAnswer:
-		var got struct {
+		var answer struct {
 			Penalty     *int     `json:"penalty"`
 			Assignments []string `json:"assignments"`
 		}
-		if json.Unmarshal(raw, &got) != nil || got.Penalty == nil {
+		if !lastIQCheckObject(output, func(raw json.RawMessage) bool {
+			answer.Penalty, answer.Assignments = nil, nil
+			return json.Unmarshal(raw, &answer) == nil && answer.Penalty != nil && answer.Assignments != nil
+		}) {
 			return false
 		}
-		assignments := make([]string, len(got.Assignments))
-		for i, value := range got.Assignments {
+		assignments := make([]string, len(answer.Assignments))
+		for i, value := range answer.Assignments {
 			assignments[i] = strings.TrimSpace(value)
 		}
 		slices.Sort(assignments)
-		return *got.Penalty == expected.Penalty && slices.Equal(assignments, expected.Assignments)
+		return *answer.Penalty == expected.Penalty && slices.Equal(assignments, expected.Assignments)
 	}
 	return false
+}
+
+// lastIQCheckObject decodes a JSON value at every "{" in the output and leaves
+// the last one that accept takes in place. It reports whether any was taken.
+func lastIQCheckObject(output string, accept func(json.RawMessage) bool) bool {
+	// Answers are short and come last; bound the scan on runaway output.
+	const maxScan = 64 << 10
+	if len(output) > maxScan {
+		output = output[len(output)-maxScan:]
+	}
+	var last json.RawMessage
+	for i := 0; i < len(output); i++ {
+		if output[i] != '{' {
+			continue
+		}
+		var raw json.RawMessage
+		if json.NewDecoder(strings.NewReader(output[i:])).Decode(&raw) == nil && accept(raw) {
+			last = raw
+		}
+	}
+	return last != nil && accept(last)
 }
 
 type iqGridPoint struct{ X, Y int }

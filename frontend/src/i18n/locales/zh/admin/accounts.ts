@@ -128,20 +128,30 @@ export default {
       kiroUsageForbiddenHint: '该账号当前无法读取 Kiro Usage，但不代表转发一定不可用',
       iqCheck: {
         title: '降智检测',
-        hint: '定时用 2 道随机推理题检测账号，连续两轮答错自动停止调度，之后答对自动恢复。手动切换过调度后，检测不再恢复此前停掉的调度。',
+        hint: '定时用 2 道随机推理题检测。只记录：只统计结果。自动停调度：最近两轮 4 道题错 3 道及以上就停止调度，之后整轮答对自动恢复。',
         model: '检测模型',
         modelPlaceholder: '留空使用默认测试模型',
         interval: '检测间隔（分钟，10–1440）',
+        modes: {
+          record: '只记录',
+          auto: '自动停调度'
+        },
+        stoppedWarning: '该账号目前由降智检测停止调度。关闭检测不会恢复调度，需要手动打开。',
         status: {
           pending: '待检测',
           passed: '正常',
-          suspect: '疑似降智 {count}/{limit}',
+          wrong: '答错 {wrong}/{total}',
+          triggered: '达到降智条件',
           disabled: '已降智·已停调度',
           unknown: '未知'
         },
         details: {
+          mode: '模式：{mode}',
+          off: '检测已关闭',
           checkedAt: '最近检测：{time}',
-          score: '答对 {correct}/{total}',
+          score: '本轮答对 {correct}/{total}',
+          recent: '最近两轮错 {wrong}/4',
+          accuracy: '累计答对 {correct}/{answered}（{percent}%）',
           model: '模型：{model}',
           error: '错误：{error}',
           nextCheckAt: '下次检测：{time}'

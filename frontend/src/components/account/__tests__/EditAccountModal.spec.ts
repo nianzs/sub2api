@@ -2529,30 +2529,46 @@ describe('EditAccountModal IQ check', () => {
 
   afterEach(() => vi.clearAllMocks())
 
-  it('turns the IQ check on with a model and a clamped interval, leaving its state to the backend', async () => {
+  it('turns the IQ check on in record-only mode with a model and a clamped interval', async () => {
     const account = buildAccount()
     account.type = 'oauth'
-    account.extra = { iq_check_state: { result: 'failed', disabled_by_check: true } }
+    account.extra = { iq_check_state: { result: 'failed' } }
     updateAccountMock.mockResolvedValue(account)
 
     const wrapper = mountModal(account)
     expect(wrapper.find('[data-testid="iq-check-model"]').exists()).toBe(false)
     await wrapper.get('[data-testid="iq-check-enabled"]').trigger('click')
+    expect((wrapper.get('[data-testid="iq-check-mode-record"]').element as HTMLInputElement).checked).toBe(true)
     await wrapper.get('[data-testid="iq-check-model"]').setValue(' gpt-5.5 ')
     await wrapper.get('[data-testid="iq-check-interval"]').setValue('5')
     await wrapper.get('form#edit-account-form').trigger('submit.prevent')
 
     const extra = updateAccountMock.mock.calls[0]?.[1]?.extra
     expect(extra).toMatchObject({ iq_check_enabled: true, iq_check_model: 'gpt-5.5', iq_check_interval_minutes: 10 })
+    expect(extra).not.toHaveProperty('iq_check_auto_disable')
+    wrapper.unmount()
+  })
+
+  it('saves the auto-stop mode', async () => {
+    const account = buildAccount()
+    account.extra = { iq_check_enabled: true }
+    updateAccountMock.mockResolvedValue(account)
+
+    const wrapper = mountModal(account)
+    await wrapper.get('[data-testid="iq-check-mode-auto"]').setValue(true)
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+
+    expect(updateAccountMock.mock.calls[0]?.[1]?.extra).toMatchObject({ iq_check_enabled: true, iq_check_auto_disable: true })
     wrapper.unmount()
   })
 
   it('loads the saved settings and removes them when the check is turned off', async () => {
     const account = buildAccount()
-    account.extra = { iq_check_enabled: true, iq_check_model: 'gpt-5.5', iq_check_interval_minutes: 30 }
+    account.extra = { iq_check_enabled: true, iq_check_auto_disable: true, iq_check_model: 'gpt-5.5', iq_check_interval_minutes: 30 }
     updateAccountMock.mockResolvedValue(account)
 
     const wrapper = mountModal(account)
+    expect((wrapper.get('[data-testid="iq-check-mode-auto"]').element as HTMLInputElement).checked).toBe(true)
     expect((wrapper.get('[data-testid="iq-check-model"]').element as HTMLInputElement).value).toBe('gpt-5.5')
     expect((wrapper.get('[data-testid="iq-check-interval"]').element as HTMLInputElement).value).toBe('30')
     await wrapper.get('[data-testid="iq-check-enabled"]').trigger('click')
@@ -2560,9 +2576,22 @@ describe('EditAccountModal IQ check', () => {
 
     const extra = updateAccountMock.mock.calls[0]?.[1]?.extra
     expect(extra).not.toHaveProperty('iq_check_enabled')
+    expect(extra).not.toHaveProperty('iq_check_auto_disable')
     expect(extra).not.toHaveProperty('iq_check_model')
     expect(extra).not.toHaveProperty('iq_check_interval_minutes')
     wrapper.unmount()
+  })
+
+  it('warns that turning the check off does not restore an account it stopped', () => {
+    const account = buildAccount()
+    account.extra = { iq_check_state: { result: 'failed', disabled_by_check: true } }
+    const wrapper = mountModal(account)
+    expect(wrapper.find('[data-testid="iq-check-stopped-warning"]').exists()).toBe(true)
+    wrapper.unmount()
+
+    const healthy = mountModal(buildAccount())
+    expect(healthy.find('[data-testid="iq-check-stopped-warning"]').exists()).toBe(false)
+    healthy.unmount()
   })
 
   it('shows the IQ check only for OpenAI accounts', () => {

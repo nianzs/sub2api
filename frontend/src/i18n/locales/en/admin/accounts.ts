@@ -295,20 +295,30 @@ export default {
       },
       iqCheck: {
         title: 'IQ check',
-        hint: 'Periodically asks the account 2 random reasoning questions. Two failed rounds in a row stop scheduling; a later passing round turns it back on. After you toggle scheduling by hand, the check no longer restores scheduling it had stopped.',
+        hint: 'Periodically asks 2 random reasoning questions. Record only: just tracks results. Auto stop: 3 or more wrong answers across the last two rounds (4 questions) stop scheduling; a later fully correct round turns it back on.',
         model: 'Check model',
         modelPlaceholder: 'Leave empty for the default test model',
         interval: 'Interval (minutes, 10–1440)',
+        modes: {
+          record: 'Record only',
+          auto: 'Auto stop scheduling'
+        },
+        stoppedWarning: 'The IQ check has stopped scheduling for this account. Turning the check off does not turn scheduling back on; do that by hand.',
         status: {
           pending: 'Pending',
           passed: 'Normal',
-          suspect: 'Suspected {count}/{limit}',
+          wrong: 'Wrong {wrong}/{total}',
+          triggered: 'Downgrade threshold reached',
           disabled: 'Downgraded · scheduling stopped',
           unknown: 'Unknown'
         },
         details: {
+          mode: 'Mode: {mode}',
+          off: 'Check is off',
           checkedAt: 'Last check: {time}',
-          score: 'Correct {correct}/{total}',
+          score: 'This round: {correct}/{total} correct',
+          recent: 'Wrong in last two rounds: {wrong}/4',
+          accuracy: 'Total correct: {correct}/{answered} ({percent}%)',
           model: 'Model: {model}',
           error: 'Error: {error}',
           nextCheckAt: 'Next check: {time}'
