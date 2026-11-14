@@ -458,14 +458,6 @@ func buildAccountForCreate(input *CreateAccountInput, accountExtra map[string]an
 				return nil, err
 			}
 		}
-		if isLeonardoCookieAccount(account) {
-			if err := ValidateLeonardoCreditUnitPriceFromExtra(account.Extra); err != nil {
-				return nil, err
-			}
-			if err := ValidateLeonardoImageLimitsFromExtra(account.Extra); err != nil {
-				return nil, err
-			}
-		}
 		if isFishTokenAccount(account) {
 			if err := ValidateFishMaxQualityFromExtra(account.Extra); err != nil {
 				return nil, err
@@ -757,14 +749,6 @@ func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *U
 		ComputeQuotaResetAt(account.Extra)
 		if isKiroDirectModeAccount(account) {
 			if err := ValidateKiroCreditUnitPriceFromExtra(account.Extra); err != nil {
-				return nil, err
-			}
-		}
-		if isLeonardoCookieAccount(account) {
-			if err := ValidateLeonardoCreditUnitPriceFromExtra(account.Extra); err != nil {
-				return nil, err
-			}
-			if err := ValidateLeonardoImageLimitsFromExtra(account.Extra); err != nil {
 				return nil, err
 			}
 		}

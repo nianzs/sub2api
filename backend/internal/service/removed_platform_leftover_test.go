@@ -9,15 +9,24 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// removedPlatformForTest was once registered; old migrations still allow it in
-// the DB CHECK constraints, so rows may survive in existing databases.
-const removedPlatformForTest = "adobe"
+// removedPlatformsForTest were once registered, so rows may survive in existing
+// databases (old migrations still allow adobe in the DB CHECK constraints;
+// leonardo was only ever validated in the application).
+var removedPlatformsForTest = []string{"adobe", "leonardo"}
 
 // A leftover OAuth account on a removed platform must behave as if it did not
 // exist: it is not treated as a concrete platform, does not get a default
 // model mapping, is never sent to another provider's API, and new accounts on
 // that platform are rejected.
 func TestRemovedPlatformLeftoverAccountIsInert(t *testing.T) {
+	for _, platform := range removedPlatformsForTest {
+		t.Run(platform, func(t *testing.T) {
+			testRemovedPlatformLeftoverAccountIsInert(t, platform)
+		})
+	}
+}
+
+func testRemovedPlatformLeftoverAccountIsInert(t *testing.T, removedPlatformForTest string) {
 	leftover := &Account{
 		ID:          9301,
 		Platform:    removedPlatformForTest,

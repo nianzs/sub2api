@@ -55,7 +55,7 @@ const (
 	fishFailureResultUnavailable  = GatewayFailureReason("fish_result_unavailable")
 )
 
-// fishFailure 是 pkg/fish 的错误翻译成网关语义后的结果（镜像 leonardoFailure）。
+// fishFailure 是 pkg/fish 的错误翻译成网关语义后的结果。
 type fishFailure struct {
 	Failover       *UpstreamFailoverError
 	Cooldown       time.Duration
@@ -471,4 +471,12 @@ func applyFishAccountError(ctx context.Context, repo AccountRepository, accountI
 			zap.Error(err),
 		)
 	}
+}
+
+// statusOrDefault 取错误携带的上游状态码，缺失时用 fallback。
+func statusOrDefault(status, fallback int) int {
+	if status > 0 {
+		return status
+	}
+	return fallback
 }

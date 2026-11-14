@@ -155,7 +155,7 @@
               <span class="font-medium text-gray-900 dark:text-white">{{ row.image_count }}{{ t('usage.imageUnit') }}</span>
               <span class="text-gray-400">({{ formatImageBillingSize(row, t) }})</span>
             </div>
-            <!-- 按张计费但上游（或估算）带了 token 用量时一并显示，如 Leonardo 的积分估算 -->
+            <!-- 按张计费但上游（或估算）带了 token 用量时一并显示 -->
             <div v-if="(row.input_tokens ?? 0) > 0 || (row.output_tokens ?? 0) > 0" class="flex items-center gap-2" data-testid="image-usage-tokens">
               <div class="inline-flex items-center gap-1">
                 <Icon name="arrowDown" size="sm" class="h-3.5 w-3.5 text-emerald-500" />
@@ -549,7 +549,7 @@
                 }).toFixed(8) }}
               </span>
             </div>
-            <!-- 本次消耗的上游积分（Kiro / Leonardo）及按账号单价估算的成本 -->
+            <!-- 本次消耗的上游积分（Kiro）及按账号单价估算的成本 -->
             <div v-if="(tooltipData?.upstream_credits ?? 0) > 0" class="flex items-center justify-between gap-6" data-testid="usage-upstream-credits">
               <span class="text-gray-400">{{ t('usage.upstreamCredits') }}</span>
               <span class="font-semibold text-amber-300">
@@ -655,7 +655,7 @@ const appStore = useAppStore()
 const copiedRequestId = ref<string | null>(null)
 const showAccountBilling = props.showAccountBilling
 
-// 上游积分最多保留 2 位小数（Kiro credits 有小数，Leonardo 积分为整数）。
+// 上游积分最多保留 2 位小数（Kiro credits 有小数）。
 const formatUpstreamCredits = (value: number | null | undefined): string =>
   Number(value ?? 0).toLocaleString(undefined, { maximumFractionDigits: 2 })
 const showUpstreamEndpoint = props.showUpstreamEndpoint

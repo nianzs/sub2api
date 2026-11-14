@@ -50,9 +50,8 @@ var FishPixelSizes = []string{
 }
 
 // gpt-image 的交付尺寸上限（OpenAI gpt-image-2 图片生成指南：长边 ≤ 3840，
-// 总像素 ≤ 8,294,400）。上游没有查询接口，只能写死；pkg/leonardo 同理写死
-// 了同一个像素上限。超限的 size 不走原生号（也就不会本地放大到超大图），
-// 由 FishRequiresRelay 交给中转号，上游自行判定。
+// 总像素 ≤ 8,294,400）。上游没有查询接口，只能写死。超限的 size 不走原生号
+// （也就不会本地放大到超大图），由 FishRequiresRelay 交给中转号，上游自行判定。
 const (
 	GPTImageMaxEdge   = 3840
 	GPTImageMaxPixels = 8_294_400

@@ -1037,9 +1037,9 @@
         </div>
       </div>
 
-      <!-- OpenAI / Kiro / Grok / Leonardo OAuth Model Mapping (OAuth 类型没有 apikey 容器，需要独立区域) -->
+      <!-- OpenAI / Kiro / Grok OAuth Model Mapping (OAuth 类型没有 apikey 容器，需要独立区域) -->
       <div
-        v-if="(account.platform === 'openai' || account.platform === 'kiro' || account.platform === 'grok' || account.platform === 'leonardo') && account.type === 'oauth'"
+        v-if="(account.platform === 'openai' || account.platform === 'kiro' || account.platform === 'grok') && account.type === 'oauth'"
         class="border-t border-gray-200 pt-4 dark:border-dark-600"
         :data-testid="account.platform === 'grok' ? 'grok-model-settings' : 'oauth-model-mapping-section'"
       >
@@ -1266,57 +1266,6 @@
           data-testid="kiro-credit-unit-price-usd"
         />
         <p class="input-hint">{{ t('admin.accounts.kiroCreditUnitPriceUsdHint') }}</p>
-      </div>
-
-      <!-- Leonardo Cookie 账号的每积分单价：仅用于今日统计估算积分消耗金额，不参与计费 -->
-      <div v-if="isLeonardoCookieAccount" class="border-t border-gray-200 pt-4 dark:border-dark-600">
-        <label class="input-label">{{ t('admin.accounts.leonardoCreditUnitPriceUsd') }}</label>
-        <input
-          v-model.number="leonardoCreditUnitPriceUsd"
-          type="number"
-          min="0"
-          step="0.0001"
-          class="input"
-          placeholder="0"
-          data-testid="leonardo-credit-unit-price-usd"
-        />
-        <p class="input-hint">{{ t('admin.accounts.leonardoCreditUnitPriceUsdHint') }}</p>
-      </div>
-
-      <!-- Leonardo Cookie 账号的出图上限：超过时按上限出图，再超分回请求尺寸，按交付尺寸计费 -->
-      <div v-if="isLeonardoCookieAccount" class="space-y-3 border-t border-gray-200 pt-4 dark:border-dark-600" data-testid="leonardo-image-limits">
-        <div>
-          <label class="input-label">{{ t('admin.accounts.leonardoMaxQuality') }}</label>
-          <Select v-model="leonardoImageLimits.maxQuality" :options="leonardoMaxQualityOptions" data-testid="leonardo-max-quality" />
-        </div>
-        <div class="grid grid-cols-2 gap-3">
-          <div>
-            <label class="input-label">{{ t('admin.accounts.leonardoMaxShortEdge') }}</label>
-            <input
-              v-model.number="leonardoImageLimits.maxShortEdge"
-              type="number"
-              min="0"
-              step="16"
-              class="input"
-              placeholder="0"
-              data-testid="leonardo-max-short-edge"
-            />
-          </div>
-          <div>
-            <label class="input-label">{{ t('admin.accounts.leonardoMaxUpscaleFactor') }}</label>
-            <input
-              v-model.number="leonardoImageLimits.maxUpscaleFactor"
-              type="number"
-              min="1"
-              max="4"
-              step="0.1"
-              class="input"
-              placeholder="2"
-              data-testid="leonardo-max-upscale-factor"
-            />
-          </div>
-        </div>
-        <p class="input-hint">{{ t('admin.accounts.leonardoImageLimitsHint') }}</p>
       </div>
 
       <!-- Upstream fields (only for upstream type) -->
@@ -3693,13 +3642,6 @@ import type {
 import BaseDialog from '@/components/common/BaseDialog.vue'
 import ConfirmDialog from '@/components/common/ConfirmDialog.vue'
 import Select from '@/components/common/Select.vue'
-import {
-  LEONARDO_MAX_QUALITY_VALUES,
-  applyLeonardoImageLimitsToExtra,
-  defaultLeonardoImageLimits,
-  leonardoImageLimitsFromExtra,
-  type LeonardoImageLimitsForm
-} from '@/utils/leonardoImageLimits'
 import { FISH_MAX_QUALITY_VALUES, applyFishMaxQualityToExtra, fishMaxQualityFromExtra } from '@/utils/fishImageLimits'
 import HelpTooltip from '@/components/common/HelpTooltip.vue'
 import UpstreamRequestIdHeaderField from '@/components/account/UpstreamRequestIdHeaderField.vue'
@@ -3955,8 +3897,6 @@ const isKiroRelay = computed(() => isKiroRelayAccount(props.account))
 // Kiro 直连 API Key 账号(apikey + 无 base_url):仅这类账号的推理区域由 api_region 控制。
 // OAuth/IdC 账号的 region 是 Identity Center 区域,不参与推理路由,故不展示本字段。
 const isKiroDirectApiKey = computed(() => isKiroDirectApiKeyAccount(props.account))
-// Leonardo Cookie 账号(oauth)消耗 Leonardo 积分;中转账号(apikey)不消耗,故只对前者展示积分单价。
-const isLeonardoCookieAccount = computed(() => props.account?.platform === 'leonardo' && props.account?.type === 'oauth')
 // Fish：凭据里有 base_url = 中转号；没有 base_url = 原生号（密钥在 api_key）。
 const isFishRelayEdit = computed(() => {
   const credentials = (props.account?.credentials as Record<string, unknown>) || {}
@@ -3990,12 +3930,6 @@ const editBaseUrl = ref('https://api.anthropic.com')
 const editApiKey = ref('')
 const editKiroAPIRegion = ref('us-east-1')
 const kiroCreditUnitPriceUsd = ref(0)
-const leonardoCreditUnitPriceUsd = ref(0)
-const leonardoImageLimits = ref<LeonardoImageLimitsForm>(defaultLeonardoImageLimits())
-const leonardoMaxQualityOptions = computed(() => [
-  { value: '', label: t('admin.accounts.leonardoMaxQualityUnlimited') },
-  ...LEONARDO_MAX_QUALITY_VALUES.map((value) => ({ value, label: value }))
-])
 const fishMaxQuality = ref('')
 const fishMaxQualityOptions = computed(() => [
   { value: '', label: t('admin.accounts.fishMaxQualityUnlimited') },
@@ -5039,13 +4973,6 @@ const syncFormFromAccount = (newAccount: Account | null) => {
     : typeof kiroCreditUnitPrice === 'string'
       ? Number(kiroCreditUnitPrice) || 0
       : 0
-  const leonardoCreditUnitPrice = extra?.leonardo_credit_unit_price_usd
-  leonardoCreditUnitPriceUsd.value = typeof leonardoCreditUnitPrice === 'number'
-    ? leonardoCreditUnitPrice
-    : typeof leonardoCreditUnitPrice === 'string'
-      ? Number(leonardoCreditUnitPrice) || 0
-      : 0
-  leonardoImageLimits.value = leonardoImageLimitsFromExtra(extra as Record<string, unknown> | undefined)
   fishMaxQuality.value = fishMaxQualityFromExtra(extra as Record<string, unknown> | undefined)
   autoPause5hThreshold.value = typeof extra?.auto_pause_5h_threshold === 'number' ? extra.auto_pause_5h_threshold * 100 : null
   autoPause7dThreshold.value = typeof extra?.auto_pause_7d_threshold === 'number' ? extra.auto_pause_7d_threshold * 100 : null
@@ -5439,7 +5366,7 @@ const syncFormFromAccount = (newAccount: Account | null) => {
       loadModelRestrictionFromMapping(oauthCredentials.model_mapping as Record<string, unknown> | undefined, {
         kiroDirect: true
       })
-    } else if ((newAccount.platform === 'openai' || newAccount.platform === 'grok' || newAccount.platform === 'leonardo') && newAccount.credentials) {
+    } else if ((newAccount.platform === 'openai' || newAccount.platform === 'grok') && newAccount.credentials) {
       const oauthCredentials = newAccount.credentials as Record<string, unknown>
       loadModelRestrictionFromMapping(oauthCredentials.model_mapping as Record<string, unknown> | undefined)
     } else {
@@ -6452,23 +6379,6 @@ const handleSubmit = async () => {
       updatePayload.credentials = newCredentials
     }
 
-    // Leonardo OAuth: persist model restriction to credentials
-    // 白名单与映射行都空 => 删掉 model_mapping，回落到后端默认映射。
-    if (props.account.platform === 'leonardo' && props.account.type === 'oauth') {
-      const currentCredentials = (updatePayload.credentials as Record<string, unknown>) ||
-        ((props.account.credentials as Record<string, unknown>) || {})
-      const newCredentials: Record<string, unknown> = { ...currentCredentials }
-
-      const modelMapping = buildModelRestrictionMapping()
-      if (modelMapping) {
-        newCredentials.model_mapping = modelMapping
-      } else {
-        delete newCredentials.model_mapping
-      }
-
-      updatePayload.credentials = newCredentials
-    }
-
     // OpenAI/Grok OAuth: persist model mapping to credentials
     if ((props.account.platform === 'openai' || props.account.platform === 'grok') && props.account.type === 'oauth') {
       const currentCredentials = isSparkShadow.value
@@ -6514,16 +6424,6 @@ const handleSubmit = async () => {
       const unitPrice = Number(kiroCreditUnitPriceUsd.value ?? 0)
       newExtra.kiro_credit_unit_price_usd = Number.isFinite(unitPrice) ? unitPrice : 0
       updatePayload.extra = newExtra
-    }
-
-    // 仅 Leonardo Cookie 账号持久化积分单价;中转账号(apikey)转发到外部上游,不消耗 Leonardo 积分。
-    if (isLeonardoCookieAccount.value) {
-      const currentExtra = (updatePayload.extra as Record<string, unknown>) ||
-        (props.account.extra as Record<string, unknown>) || {}
-      const newExtra: Record<string, unknown> = { ...currentExtra }
-      const unitPrice = Number(leonardoCreditUnitPriceUsd.value ?? 0)
-      newExtra.leonardo_credit_unit_price_usd = Number.isFinite(unitPrice) ? unitPrice : 0
-      updatePayload.extra = applyLeonardoImageLimitsToExtra(newExtra, leonardoImageLimits.value)
     }
 
     // Fish 原生号的最大质量。中转号原样转发，不写这个上限。

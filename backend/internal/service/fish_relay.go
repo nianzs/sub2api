@@ -7,7 +7,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/domain"
 )
 
-// fish 中转账号的凭据键（镜像 Leonardo 中转）。
+// fish 中转账号的凭据键。
 const (
 	fishCredentialRelayBaseURL = "base_url"
 	fishCredentialRelayAPIKey  = "api_key"

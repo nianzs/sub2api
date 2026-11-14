@@ -39,9 +39,6 @@ const (
 	// PlatformCline 是 Cline API（多模型聚合，OpenAI 兼容 Chat Completions；按量积分计费，
 	// 另有 ClinePass 订阅）。
 	PlatformCline = "cline"
-	// PlatformLeonardo 是 Leonardo.ai 图片生成平台（OpenAI Images 兼容端点；
-	// 原生 Cookie 账号直连网页版 GraphQL 协议，另支持 OpenAI Images 形中转账号兜底）。
-	PlatformLeonardo = "leonardo"
 	// PlatformFish 是 fish.audio 图片生成平台（OpenAI Images 兼容端点；
 	// 账号为网页会话 Bearer token，直连 api.fish.audio 的 image-video 工具协议）。
 	PlatformFish      = "fish"

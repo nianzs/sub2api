@@ -51,9 +51,6 @@ func RegisterGatewayRoutes(
 		return domain.UsesOpenAIGateway(getGroupPlatform(c))
 	}
 	countTokensHandler := func(c *gin.Context) {
-		if rejectImagesOnlyPlatformTextEndpoint(c) {
-			return
-		}
 		switch platform := getGroupPlatform(c); {
 		case platform == service.PlatformGrok:
 			h.OpenAIGateway.GrokCountTokens(c)
@@ -82,8 +79,6 @@ func RegisterGatewayRoutes(
 			h.OpenAIGateway.Images(c)
 		case service.PlatformGrok:
 			h.OpenAIGateway.GrokImages(c)
-		case service.PlatformLeonardo:
-			h.Gateway.LeonardoImages(c)
 		case service.PlatformFish:
 			h.Gateway.FishImages(c)
 		default:
@@ -197,9 +192,6 @@ func RegisterGatewayRoutes(
 	{
 		// /v1/messages: auto-route based on group platform
 		gateway.POST("/messages", func(c *gin.Context) {
-			if rejectImagesOnlyPlatformTextEndpoint(c) {
-				return
-			}
 			if isOpenAIResponsesCompatibleGatewayPlatform(c) {
 				h.OpenAIGateway.Messages(c)
 				return
@@ -222,9 +214,6 @@ func RegisterGatewayRoutes(
 		gateway.GET("/live/:call_id", h.OpenAIGateway.LiveSideband)
 		// OpenAI Responses API: auto-route based on group platform
 		gateway.POST("/responses", func(c *gin.Context) {
-			if rejectImagesOnlyPlatformTextEndpoint(c) {
-				return
-			}
 			if isOpenAIResponsesCompatibleGatewayPlatform(c) {
 				h.OpenAIGateway.Responses(c)
 				return
@@ -232,9 +221,6 @@ func RegisterGatewayRoutes(
 			h.Gateway.Responses(c)
 		})
 		gateway.POST("/responses/*subpath", guardResponsesSubpath(func(c *gin.Context) {
-			if rejectImagesOnlyPlatformTextEndpoint(c) {
-				return
-			}
 			if isOpenAIResponsesCompatibleGatewayPlatform(c) {
 				h.OpenAIGateway.Responses(c)
 				return
@@ -247,9 +233,6 @@ func RegisterGatewayRoutes(
 		})
 		// OpenAI Chat Completions API: auto-route based on group platform
 		gateway.POST("/chat/completions", func(c *gin.Context) {
-			if rejectImagesOnlyPlatformTextEndpoint(c) {
-				return
-			}
 			if isOpenAIResponsesCompatibleGatewayPlatform(c) {
 				h.OpenAIGateway.ChatCompletions(c)
 				return
@@ -378,9 +361,6 @@ func RegisterGatewayRoutes(
 
 	// OpenAI Responses API（不带v1前缀的别名）— auto-route based on group platform
 	responsesHandler := func(c *gin.Context) {
-		if rejectImagesOnlyPlatformTextEndpoint(c) {
-			return
-		}
 		if isOpenAIResponsesCompatibleGatewayPlatform(c) {
 			h.OpenAIGateway.Responses(c)
 			return
@@ -421,9 +401,6 @@ func RegisterGatewayRoutes(
 	}
 	// OpenAI Chat Completions API（不带v1前缀的别名）— auto-route based on group platform
 	rootRoute(http.MethodPost, "/chat/completions", bodyLimit, func(c *gin.Context) {
-		if rejectImagesOnlyPlatformTextEndpoint(c) {
-			return
-		}
 		if isOpenAIResponsesCompatibleGatewayPlatform(c) {
 			h.OpenAIGateway.ChatCompletions(c)
 			return
@@ -569,24 +546,6 @@ func getGroupPlatform(c *gin.Context) string {
 		}
 	}
 	return apiKey.Group.Platform
-}
-
-// rejectImagesOnlyPlatformTextEndpoint 拦截纯出图平台（Leonardo）分组的文本协议
-// 请求。Leonardo 在平台清单里挂在 Anthropic 网关下，不拦截的话 Messages/Chat/
-// Responses 会选中 Leonardo 账号，把 Cookie 换来的 JWT（或中转 API Key）当作
-// Claude 凭据转发出去。返回 true 表示已写错误响应。
-func rejectImagesOnlyPlatformTextEndpoint(c *gin.Context) bool {
-	if getGroupPlatform(c) != service.PlatformLeonardo {
-		return false
-	}
-	service.MarkOpsClientBusinessLimited(c, service.OpsClientBusinessLimitedReasonLocalFeatureGate)
-	c.JSON(http.StatusNotFound, gin.H{
-		"error": gin.H{
-			"type":    "not_found_error",
-			"message": "This platform only supports the Images API (/v1/images/generations and /v1/images/edits)",
-		},
-	})
-	return true
 }
 
 func compositeTargetPlatformMiddleware(resolver *service.CompositeRouteResolver) gin.HandlerFunc {

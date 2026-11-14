@@ -1313,10 +1313,6 @@ export interface Account {
     model_rate_limits?: Record<string, { rate_limited_at: string; rate_limit_reset_at: string }>
     antigravity_credits_overages?: Record<string, { activated_at: string; active_until: string }>
 kiro_credit_unit_price_usd?: number
-    leonardo_credit_unit_price_usd?: number
-    leonardo_max_quality?: string
-    leonardo_max_short_edge?: number
-    leonardo_max_upscale_factor?: number
     fish_max_quality?: string
     upstream_billing_probe_enabled?: boolean
     upstream_billing_rate_sync_enabled?: boolean
@@ -1535,18 +1531,6 @@ export interface KiroOverageInfo {
   currency_symbol?: string
 }
 
-// Leonardo 积分余额快照：上游只给各池剩余量，上限来自套餐常量表（未知套餐时为 0）
-export interface LeonardoCreditsSnapshot {
-  total: number
-  usable?: number
-  subscription: number
-  paid: number
-  rollover: number
-  fast_limit?: number
-  rollover_limit?: number
-  fast_daily?: boolean
-}
-
 export interface GrokQuotaWindow {
   limit?: number | null
   remaining?: number | null
@@ -1648,12 +1632,6 @@ export interface AccountUsageInfo {
   fish_credits?: KiroCreditProgress | null
   fish_daily?: KiroCreditProgress | null
   fish_reset_at?: string | null
-
-  // Leonardo 积分余额快照
-  leonardo_plan?: string | null
-  leonardo_plan_name?: string | null
-  leonardo_credits?: LeonardoCreditsSnapshot | null
-  leonardo_token_renewal?: string | null
 
   // Antigravity 403 forbidden 状态
   is_forbidden?: boolean
@@ -2020,7 +1998,7 @@ export interface AdminUsageLog extends UsageLog {
   account_rate_multiplier?: number | null
   // 自定义定价规则计算的账号统计费用（nil 时使用 total_cost * multiplier）
   account_stats_cost?: number | null
-  // 本次消耗的上游积分（Kiro credits / Leonardo 积分，仅管理员可见）
+  // 本次消耗的上游积分（Kiro credits，仅管理员可见）
   upstream_credits?: number | null
   // 按账号当前积分单价估算的上游成本（USD，未设单价时为空）
   upstream_credit_cost?: number | null

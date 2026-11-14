@@ -42,7 +42,7 @@ const (
 )
 
 // fishClientCache 按账号缓存带代理的客户端实例（连接复用；客户端无状态，
-// 按代理指纹缓存即可）。代理变化时重建。镜像 leonardoClientCache。
+// 按代理指纹缓存即可）。代理变化时重建。
 type fishClientCache struct {
 	mu      sync.Mutex
 	clients map[int64]*fishClientEntry
@@ -88,8 +88,7 @@ var (
 type FishImageService struct {
 	clients        *fishClientCache
 	resolveStorage ImageStorageResolver
-	// inputClient 抓取参考图源图（复用 leonardo_image_input.go 的
-	// SSRF 三层防护客户端）。
+	// inputClient 抓取参考图源图（image_input_fetch.go 的 SSRF 三层防护客户端）。
 	inputClient *http.Client
 }
 
@@ -98,7 +97,7 @@ func NewFishImageService(resolveStorage ImageStorageResolver) *FishImageService 
 	return &FishImageService{
 		clients:        &fishClientCache{},
 		resolveStorage: resolveStorage,
-		inputClient:    newLeonardoInputImageClient(),
+		inputClient:    newInputImageClient(),
 	}
 }
 
@@ -119,8 +118,8 @@ type FishImageResult struct {
 	Usage json.RawMessage
 }
 
-// fishInputImage 是一张待上传的参考图（复用 leonardoInputImage 形状）。
-type fishInputImage = leonardoInputImage
+// fishInputImage 是一张待上传的参考图。
+type fishInputImage = inputImage
 
 // FishImageCall 跨账号切换保持的请求级状态：参考图只取一次；已交付的图
 // 与剩余张数在换号续跑间累计——重跑只生成缺口，绝不重生成已交付图（防双扣）。
@@ -628,7 +627,7 @@ func fishLooseQuality(call *FishImageCall) string {
 	return quality
 }
 
-// fishDeliveredSize 返回交付给客户的实际尺寸（镜像 leonardoDeliveredSize）：
+// fishDeliveredSize 返回交付给客户的实际尺寸：
 // 优先读首张最终图的像素（裁剪缩放失败退回原图时如实变化），读不到时取
 // plan 的目标尺寸。
 func fishDeliveredSize(images [][]byte, plan *domain.FishSizePlan) string {
@@ -785,7 +784,7 @@ func (s *FishImageService) loadInputs(ctx context.Context, call *FishImageCall) 
 			inputs = append(inputs, &fishInputImage{Data: upload.Data, ContentType: upload.ContentType})
 		}
 		for _, rawURL := range call.Request.InputImageURLs {
-			input, err := fetchLeonardoInputImage(ctx, s.inputClient, rawURL)
+			input, err := fetchInputImage(ctx, s.inputClient, rawURL)
 			if err != nil {
 				call.inputsErr = err
 				return

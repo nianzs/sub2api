@@ -18,9 +18,7 @@ import (
 
 // FishImages 处理 fish.audio 分组下的 /v1/images/generations 与 /v1/images/edits。
 //
-// 结构照 LeonardoImages，但去掉中转分支——fish 上游不是 OpenAI 线协议，
-// 全部账号都是 token 原生号。选号走平台无关的
-// SelectAccountForModelWithExclusions 自建 failover。
+// 选号走平台无关的 SelectAccountForModelWithExclusions 自建 failover。
 func (h *GatewayHandler) FishImages(c *gin.Context) {
 	apiKey, ok := middleware2.GetAPIKeyFromContext(c)
 	if !ok {
@@ -128,7 +126,7 @@ func (h *GatewayHandler) fishImageFitLimits(ctx context.Context) domain.FishFitL
 	return h.settingService.GetFishImageFitLimits(ctx)
 }
 
-// admitFishImagesRequest 与 Leonardo 出图一致的准入：全局出图并发槽 →
+// admitFishImagesRequest 与 OpenAI/Grok 出图一致的准入：全局出图并发槽 →
 // 用户并发槽 → 计费资格。
 func (h *GatewayHandler) admitFishImagesRequest(
 	c *gin.Context,
@@ -165,7 +163,7 @@ func (h *GatewayHandler) admitFishImagesRequest(
 		return nil, false
 	}
 	// 槽位持有到 handler 返回（提交后上游与客户端脱钩），由 Redis TTL 兜底。
-	if userRelease = leonardoReleaseOnce(userRelease); userRelease != nil {
+	if userRelease = imageReleaseOnce(userRelease); userRelease != nil {
 		releases = append(releases, userRelease)
 	}
 
@@ -196,7 +194,7 @@ func (h *GatewayHandler) acquireFishImageSlot(c *gin.Context) (func(), bool) {
 const fishImagesMaxSelectionRounds = 64
 
 // runFishImagesFailover 逐个账号尝试出图，直到成功或没有可换的账号。
-// stream=true 走假流式（与 Leonardo 同一套 leonardoFakeStream）。
+// stream=true 走假流式（imagesFakeStream）。
 func (h *GatewayHandler) runFishImagesFailover(
 	c *gin.Context,
 	reqLog *zap.Logger,
@@ -216,12 +214,12 @@ func (h *GatewayHandler) runFishImagesFailover(
 	}
 
 	// 保活：stream=true 假流式；非流式 JSON 空白保活（配置 0 关闭）。
-	var fakeStream *leonardoFakeStream
+	var fakeStream *imagesFakeStream
 	if parsed.Stream {
-		fakeStream = startLeonardoFakeStream(c, h.leonardoImageStreamKeepaliveInterval())
+		fakeStream = startImagesFakeStream(c, h.imageStreamKeepaliveInterval())
 		defer fakeStream.stop()
 	} else {
-		stopJSONKeepalive := service.StartOpenAIImagesJSONKeepalive(c, h.leonardoImageNonstreamKeepaliveInterval())
+		stopJSONKeepalive := service.StartOpenAIImagesJSONKeepalive(c, h.imageNonstreamKeepaliveInterval())
 		defer stopJSONKeepalive()
 	}
 
@@ -236,7 +234,7 @@ func (h *GatewayHandler) runFishImagesFailover(
 		}
 
 		excluded := service.FishRelaySelectionExclusions(
-			mergeLeonardoAccountIDSets(failedAccountIDs, busyAccountIDs), requireRelay, deferredNatives)
+			mergeAccountIDSets(failedAccountIDs, busyAccountIDs), requireRelay, deferredNatives)
 		if requireRelay {
 			h.gatewayService.ExcludeFishNativeAccounts(requestCtx, apiKey.GroupID, excluded)
 		}
@@ -292,7 +290,7 @@ func (h *GatewayHandler) runFishImagesFailover(
 			busyAccountIDs[account.ID] = struct{}{}
 			continue
 		}
-		releaseAccount = leonardoReleaseOnce(releaseAccount)
+		releaseAccount = imageReleaseOnce(releaseAccount)
 		if releaseAccount == nil {
 			releaseAccount = func() {}
 		}
@@ -428,7 +426,7 @@ func (h *GatewayHandler) finishFishImagesPartialSuccess(
 		fishImagesError(c, http.StatusBadGateway, "api_error", "Upstream request failed")
 		return
 	}
-	if fakeStream := leonardoFakeStreamFromContext(c); fakeStream != nil {
+	if fakeStream := imagesFakeStreamFromContext(c); fakeStream != nil {
 		fakeStream.writeEvents(service.FishImagesStreamEvents(req.parsed, result))
 	} else {
 		c.Data(http.StatusOK, "application/json", result.Body)
@@ -493,7 +491,7 @@ func (h *GatewayHandler) finishFishImagesSuccess(
 		fishImagesError(c, http.StatusBadGateway, "api_error", "Upstream request failed")
 		return
 	}
-	if fakeStream := leonardoFakeStreamFromContext(c); fakeStream != nil {
+	if fakeStream := imagesFakeStreamFromContext(c); fakeStream != nil {
 		fakeStream.writeEvents(service.FishImagesStreamEvents(req.parsed, result))
 	} else {
 		c.Data(http.StatusOK, "application/json", result.Body)
@@ -581,7 +579,7 @@ func fishImagesFailoverError(c *gin.Context, failover *service.UpstreamFailoverE
 }
 
 func fishImagesError(c *gin.Context, status int, errType, message string) {
-	if fakeStream := leonardoFakeStreamFromContext(c); fakeStream != nil && fakeStream.failIfCommitted(errType, "", message) {
+	if fakeStream := imagesFakeStreamFromContext(c); fakeStream != nil && fakeStream.failIfCommitted(errType, "", message) {
 		return
 	}
 	if service.IsResponseCommitted(c) {
@@ -590,8 +588,8 @@ func fishImagesError(c *gin.Context, status int, errType, message string) {
 	c.JSON(status, gin.H{"error": gin.H{"type": errType, "message": message, "param": nil, "code": nil}})
 }
 
-// tryFishImagesRelay 把 OpenAI Images 形状的请求原样转发到中转号的 base_url
-// （镜像 tryLeonardoImagesRelay）。done=true 表示已经给客户端写了成功或终态
+// tryFishImagesRelay 把 OpenAI Images 形状的请求原样转发到中转号的 base_url。
+// done=true 表示已经给客户端写了成功或终态
 // 错误；switched=true 表示应换下一个账号。
 func (h *GatewayHandler) tryFishImagesRelay(
 	c *gin.Context,

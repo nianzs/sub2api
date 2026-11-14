@@ -117,7 +117,7 @@ func newGatewayModelsHandlerForTest(repo service.AccountRepository, routeRepo ..
 			nil, // httpUpstream
 			nil, // deferredService
 			nil, // claudeTokenProvider
-			nil, nil,
+			nil,
 			// kiroTokenProvider
 			nil, nil, nil, // kiroCooldownStore
 			nil,      // sessionLimitCache
@@ -2018,33 +2018,38 @@ func TestGatewayModels_CompositeCodexRouteLookupErrorKeepsFallback(t *testing.T)
 }
 
 // A group left on a removed platform (old migrations still allow "adobe" in the
-// CHECK constraint) must not advertise any models, and its leftover accounts
-// must not leak their mappings into the list.
+// CHECK constraint; "leonardo" was only validated in the application) must not
+// advertise any models, and its leftover accounts must not leak their mappings
+// into the list.
 func TestGatewayModels_RemovedPlatformGroupListsNothing(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
-	groupID := int64(21)
-	h := newGatewayModelsHandlerForTest(
-		&gatewayModelsAccountRepoStub{
-			byGroup: map[int64][]service.Account{
-				groupID: {{ID: 1, Platform: "adobe", Credentials: map[string]any{
-					"model_mapping": map[string]any{"gpt-image-2": "firefly-gpt-image-2"},
-				}}},
-			},
-		},
-	)
+	for _, platform := range []string{"adobe", "leonardo"} {
+		t.Run(platform, func(t *testing.T) {
+			groupID := int64(21)
+			h := newGatewayModelsHandlerForTest(
+				&gatewayModelsAccountRepoStub{
+					byGroup: map[int64][]service.Account{
+						groupID: {{ID: 1, Platform: platform, Credentials: map[string]any{
+							"model_mapping": map[string]any{"gpt-image-2": "upstream-gpt-image-2"},
+						}}},
+					},
+				},
+			)
 
-	rec := httptest.NewRecorder()
-	c, _ := gin.CreateTestContext(rec)
-	c.Request = httptest.NewRequest(http.MethodGet, "/v1/models", nil)
-	c.Set(string(middleware2.ContextKeyAPIKey), &service.APIKey{
-		Group: &service.Group{ID: groupID, Platform: "adobe"},
-	})
+			rec := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(rec)
+			c.Request = httptest.NewRequest(http.MethodGet, "/v1/models", nil)
+			c.Set(string(middleware2.ContextKeyAPIKey), &service.APIKey{
+				Group: &service.Group{ID: groupID, Platform: platform},
+			})
 
-	h.Models(c)
+			h.Models(c)
 
-	require.Equal(t, http.StatusOK, rec.Code)
-	var got gatewayModelsResponseForTest
-	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &got))
-	require.Empty(t, got.Data)
+			require.Equal(t, http.StatusOK, rec.Code)
+			var got gatewayModelsResponseForTest
+			require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &got))
+			require.Empty(t, got.Data)
+		})
+	}
 }

@@ -131,9 +131,6 @@ func NewTokenRefreshService(
 		grokOAuthService = grokOAuthServices[0]
 	}
 	grokRefresher := NewGrokTokenRefresher(grokOAuthService)
-	// Leonardo 没有 refresh_token：长期凭据是账号里的浏览器 cookie，刷新器不依赖任何
-	// OAuth service，故直接构造。
-	leonardoRefresher := NewLeonardoTokenRefresher()
 
 	// Each provider is registered exactly once. The same registry supplies both
 	// execution and repository eligibility, preventing future platform drift.
@@ -144,22 +141,9 @@ func NewTokenRefreshService(
 		{platform: PlatformAntigravity, refresher: agRefresher, executor: agRefresher},
 		{platform: PlatformKiro, refresher: kiroRefresher, executor: kiroRefresher},
 		{platform: PlatformGrok, refresher: grokRefresher, executor: grokRefresher},
-		{platform: PlatformLeonardo, refresher: leonardoRefresher, executor: leonardoRefresher},
 	}
 
 	return s
-}
-
-// cookieCredentialRefreshPlatforms 返回 platforms 中以 cookie 作为长期凭据的平台。
-// 这些平台没有 refresh_token，候选查询须改为要求 cookie，否则后台永远刷不到它们。
-func cookieCredentialRefreshPlatforms(platforms []string) []string {
-	var out []string
-	for _, platform := range platforms {
-		if platform == PlatformLeonardo {
-			out = append(out, platform)
-		}
-	}
-	return out
 }
 
 func (s *TokenRefreshService) eligiblePlatforms() []string {
@@ -540,21 +524,19 @@ func (s *TokenRefreshService) processRefreshContext(parent context.Context) {
 
 	stats := tokenRefreshPageStats{}
 	afterID := s.candidateAfterID()
-	cookiePlatforms := cookieCredentialRefreshPlatforms(platforms)
 	for {
 		if ctx.Err() != nil {
 			slog.Warn("token_refresh.cycle_stopped", "error", ctx.Err(), "resume_after_id", afterID)
 			break
 		}
 		page, err := pager.ListOAuthRefreshCandidatePage(ctx, OAuthRefreshPageOptions{
-			Platforms:                 platforms,
-			AfterID:                   afterID,
-			Limit:                     pageSize,
-			ActiveOnly:                true,
-			IncludeSetupToken:         true,
-			RequireRefreshToken:       true,
-			CookieCredentialPlatforms: cookiePlatforms,
-			ExcludeRetryCooldown:      true,
+			Platforms:            platforms,
+			AfterID:              afterID,
+			Limit:                pageSize,
+			ActiveOnly:           true,
+			IncludeSetupToken:    true,
+			RequireRefreshToken:  true,
+			ExcludeRetryCooldown: true,
 		})
 		if err != nil {
 			slog.Error("token_refresh.list_accounts_failed", "error", err, "after_id", afterID)
@@ -1008,9 +990,8 @@ func (s *TokenRefreshService) refreshWithRetryWithRateGate(
 		if isNonRetryableRefreshError(err) {
 			errorMsg := "Token refresh failed (non-retryable): " + logredact.RedactText(err.Error())
 			isGrokOAuth := account.IsGrokOAuth()
-			// Grok / Leonardo 走条件置错，可能因凭据已变而跳过，通知推迟到确认落库之后。
-			isLeonardo := account.Platform == PlatformLeonardo
-			if !isGrokOAuth && !isLeonardo {
+			// Grok 走条件置错，可能因凭据已变而跳过，通知推迟到确认落库之后。
+			if !isGrokOAuth {
 				s.notifyAccountSchedulingBlocked(account, time.Time{}, "token_refresh_non_retryable")
 			}
 			s.clearAntigravityForceTokenRefresh(ctx, account, "non_retryable")
@@ -1034,13 +1015,6 @@ func (s *TokenRefreshService) refreshWithRetryWithRateGate(
 						slog.Info("token_refresh.grok_error_status_skipped_stale_credentials", "account_id", account.ID)
 						return errRefreshSkipped
 					}
-				}
-			} else if isLeonardo {
-				// cookie 在 get-session 往返期间被管理员替换时，旧 cookie 的失效结论不能隔离新 cookie。
-				persistentlyBlocked, setErr = setLeonardoCookieRefreshError(ctx, s.accountRepo, account, errorMsg)
-				if setErr == nil && !persistentlyBlocked {
-					slog.Info("token_refresh.leonardo_error_status_skipped_cookie_changed", "account_id", account.ID)
-					return errRefreshSkipped
 				}
 			} else {
 				setErr = s.accountRepo.SetError(ctx, account.ID, errorMsg)

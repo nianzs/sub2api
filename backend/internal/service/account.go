@@ -750,8 +750,6 @@ func defaultModelMappingForPlatform(platform string) map[string]string {
 		return domain.DefaultAntigravityModelMapping
 	case domain.PlatformKiro:
 		return domain.DefaultKiroModelMapping
-	case domain.PlatformLeonardo:
-		return domain.DefaultLeonardoModelMapping
 	case domain.PlatformFish:
 		return domain.DefaultFishModelMapping
 	default:
@@ -1002,11 +1000,8 @@ func (a *Account) isModelMappingSupported(requestedModel string) bool {
 	if a.IsOpenAIPassthroughEnabled() {
 		return true
 	}
-	// Leonardo 只服务平台已实现的模型（首期仅 gpt-image-2），自定义映射也绕不过去。
-	if a.Platform == PlatformLeonardo {
-		return leonardoAccountSupportsModel(a, requestedModel)
-	}
-	// fish 同理：token 原生号与中转号都只承接 fish 公共名（gpt-image 家族）。
+	// fish 的 token 原生号与中转号都只承接 fish 公共名（gpt-image 家族），
+	// 自定义映射也绕不过去。
 	if a.Platform == PlatformFish {
 		return fishAccountSupportsModel(a, requestedModel)
 	}
@@ -1559,9 +1554,9 @@ func (a *Account) IsOpenAIApiKey() bool {
 // 适用 openai、国产 OpenAI 兼容供应商（kimi/zhipu/deepseek）与 OpenCode Go；
 // grok 走 GetGrokBaseURL，此处对 grok 返回 "" 以保持原有行为。
 func (a *Account) GetOpenAIBaseURL() string {
-	// Leonardo / fish 中转号借用 OpenAI Images 转发链路做分组兜底，必须返回它
+	// fish 中转号借用 OpenAI Images 转发链路做分组兜底，必须返回它
 	// 自己的 base_url，否则会落到 api.openai.com。
-	if isLeonardoRelayAccount(a) || isFishRelayAccount(a) {
+	if isFishRelayAccount(a) {
 		return strings.TrimRight(strings.TrimSpace(a.GetCredential("base_url")), "/")
 	}
 	if !a.IsOpenAI() && !a.IsMultiProtocolAPIKey() {
@@ -1905,7 +1900,7 @@ func (a *Account) GetOpenAIProtocolAPIKey() string {
 	if a == nil {
 		return ""
 	}
-	if isLeonardoRelayAccount(a) || isFishRelayAccount(a) {
+	if isFishRelayAccount(a) {
 		return a.GetCredential("api_key")
 	}
 	if a.IsMultiProtocolAPIKey() {
@@ -2476,9 +2471,8 @@ func (a *Account) IsAnthropicAPIKeyPassthroughEnabled() bool {
 }
 
 // CreditUnitPriceUSD returns the account-level USD price per upstream credit used
-// for display-only cost estimates (Kiro: extra.kiro_credit_unit_price_usd, Leonardo:
-// extra.leonardo_credit_unit_price_usd). Unset, non-numeric or non-positive values
-// yield 0.
+// for display-only cost estimates (Kiro: extra.kiro_credit_unit_price_usd).
+// Unset, non-numeric or non-positive values yield 0.
 func (a *Account) CreditUnitPriceUSD() float64 {
 	if a == nil || a.Extra == nil {
 		return 0
@@ -2487,8 +2481,6 @@ func (a *Account) CreditUnitPriceUSD() float64 {
 	switch a.Platform {
 	case PlatformKiro:
 		key = "kiro_credit_unit_price_usd"
-	case PlatformLeonardo:
-		key = "leonardo_credit_unit_price_usd"
 	default:
 		return 0
 	}
@@ -2516,12 +2508,6 @@ func (a *Account) CreditUnitPriceUSD() float64 {
 // ValidateKiroCreditUnitPriceFromExtra rejects invalid account-level Kiro credit pricing.
 func ValidateKiroCreditUnitPriceFromExtra(extra map[string]any) error {
 	return validateCreditUnitPriceFromExtra(extra, "kiro_credit_unit_price_usd")
-}
-
-// ValidateLeonardoCreditUnitPriceFromExtra rejects invalid account-level Leonardo
-// credit pricing (USD per Leonardo credit; display-only today-stats estimate).
-func ValidateLeonardoCreditUnitPriceFromExtra(extra map[string]any) error {
-	return validateCreditUnitPriceFromExtra(extra, "leonardo_credit_unit_price_usd")
 }
 
 // validateCreditUnitPriceFromExtra checks extra[key] is a finite number >= 0 and

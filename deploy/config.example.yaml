@@ -578,11 +578,6 @@ gateway:
   # Non-streaming Images JSON keepalive interval (seconds), 0=disable; commits HTTP 200 after the first heartbeat
   # 图片非流式 JSON keepalive 间隔（秒），0=禁用；首个心跳后 HTTP 状态会固化为 200
   image_nonstream_keepalive_interval: 0
-  # Leonardo native accounts report no token usage; usage is estimated as credits spent x this ratio
-  # (output tokens per credit), 0=omit usage. 34 is derived from gpt-image-1's published token table.
-  # Leonardo 原生号不报 token 用量，按扣除积分 × 该比例估算 usage（每积分多少输出 token），0=不返回 usage；
-  # 34 由 gpt-image-1 官方 token 表推出，可用 OpenAI 渠道的真实 usage 校准
-  leonardo_usage_tokens_per_credit: 34
   # Image generation independent concurrency limiter (process-local, default disabled)
   # 图片生成独立并发限制（进程级，默认关闭；多实例总上限约为实例数×该值）
   image_concurrency:

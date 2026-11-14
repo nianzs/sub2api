@@ -14,7 +14,7 @@ func TestProvideAccountUsageServicePreservesKiroAndAgentIdentityDependencies(t *
 
 	svc := ProvideAccountUsageService(
 		nil, nil, nil, nil, nil, nil, nil, nil,
-		NewUsageCache(), nil, nil, gateway, kiro, nil,
+		NewUsageCache(), nil, nil, gateway, kiro,
 	)
 
 	require.Equal(t, kiro, svc.kiroTokenProvider)
@@ -26,7 +26,7 @@ func TestProvideAccountTestServicePreservesKiroAndAgentIdentityDependencies(t *t
 	gateway := &OpenAIGatewayService{}
 
 	svc := ProvideAccountTestService(
-		nil, nil, nil, kiro, nil, nil, nil, nil, nil, nil, gateway, nil, nil,
+		nil, nil, nil, kiro, nil, nil, nil, nil, nil, gateway, nil, nil,
 	)
 
 	require.Equal(t, kiro, svc.kiroTokenProvider)
