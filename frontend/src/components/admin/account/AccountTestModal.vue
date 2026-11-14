@@ -6,7 +6,6 @@
     @close="handleClose"
   >
     <div class="space-y-4">
-      <AccountTestEvidence v-if="upstreamEvidence" :evidence="upstreamEvidence" />
       <!-- Account Info Card -->
       <div
         v-if="account"
@@ -369,8 +368,6 @@
 import { computed, ref, watch, nextTick } from 'vue'
 import { useI18n } from 'vue-i18n'
 import BaseDialog from '@/components/common/BaseDialog.vue'
-import AccountTestEvidence from './AccountTestEvidence.vue'
-import type { AccountTestUpstreamEvidence } from '@/types/accountTestEvidence'
 import Select from '@/components/common/Select.vue'
 import TextArea from '@/components/common/TextArea.vue'
 import { Icon } from '@/components/icons'
@@ -416,9 +413,7 @@ const generatedImages = ref<PreviewMedia[]>([])
 const generatedAudios = ref<PreviewMedia[]>([])
 const generatedVideos = ref<PreviewMedia[]>([])
 const previewImageUrl = ref('')
-const testMode = ref<'default' | 'compact' | 'bps_tools'>('default')
-// BPS 测试回传的上游证据（HTTP 状态、request id、错误码与脱敏后的错误消息）
-const upstreamEvidence = ref<AccountTestUpstreamEvidence | null>(null)
+const testMode = ref<'default' | 'compact'>('default')
 const grokTestMode = ref<'text' | 'image' | 'video' | 'search' | 'tts' | 'stt' | 'realtime'>('text')
 const uploadImageDataURL = ref('')
 const uploadImagePreview = ref('')
@@ -429,18 +424,10 @@ const imageFileInput = ref<HTMLInputElement | null>(null)
 const audioFileInput = ref<HTMLInputElement | null>(null)
 const isOpenAIAccount = computed(() => props.account?.platform === 'openai')
 const isGrokAccount = computed(() => props.account?.platform === 'grok')
-// BPS-only (BPS OAuth) accounts are tested on the BPS route (the default test
-// follows it), so they get the BPS tool probe instead of the native-only compact probe.
-const isBPSAccount = computed(() => isOpenAIAccount.value && props.account?.type === 'bps-oauth')
-const openAITestModeOptions = computed(() => isBPSAccount.value
-  ? [
-      { value: 'default', label: t('admin.accounts.openai.testModeDefault') },
-      { value: 'bps_tools', label: t('admin.accounts.openai.testModeBPSTools') }
-    ]
-  : [
-      { value: 'default', label: t('admin.accounts.openai.testModeDefault') },
-      { value: 'compact', label: t('admin.accounts.openai.testModeCompact') }
-    ])
+const openAITestModeOptions = computed(() => [
+  { value: 'default', label: t('admin.accounts.openai.testModeDefault') },
+  { value: 'compact', label: t('admin.accounts.openai.testModeCompact') }
+])
 const grokTestModeOptions = computed(() => [
   { value: 'text', label: t('admin.accounts.grok.testModeText') },
   { value: 'image', label: t('admin.accounts.grok.testModeImage') },
@@ -821,7 +808,6 @@ const loadAvailableModels = async () => {
 
 const resetState = () => {
   status.value = 'idle'
-  upstreamEvidence.value = null
   outputLines.value = []
   streamingContent.value = ''
   errorMessage.value = ''
@@ -970,11 +956,6 @@ const startTest = async () => {
 
 const handleEvent = (event: {
   type: string
-  upstream_status?: number
-  upstream_model?: string
-  request_id?: string
-  upstream_error_code?: string
-  upstream_error_message?: string
   text?: string
   model?: string
   success?: boolean
@@ -985,18 +966,6 @@ const handleEvent = (event: {
   mime_type?: string
 }) => {
   switch (event.type) {
-    case 'upstream_response':
-      if (event.upstream_status && event.upstream_status >= 100 && event.upstream_status <= 599) {
-        upstreamEvidence.value = {
-          status: event.upstream_status,
-          model: event.upstream_model,
-          requestId: event.request_id,
-          errorCode: event.upstream_error_code,
-          errorMessage: event.upstream_error_message
-        }
-      }
-      break
-
     case 'test_start':
       addLine(t('admin.accounts.connectedToApi'), 'text-green-400')
       if (event.model) {

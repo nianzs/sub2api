@@ -64,9 +64,6 @@ func (s *OpenAIGatewayService) ForwardAsChatCompletions(
 	// 遥测回合收尾放在这层非递归 wrapper：forwardAsChatCompletions 会尾递归重入
 	// 自己（agent identity task recovery），在内层注册会让重试各自收尾。
 	defer finishCodexTelemetryTurn(c)
-	if account.IsBPSOAuth() {
-		return nil, newBPSUnsupportedInboundFailoverError()
-	}
 	return s.forwardAsChatCompletions(ctx, c, account, body, promptCacheKey, defaultMappedModel, false)
 }
 

@@ -1,5 +1,4 @@
 import { getProviderProfile } from '@/constants/platformCatalog'
-import { DEFAULT_EXCEL_BPS_MODELS } from '@/constants/account'
 
 // =====================
 // 模型列表（硬编码，与 new-api 一致）
@@ -684,18 +683,6 @@ export function getPresetMappingsByPlatform(platform: string) {
   if (platform === 'fish') return fishPresetMappings
   if (platform === 'bedrock') return bedrockPresetMappings
   return anthropicPresetMappings
-}
-
-// BPS OAuth 账号只服务 BPS 模型：快速添加只给默认 BPS 模型（from = to），颜色沿用 OpenAI 预设。
-export function getBPSPresetMappings() {
-  return DEFAULT_EXCEL_BPS_MODELS.map(model =>
-    openaiPresetMappings.find(preset => preset.from === model && preset.to === model) ?? {
-      label: model,
-      from: model,
-      to: model,
-      color: 'bg-gray-100 text-gray-700 hover:bg-gray-200 dark:bg-dark-600 dark:text-gray-300'
-    }
-  )
 }
 
 // =====================

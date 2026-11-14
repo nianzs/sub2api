@@ -813,10 +813,6 @@ func (s *AccountTestService) fetchUpstreamModelListRequest(ctx context.Context, 
 		models, err := s.fetchKiroDirectUpstreamModels(ctx, account)
 		return models, nil, nil, err
 	}
-	if account.IsBPSOAuth() {
-		models, body, err := s.fetchExcelBPSUpstreamModels(ctx, account)
-		return models, body, nil, err
-	}
 
 	if s.httpUpstream == nil {
 		return nil, nil, nil, newUpstreamModelSyncConfigError("Upstream HTTP client is not configured", nil)

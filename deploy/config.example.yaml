@@ -245,9 +245,6 @@ gateway:
   # Share Kiro cache emulation prefix state via Redis across instances (default false)
   # Kiro 缓存模拟的前缀命中状态通过 Redis 跨实例共享；关闭时各实例独立模拟
   kiro_cache_emulation_redis_enabled: false
-  # Share Excel BPS replay/catalog state via Redis across instances (default false)
-  # Excel BPS 的回放与模型目录状态通过 Redis 跨实例共享；关闭时各实例独立维护
-  excel_bps_state_redis_enabled: false
   # Timeout for waiting upstream response headers (seconds)
   # 等待上游响应头超时时间（秒）
   response_header_timeout: 600
@@ -566,9 +563,6 @@ gateway:
   # Stream data interval timeout (seconds), 0=disable
   # 流数据间隔超时（秒），0=禁用
   stream_data_interval_timeout: 180
-  # Excel BPS stream data interval timeout (seconds), 0=disable, otherwise 30-300 (default 120)
-  # Excel BPS 流数据间隔超时（秒），0=禁用，否则取 30-300（默认 120）
-  excel_bps_stream_data_interval_timeout: 120
   # Stream keepalive interval (seconds), 0=disable
   # 流式 keepalive 间隔（秒），0=禁用
   stream_keepalive_interval: 10

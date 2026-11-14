@@ -20,7 +20,6 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/openai"
 	"github.com/Wei-Shaw/sub2api/internal/platform/liveattestation"
-	"github.com/Wei-Shaw/sub2api/internal/service/basispoints"
 	"github.com/Wei-Shaw/sub2api/internal/util/responseheaders"
 	"github.com/cespare/xxhash/v2"
 	"github.com/gin-gonic/gin"
@@ -509,9 +508,6 @@ type OpenAIGatewayService struct {
 	responseHeaderFilter                *responseheaders.CompiledHeaderFilter
 	codexSnapshotThrottle               *accountWriteThrottle
 	openAIModelsCache                   openAIModelsCache
-	excelBPSModelCooldowns              excelBPSModelCooldowns
-	excelBPSCooldownUntil               sync.Map // key: int64(accountID), value: time.Time
-	excelBPSAttachments                 basispoints.AttachmentCache
 	openaiCompatSessionResponses        sessionMemoryCache
 	openaiCompatAnthropicDigestSessions sessionMemoryCache
 	// openaiCodexTurnStateOrigins: 下游会话 seed → openAICodexTurnStateOrigin，
@@ -1269,21 +1265,6 @@ func (s *OpenAIGatewayService) GetAccessToken(ctx context.Context, account *Acco
 			return accessToken, "oauth", nil
 		}
 		// 降级：TokenProvider 未配置时直接从账号读取
-		accessToken := account.GetOpenAIAccessToken()
-		if accessToken == "" {
-			return "", "", errors.New("access_token not found in credentials")
-		}
-		return accessToken, "oauth", nil
-	case AccountTypeBPSOAuth:
-		// BPS-only accounts hold Excel-client OAuth credentials maintained by the
-		// same OpenAI token lifecycle; only the BPS forwarder consumes them.
-		if s.openAITokenProvider != nil {
-			accessToken, err := s.openAITokenProvider.GetAccessToken(ctx, account)
-			if err != nil {
-				return "", "", err
-			}
-			return accessToken, "oauth", nil
-		}
 		accessToken := account.GetOpenAIAccessToken()
 		if accessToken == "" {
 			return "", "", errors.New("access_token not found in credentials")

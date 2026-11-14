@@ -155,25 +155,3 @@ func TestSettingHandler_GetPublicSettings_ExposesWeChatOAuthModeCapabilities(t *
 	require.True(t, resp.Data.WeChatOAuthOpenEnabled)
 	require.True(t, resp.Data.WeChatOAuthMPEnabled)
 }
-
-// The removed Excel BPS switch is no longer exposed to unauthenticated
-// clients, even when a stale database row still holds it.
-func TestSettingHandler_GetPublicSettings_OmitsRemovedExcelBPSSwitch(t *testing.T) {
-	gin.SetMode(gin.TestMode)
-	repo := &settingHandlerPublicRepoStub{values: map[string]string{"excel_bps_enabled": "false"}}
-	h := NewSettingHandler(service.NewSettingService(repo, &config.Config{}), "test-version")
-
-	recorder := httptest.NewRecorder()
-	c, _ := gin.CreateTestContext(recorder)
-	c.Request = httptest.NewRequest(http.MethodGet, "/api/v1/settings/public", nil)
-
-	h.GetPublicSettings(c)
-
-	require.Equal(t, http.StatusOK, recorder.Code)
-	var resp struct {
-		Data map[string]json.RawMessage `json:"data"`
-	}
-	require.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &resp))
-	require.NotEmpty(t, resp.Data)
-	require.NotContains(t, resp.Data, "excel_bps_enabled")
-}

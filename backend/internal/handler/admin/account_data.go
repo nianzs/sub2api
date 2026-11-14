@@ -717,7 +717,7 @@ func validateDataAccount(item DataAccount) error {
 		return errors.New("account credentials is required")
 	}
 	switch item.Type {
-	case service.AccountTypeOAuth, service.AccountTypeSetupToken, service.AccountTypeAPIKey, service.AccountTypeUpstream, service.AccountTypeBPSOAuth:
+	case service.AccountTypeOAuth, service.AccountTypeSetupToken, service.AccountTypeAPIKey, service.AccountTypeUpstream:
 	default:
 		return fmt.Errorf("account type is invalid: %s", item.Type)
 	}
@@ -742,20 +742,18 @@ func defaultProxyName(name string) string {
 
 // enrichCredentialsFromIDToken performs best-effort extraction of user info fields
 // (email, plan_type, chatgpt_account_id, etc.) from id_token in credentials.
-// Only applies to OpenAI OAuth and BPS OAuth accounts. Skips expired token
-// errors silently. Existing credential values are never overwritten — only
-// missing fields are filled.
+// Only applies to OpenAI OAuth accounts. Skips expired token errors silently.
+// Existing credential values are never overwritten — only missing fields are filled.
 func enrichCredentialsFromIDToken(item *DataAccount) {
 	if item.Credentials == nil {
 		return
 	}
-	// Only enrich OpenAI OAuth accounts (BPS-only accounts need plan_type too:
-	// free plans are not eligible for BPS)
+	// Only enrich OpenAI OAuth accounts
 	platform := strings.ToLower(strings.TrimSpace(item.Platform))
 	if platform != service.PlatformOpenAI {
 		return
 	}
-	if accountType := strings.ToLower(strings.TrimSpace(item.Type)); accountType != service.AccountTypeOAuth && accountType != service.AccountTypeBPSOAuth {
+	if strings.ToLower(strings.TrimSpace(item.Type)) != service.AccountTypeOAuth {
 		return
 	}
 

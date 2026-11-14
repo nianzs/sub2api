@@ -196,36 +196,6 @@ describe('ModelWhitelistSelector', () => {
     expect(wrapper.emitted('update:modelValue')).toEqual([[['custom-model']]])
   })
 
-  it('fills related models from availableModels when the caller provides a candidate list', async () => {
-    const wrapper = mountSelector({
-      modelValue: ['bps-custom'],
-      availableModels: ['gpt-6-astra', 'gpt-5.6-sol', 'gpt-5.6-terra', 'bps-custom']
-    })
-
-    await wrapper.get('div.cursor-pointer').trigger('click')
-    const options = wrapper.findAll('[data-testid="select-model"]').map(option => option.text())
-    expect(options).toEqual(['bps-custom', 'gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-6-astra'])
-
-    const fillRelated = wrapper.findAll('button').find(button => button.text() === 'admin.accounts.fillRelatedModels')
-    await fillRelated!.trigger('click')
-    expect(wrapper.emitted('update:modelValue')?.at(-1)?.[0]).toEqual([
-      'bps-custom',
-      'gpt-6-astra',
-      'gpt-5.6-sol',
-      'gpt-5.6-terra'
-    ])
-  })
-
-  it('fills related models from the platform catalog without availableModels', async () => {
-    const wrapper = mountSelector({ modelValue: [] })
-
-    const fillRelated = wrapper.findAll('button').find(button => button.text() === 'admin.accounts.fillRelatedModels')
-    await fillRelated!.trigger('click')
-    const filled = wrapper.emitted('update:modelValue')?.at(-1)?.[0] as string[]
-    expect(filled).toContain('gpt-image-2')
-    expect(filled).toContain('codex-auto-review')
-  })
-
   it('copies a model ID without selecting the model', async () => {
     const wrapper = mountSelector()
     await wrapper.get('div.cursor-pointer').trigger('click')

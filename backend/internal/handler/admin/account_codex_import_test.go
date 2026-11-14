@@ -9,7 +9,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Wei-Shaw/sub2api/internal/pkg/openai"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 )
 
@@ -1093,62 +1092,4 @@ func buildCodexImportTestJWT(t *testing.T, exp time.Time, extraClaims map[string
 		t.Fatalf("marshal claims: %v", err)
 	}
 	return base64.RawURLEncoding.EncodeToString(headerBytes) + "." + base64.RawURLEncoding.EncodeToString(claimBytes) + "."
-}
-
-// An Excel-client session only works through BPS: importing it as a Codex
-// account would send its token to native Codex, so the item is rejected.
-func TestNormalizeCodexImportRejectsExcelClientSessions(t *testing.T) {
-	codexToken := buildCodexImportTestJWT(t, time.Now().Add(time.Hour), map[string]any{})
-	excelToken := buildCodexImportTestJWT(t, time.Now().Add(time.Hour), map[string]any{"client_id": openai.ExcelClientID})
-	for name, value := range map[string]any{
-		"session client_id":   map[string]any{"tokens": map[string]any{"access_token": codexToken, "refresh_token": "rt", "client_id": openai.ExcelClientID}},
-		"access token claim":  excelToken,
-		"claim with RT input": map[string]any{"access_token": excelToken, "refresh_token": "rt"},
-	} {
-		t.Run(name, func(t *testing.T) {
-			_, err := normalizeCodexImportEntry(codexImportEntry{Index: 1, Value: value})
-			if err == nil || !strings.Contains(err.Error(), "BPS OAuth") {
-				t.Fatalf("error = %v, want an Excel session rejection", err)
-			}
-		})
-	}
-}
-
-func TestNormalizeCodexImportKeepsSuppliedRefreshClient(t *testing.T) {
-	token := buildCodexImportTestJWT(t, time.Now().Add(time.Hour), map[string]any{})
-	item, err := normalizeCodexImportEntry(codexImportEntry{Index: 1, Value: map[string]any{"access_token": token, "refresh_token": "rt"}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if item.Credentials["client_id"] != openai.ClientID {
-		t.Fatalf("client_id = %v, want the Codex default", item.Credentials["client_id"])
-	}
-	item, err = normalizeCodexImportEntry(codexImportEntry{Index: 1, Value: map[string]any{"access_token": token, "refresh_token": "rt", "client_id": "app_other"}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if item.Credentials["client_id"] != "app_other" {
-		t.Fatalf("client_id = %v, want the supplied client", item.Credentials["client_id"])
-	}
-}
-
-// BPS-only accounts need the plan from the id_token too: free plans are not
-// eligible for BPS.
-func TestEnrichCredentialsFromIDTokenCoversBPSOAuth(t *testing.T) {
-	idToken := buildCodexImportTestJWT(t, time.Now().Add(time.Hour), map[string]any{
-		"email":                       "bps@example.com",
-		"https://api.openai.com/auth": map[string]any{"chatgpt_account_id": "acct", "chatgpt_plan_type": "free"},
-	})
-	for _, accountType := range []string{service.AccountTypeOAuth, service.AccountTypeBPSOAuth} {
-		item := &DataAccount{Platform: service.PlatformOpenAI, Type: accountType, Credentials: map[string]any{"id_token": idToken}}
-		enrichCredentialsFromIDToken(item)
-		if item.Credentials["plan_type"] != "free" || item.Credentials["chatgpt_account_id"] != "acct" {
-			t.Fatalf("%s: credentials = %v", accountType, item.Credentials)
-		}
-	}
-	apiKey := &DataAccount{Platform: service.PlatformOpenAI, Type: service.AccountTypeAPIKey, Credentials: map[string]any{"id_token": idToken}}
-	enrichCredentialsFromIDToken(apiKey)
-	if _, ok := apiKey.Credentials["plan_type"]; ok {
-		t.Fatal("API key accounts are not enriched")
-	}
 }

@@ -13,17 +13,12 @@ const (
 	// AccountTestModeCompact drives the remote-compaction probe test
 	// (native v2: streaming /responses with a compaction_trigger input item).
 	AccountTestModeCompact = "compact"
-	// AccountTestModeBPSTools runs the Excel/BPS tool round-trip probe through
-	// the same gateway path as user Responses requests.
-	AccountTestModeBPSTools = "bps_tools"
 )
 
 func normalizeAccountTestMode(mode string) string {
 	switch strings.ToLower(strings.TrimSpace(mode)) {
 	case AccountTestModeCompact:
 		return AccountTestModeCompact
-	case AccountTestModeBPSTools:
-		return AccountTestModeBPSTools
 	default:
 		return AccountTestModeDefault
 	}

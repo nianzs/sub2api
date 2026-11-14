@@ -49,7 +49,7 @@ func recordQualityBatchRoute(c *gin.Context, account *Account, model, route stri
 // path carries them; other platforms would silently send the connectivity
 // probe and must never be graded.
 func qualityProbeSupported(account *Account) bool {
-	return account != nil && account.Platform == PlatformOpenAI && !account.IsBPSOAuth()
+	return account != nil && account.Platform == PlatformOpenAI
 }
 
 // TestPelicanAccountConnection runs an account test with the quality prompt and
@@ -77,8 +77,9 @@ func createPelicanOpenAIPayload(modelID string, isOAuth bool, prompt, reasoningE
 	input, ok := payload["input"].([]map[string]any)
 	if ok && len(input) > 0 {
 		content, ok := input[0]["content"].([]map[string]any)
-		if ok && len(content) > 0 {
-			content[0]["text"] = promptOrDefault(prompt)
+		// An empty prompt keeps the connectivity probe's default text.
+		if text := strings.TrimSpace(prompt); ok && len(content) > 0 && text != "" {
+			content[0]["text"] = text
 		}
 	}
 	if effort := normalizePelicanReasoningEffort(reasoningEffort); effort != "" {

@@ -5,9 +5,6 @@ import (
 	"net/http"
 )
 
-// setOpenAIChatGPTAccountHeaders writes native Codex headers. The protocol
-// gate is deliberate: BPS-only accounts also expose a ChatGPT account ID, but
-// their Excel credentials must never be presented to chatgpt.com.
 func setOpenAIChatGPTAccountHeaders(headers http.Header, account *Account) {
 	if headers == nil || account == nil || !account.IsOpenAIOAuthLike() {
 		return
