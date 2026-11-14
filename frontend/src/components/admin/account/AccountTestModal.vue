@@ -451,12 +451,6 @@ const supportsOpenAIImageTest = computed(() => {
   return props.account?.platform === 'openai'
 })
 
-const supportsLeonardoImageTest = computed(() => {
-  const modelID = selectedModelId.value.toLowerCase()
-  if (!modelID.startsWith('gpt-image-')) return false
-  return props.account?.platform === 'leonardo'
-})
-
 const supportsFishImageTest = computed(() => {
   if (props.account?.platform !== 'fish') return false
   return selectedModelId.value.toLowerCase().startsWith('gpt-image-')
@@ -487,7 +481,6 @@ const supportsImageTest = computed(
   () =>
     supportsGeminiImageTest.value ||
     supportsOpenAIImageTest.value ||
-    supportsLeonardoImageTest.value ||
     supportsFishImageTest.value ||
     supportsGrokImageTest.value
 )

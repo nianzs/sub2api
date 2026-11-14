@@ -46,14 +46,14 @@
           formatCurrency(props.stats.user_cost)
         }}</span>
       </div>
-      <!-- Kiro / Leonardo Credits -->
+      <!-- Kiro Credits -->
       <div
         v-if="showKiroCredits"
         class="flex items-center gap-1"
         :class="kiroCreditLossClass"
         data-testid="kiro-credits-row"
       >
-        <span :class="kiroCreditLabelClass">{{ creditsLabel }}:</span>
+        <span :class="kiroCreditLabelClass">{{ t('admin.accounts.stats.kiroCredits') }}:</span>
         <span class="font-medium" :class="kiroCreditValueClass">
           {{ formatCredits(props.stats.kiro_credits) }}
           <span v-if="kiroCreditEstimatedCost">
@@ -95,17 +95,8 @@ const props = withDefaults(
 
 const { t } = useI18n()
 
-// 仅 Kiro 直连账号与 Leonardo Cookie 账号展示 credits 行;外部中转账号转发到兼容上游、不消耗平台积分。
-// Leonardo 积分由后端写入同一 kiro_credits 字段,单价也复用 kiroCreditUnitPriceUsd 入参。
-const showKiroCredits = computed(
-  () => (props.platform === 'kiro' || props.platform === 'leonardo') && !props.isRelay
-)
-
-const creditsLabel = computed(() =>
-  props.platform === 'leonardo'
-    ? t('admin.accounts.stats.leonardoCredits')
-    : t('admin.accounts.stats.kiroCredits')
-)
+// 仅 Kiro 直连账号展示 credits 行;外部中转账号转发到 Anthropic 兼容上游、无 Kiro credits。
+const showKiroCredits = computed(() => props.platform === 'kiro' && !props.isRelay)
 
 const kiroCreditEstimatedCostValue = computed(() => {
   if (!showKiroCredits.value) return null

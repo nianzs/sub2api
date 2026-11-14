@@ -306,7 +306,7 @@
               :stats="todayStatsByAccountId[String(row.id)] ?? null"
               :platform="row.platform"
               :kiro-credit-unit-price-usd="getKiroCreditUnitPriceUsd(row)"
-              :is-relay="isTodayStatsRelayAccount(row)"
+              :is-relay="isKiroRelayAccount(row)"
               :loading="todayStatsLoading"
               :error="todayStatsError"
             />
@@ -330,7 +330,6 @@
               :today-stats-loading="todayStatsLoading"
               :manual-refresh-token="usageManualRefreshToken"
               @kiro-usage-meta="handleUsagePlanMeta(row, $event)"
-              @leonardo-usage-meta="handleUsagePlanMeta(row, $event)"
               @fish-usage-meta="handleFishUsageMeta(row, $event)"
               :batched-usage="usageBatchByAccountId[String(row.id)] ?? null"
               :batched-usage-error="usageBatchErrorByAccountId[String(row.id)] ?? null"
@@ -1495,15 +1494,15 @@ const shouldReplaceAutoRefreshRow = (current: Account, next: Account) => {
   )
 }
 
-// Kiro / Leonardo 的套餐来自用量接口，合并进内存态 credentials.plan_type，
+// Kiro 的套餐来自用量接口，合并进内存态 credentials.plan_type，
 // 供「平台/类型」列的 PlatformTypeBadge 渲染（不落库，刷新后由用量重新回填）。
 // Kiro 同时回填 overage 开关，Badge 据此展示「超量」标记。
 const handleUsagePlanMeta = (account: Account, meta: { plan_type?: string; kiro_overages_enabled?: boolean }) => {
-  if (account.platform !== 'kiro' && account.platform !== 'leonardo') return
+  if (account.platform !== 'kiro') return
   account.credentials = {
     ...(account.credentials || {}),
     ...(meta.plan_type ? { plan_type: meta.plan_type } : {}),
-    ...(account.platform === 'kiro' ? { kiro_overages_enabled: meta.kiro_overages_enabled === true } : {})
+    kiro_overages_enabled: meta.kiro_overages_enabled === true
   }
 }
 
@@ -1519,19 +1518,12 @@ const handleFishUsageMeta = (account: Account, meta: { plan_type?: string }) => 
   }
 }
 
-// 今日统计积分估算单价:Kiro 读 kiro_credit_unit_price_usd,Leonardo 读 leonardo_credit_unit_price_usd。
 const getKiroCreditUnitPriceUsd = (account: Account): number => {
-  let raw: unknown
-  if (account.platform === 'kiro') raw = account.extra?.kiro_credit_unit_price_usd
-  else if (account.platform === 'leonardo') raw = account.extra?.leonardo_credit_unit_price_usd
-  else return 0
+  if (account.platform !== 'kiro') return 0
+  const raw = account.extra?.kiro_credit_unit_price_usd
   const value = typeof raw === 'number' ? raw : typeof raw === 'string' ? Number(raw) : 0
   return Number.isFinite(value) && value > 0 ? value : 0
 }
-
-// Leonardo 中转账号(apikey)转发到外部 OpenAI 兼容上游,不消耗 Leonardo 积分;Kiro 沿用原中转判定。
-const isTodayStatsRelayAccount = (account: Account): boolean =>
-  account.platform === 'leonardo' ? account.type === 'apikey' : isKiroRelayAccount(account)
 
 const syncAccountRefs = (nextAccount: Account) => {
   if (edAcc.value?.id === nextAccount.id) edAcc.value = nextAccount
