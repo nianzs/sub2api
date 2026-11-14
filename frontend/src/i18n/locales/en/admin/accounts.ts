@@ -283,6 +283,43 @@ export default {
         viewTempUnschedDetails: 'View temp unschedulable details',
         tempUnschedulableUntil: 'Resumes {time}'
       },
+      iqCheck: {
+        title: 'IQ check',
+        hint: 'Periodically asks 2 random reasoning questions. Record only: just tracks results. Auto stop: 3 or more wrong answers across the last two rounds (4 questions) stop scheduling; a later fully correct round turns it back on.',
+        model: 'Check model',
+        modelPlaceholder: 'Leave empty for the default test model',
+        interval: 'Interval (minutes, 10–1440)',
+        modes: {
+          record: 'Record only',
+          auto: 'Auto stop scheduling'
+        },
+        stoppedWarning: 'The IQ check has stopped scheduling for this account. Turning the check off does not turn scheduling back on; do that by hand.',
+        status: {
+          pending: 'Pending',
+          passed: 'Normal',
+          wrong: 'Wrong {wrong}/{total}',
+          triggered: 'Downgrade threshold reached',
+          disabled: 'Downgraded · scheduling stopped',
+          unknown: 'Unknown'
+        },
+        drawing: {
+          title: 'Pelican riding a bicycle',
+          view: 'View larger',
+          failed: 'No drawing',
+          meta: 'Model {model} · {seconds}s · {time}'
+        },
+        details: {
+          mode: 'Mode: {mode}',
+          off: 'Check is off',
+          checkedAt: 'Last check: {time}',
+          score: 'This round: {correct}/{total} correct',
+          recent: 'Wrong in last two rounds: {wrong}/4',
+          accuracy: 'Total correct: {correct}/{answered} ({percent}%)',
+          model: 'Model: {model}',
+          error: 'Error: {error}',
+          nextCheckAt: 'Next check: {time}'
+        }
+      },
       columns: {
         name: 'Name',
         id: 'Account ID',
@@ -298,6 +335,7 @@ export default {
         schedulerScore: 'Scheduler Score',
         status: 'Status',
         schedulable: 'Schedulable',
+        iqCheck: 'IQ check',
         todayStats: 'Today Stats',
         groups: 'Groups',
         usageWindows: 'Usage Windows',

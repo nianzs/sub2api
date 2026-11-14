@@ -373,7 +373,6 @@ func (s *AccountTestService) TestAccountConnection(c *gin.Context, accountID int
 		return s.sendErrorAndEnd(c, "Account not found")
 	}
 	bindAccountTestPlatform(c, account)
-	recordQualityBatchRoute(c, account, modelID, account.Platform+":"+account.GetAPIProtocol())
 
 	// Synthetic UI load-test accounts exercise the real SSE parsing and modal
 	// interactions, but intentionally do not send their placeholder credentials
@@ -980,7 +979,6 @@ func (s *AccountTestService) testBedrockAccountConnection(c *gin.Context, ctx co
 func (s *AccountTestService) testOpenAIAccountConnection(c *gin.Context, account *Account, modelID string, prompt string, mode string) error {
 	ctx := c.Request.Context()
 	mode = normalizeAccountTestMode(mode)
-	recordQualityBatchRoute(c, account, modelID, "openai:account")
 
 	// Default to openai.DefaultTestModel for OpenAI testing
 	testModelID := modelID
@@ -1072,10 +1070,7 @@ func (s *AccountTestService) testOpenAIAccountConnection(c *gin.Context, account
 		upstreamTestModelID = normalizeOpenAIModelForUpstream(credentialAccount, testModelID)
 	}
 	payload := createOpenAITestPayload(upstreamTestModelID, isOAuth)
-	if options, ok := pelicanTestOptionsFromContext(ctx); ok {
-		// Quality rules send their question and reasoning effort instead of "hi".
-		payload = createPelicanOpenAIPayload(upstreamTestModelID, isOAuth, options.prompt, options.reasoningEffort)
-	}
+	applyIQCheckResponsesPayload(ctx, payload)
 	payloadBytes, _ := json.Marshal(payload)
 
 	// Send test_start event once. A task-invalid Agent Identity response may
@@ -2318,7 +2313,7 @@ func (s *AccountTestService) testOpenAIChatCompletionsConnection(
 	c.Writer.Flush()
 
 	payload := createOpenAIChatCompletionsTestPayload(testModelID, prompt)
-	if options, ok := pelicanTestOptionsFromContext(c.Request.Context()); ok && options.reasoningEffort != "" {
+	if options, ok := iqCheckProbeOptionsFromContext(ctx); ok && options.reasoningEffort != "" {
 		payload["reasoning_effort"] = options.reasoningEffort
 	}
 	payloadBytes, _ := json.Marshal(payload)

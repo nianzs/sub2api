@@ -1173,6 +1173,13 @@ func reconcileCRSUpstreamBillingProbeExtra(
 	if existing == nil {
 		return
 	}
+	// The IQ check is configured here, not in CRS: keep its settings and last result.
+	for _, key := range []string{IQCheckEnabledExtraKey, IQCheckAutoDisableExtraKey, IQCheckModelExtraKey, IQCheckIntervalExtraKey, IQCheckStateExtraKey} {
+		delete(extra, key)
+		if value, ok := existing.Extra[key]; ok {
+			extra[key] = value
+		}
+	}
 	target := &Account{Platform: targetPlatform, Type: targetType, Credentials: targetCredentials}
 	if IsUpstreamBillingProbeIdentity(targetPlatform, targetType) {
 		probeEnabled := false

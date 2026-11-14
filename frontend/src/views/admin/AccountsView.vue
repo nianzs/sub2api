@@ -301,6 +301,9 @@
               <span class="pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out" :class="[row.schedulable ? 'translate-x-4' : 'translate-x-0']" />
             </button>
           </template>
+          <template #cell-iq_check="{ row }">
+            <AccountIQCheckCell :account="row" :drawing="iqDrawingsByAccountId[row.id] ?? null" />
+          </template>
           <template #cell-today_stats="{ row }">
             <AccountTodayStatsCell
               :stats="todayStatsByAccountId[String(row.id)] ?? null"
@@ -563,6 +566,7 @@ import AccountStatsModal from '@/components/admin/account/AccountStatsModal.vue'
 import ScheduledTestsPanel from '@/components/admin/account/ScheduledTestsPanel.vue'
 import type { SelectOption } from '@/components/common/Select.vue'
 import AccountStatusIndicator from '@/components/account/AccountStatusIndicator.vue'
+import AccountIQCheckCell from '@/components/account/AccountIQCheckCell.vue'
 import AccountUsageCell from '@/components/account/AccountUsageCell.vue'
 import AccountTodayStatsCell from '@/components/account/AccountTodayStatsCell.vue'
 import AccountGroupsCell from '@/components/account/AccountGroupsCell.vue'
@@ -582,7 +586,7 @@ import { extractApiErrorMessage } from '@/utils/apiError'
 import { sanitizeUrl } from '@/utils/url'
 import { getFloatingPanelPosition } from '@/utils/floatingPanel'
 import { formatMultiplier } from '@/utils/formatters'
-import type { Account, AccountListItem, AccountPlatform, AccountSchedulerGroupScore, AccountType, AccountUsageInfo, Proxy as AccountProxy, AdminGroup, WindowStats, ClaudeModel, UpstreamBillingProbeSnapshot } from '@/types'
+import type { Account, AccountListItem, AccountPlatform, AccountSchedulerGroupScore, AccountType, AccountUsageInfo, Proxy as AccountProxy, AdminGroup, WindowStats, ClaudeModel, UpstreamBillingProbeSnapshot, IQCheckDrawing } from '@/types'
 
 const { t } = useI18n()
 const appStore = useAppStore()
@@ -1169,6 +1173,31 @@ const {
     sort_order: sortState.sort_order
   }
 })
+
+// 降智检测的鹈鹕图：只为当前页开启过检测的 OpenAI 账号批量拉取；检测时间变了才重拉。
+const iqDrawingsByAccountId = ref<Record<number, IQCheckDrawing>>({})
+let iqDrawingsReqSeq = 0
+const iqDrawingsKey = computed(() => hiddenColumns.has('iq_check') ? '' : accounts.value
+  .filter(account => account.platform === 'openai' && (account.extra?.iq_check_enabled === true || account.extra?.iq_check_state))
+  .map(account => `${account.id}:${account.extra?.iq_check_state?.checked_at ?? ''}`)
+  .join(','))
+const refreshIQDrawings = async (key: string) => {
+  const reqSeq = ++iqDrawingsReqSeq
+  const ids = key ? key.split(',').map(part => Number(part.split(':')[0])) : []
+  if (ids.length === 0) {
+    iqDrawingsByAccountId.value = {}
+    return
+  }
+  try {
+    const drawings = await adminAPI.accounts.getIQCheckDrawings(ids)
+    if (reqSeq !== iqDrawingsReqSeq) return
+    iqDrawingsByAccountId.value = Object.fromEntries(drawings.map(drawing => [drawing.account_id, drawing]))
+  } catch (error) {
+    // 拉图失败只是不显示缩略图，不影响列表。
+    if (reqSeq === iqDrawingsReqSeq) console.error('Failed to load IQ check drawings:', error)
+  }
+}
+watch(iqDrawingsKey, key => { void refreshIQDrawings(key) }, { immediate: true })
 
 const {
   selectedSet,
@@ -1915,6 +1944,7 @@ const allColumns = computed(() => {
     { key: 'capacity', label: t('admin.accounts.columns.capacity'), sortable: false },
     { key: 'status', label: t('admin.accounts.columns.status'), sortable: true },
     { key: 'schedulable', label: t('admin.accounts.columns.schedulable'), sortable: true },
+    { key: 'iq_check', label: t('admin.accounts.columns.iqCheck'), sortable: false },
     { key: 'today_stats', label: t('admin.accounts.columns.todayStats'), sortable: false }
   ]
   if (!authStore.isSimpleMode) {

@@ -1127,6 +1127,36 @@ export interface UpstreamBillingData {
 
 export type UpstreamBillingProbeStatus = 'ok' | 'unsupported' | 'failed'
 
+/** Last IQ check result, written by the backend IQ check service. */
+export interface IQCheckState {
+  checked_at?: string
+  next_check_at?: string
+  result?: 'passed' | 'failed' | 'unknown'
+  correct?: number
+  total?: number
+  error?: string
+  /** Wrong answers in the last round, and in the last two rounds together. */
+  last_round_wrong?: number
+  recent_wrong?: number
+  /** Cumulative answered and correct questions for stats_model. */
+  answered?: number
+  answered_correct?: number
+  stats_model?: string
+  disabled_by_check?: boolean
+  model?: string
+}
+
+/** Latest IQ check drawing of an account (GET /admin/accounts/iq-check-drawings). */
+export interface IQCheckDrawing {
+  account_id: number
+  /** Empty when the drawing failed; see error. */
+  svg: string
+  error: string
+  model: string
+  latency_ms: number
+  drawn_at: string
+}
+
 export interface UpstreamBillingProbeSnapshot {
   status: UpstreamBillingProbeStatus
   data?: UpstreamBillingData
@@ -1317,6 +1347,11 @@ kiro_credit_unit_price_usd?: number
     upstream_billing_probe_enabled?: boolean
     upstream_billing_rate_sync_enabled?: boolean
     upstream_billing_probe?: UpstreamBillingProbeSnapshot
+    iq_check_enabled?: boolean
+    iq_check_auto_disable?: boolean
+    iq_check_model?: string
+    iq_check_interval_minutes?: number
+    iq_check_state?: IQCheckState
     codex_reset_credit_snapshot?: {
       available_count?: number
       credits?: { expires_at?: string }[]
@@ -2617,73 +2652,14 @@ export interface TotpLogin2FARequest {
 
 // ==================== Scheduled Test Types ====================
 
-// Account quality rules (ported from ranxi2001/sub2api@f895ea743). A quality
-// rule is a scheduled test plan whose pelican_config carries a quality policy.
-export type QualityQuestionKind = 'candy' | 'random_reasoning'
-export type QualityAction = 'observe_only' | 'disable_scheduling' | 'remove_groups'
-
-export interface QualityJudgeConfig {
-  group_id: number
-  model_id: string
-  prompt: string
-}
-
-export interface QualityJudgment {
-  verdict: 'correct' | 'incorrect' | 'unknown'
-  reason: string
-  account_id?: number
-  group_id?: number
-  model_id?: string
-}
-
-export interface QualityPolicy {
-  judge?: QualityJudgeConfig
-  expected_answer: string
-  action: QualityAction
-  remove_group_ids: number[]
-  retest_rest_minutes?: number
-  auto_restore: boolean
-}
-
-export interface QualityBatchEvidence {
-  id: string
-  decision: string
-  mapped_model: string
-  route: string
-  peer_accounts: number
-  peer_passed: number
-  peer_failed: number
-  peer_inconclusive: number
-  started_at?: string
-  start_deadline?: string
-}
-
-export interface PelicanTestConfig {
-  // Optional display name, persisted with the rule's editable configuration.
-  rule_name?: string
-  question_kind?: QualityQuestionKind
-  prompt: string
-  reasoning_effort: string
-  parallel_count: number
-  model_ids?: string[]
-  quality?: QualityPolicy
-  // Result-only fields.
-  model_id?: string
-  random_question?: { id: string; family?: string; version?: string }
-  quality_batch?: QualityBatchEvidence
-}
-
 export interface ScheduledTestPlan {
   id: number
   account_id: number
-  account_name?: string
   model_id: string
   cron_expression: string
   enabled: boolean
   max_results: number
   auto_recover: boolean
-  pelican_config?: PelicanTestConfig
-  running_until?: string | null
   last_run_at: string | null
   next_run_at: string | null
   created_at: string
@@ -2693,15 +2669,10 @@ export interface ScheduledTestPlan {
 export interface ScheduledTestResult {
   id: number
   plan_id: number
-  account_name?: string
   status: string
   response_text: string
   error_message: string
   latency_ms: number
-  pelican_config?: PelicanTestConfig
-  quality_action?: string
-  quality_judgment?: QualityJudgment
-  quality_round_id?: string
   started_at: string
   finished_at: string
   created_at: string
@@ -2714,7 +2685,6 @@ export interface CreateScheduledTestPlanRequest {
   enabled?: boolean
   max_results?: number
   auto_recover?: boolean
-  pelican_config?: PelicanTestConfig
 }
 
 export interface UpdateScheduledTestPlanRequest {
@@ -2723,7 +2693,6 @@ export interface UpdateScheduledTestPlanRequest {
   enabled?: boolean
   max_results?: number
   auto_recover?: boolean
-  pelican_config?: PelicanTestConfig
 }
 
 // Payment types

@@ -8,6 +8,7 @@ import type { OpenAIReferralRefreshResult, OpenAIReferralSendResult } from '@/ty
 import type {
   Account,
   AccountListItem,
+  IQCheckDrawing,
   CreateAccountRequest,
   UpdateAccountRequest,
   PaginatedResponse,
@@ -586,6 +587,17 @@ export async function getBatchTodayStats(accountIds: number[]): Promise<BatchTod
 }
 
 /**
+ * Latest IQ check drawings (animated pelican SVG) of the given accounts.
+ * The SVG must only be shown through <img>, never inserted as HTML.
+ */
+export async function getIQCheckDrawings(accountIds: number[]): Promise<IQCheckDrawing[]> {
+  const { data } = await apiClient.get<IQCheckDrawing[]>('/admin/accounts/iq-check-drawings', {
+    params: { ids: accountIds.join(',') }
+  })
+  return data ?? []
+}
+
+/**
  * Set account schedulable status
  * @param id - Account ID
  * @param schedulable - Whether the account should participate in scheduling
@@ -1143,6 +1155,7 @@ export async function refreshOpenCodeGoUsage(id: number): Promise<OpenCodeGoUsag
 
 export const accountsAPI = {
   list,
+  getIQCheckDrawings,
   listWithEtag,
   getUpstreamBillingRatesWithEtag,
   getById,

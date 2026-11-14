@@ -1,103 +1,133 @@
 package service
 
+// Question generators and solvers are adapted from ranxi2001/sub2api@f895ea743
+// (backend/internal/service/quality_random_question.go). Answers are graded
+// locally against the solver, so no judge model is involved.
+
 import (
 	"crypto/rand"
-	"crypto/sha256"
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
 	"io"
 	mathrand "math/rand/v2"
+	"slices"
 	"strings"
 )
 
-const QualityRandomQuestionKind = "random_reasoning"
-const qualityRandomGeneratorVersion = "1"
-
-// Result-only metadata. Rules store no seed, fixed question or reference answer.
-type QualityRandomQuestion struct {
-	ID      string `json:"id"`
-	Family  string `json:"family"`
-	Version string `json:"version"`
+// iqCheckQuestion is one generated question with its reference answer.
+type iqCheckQuestion struct {
+	Family   string
+	Prompt   string
+	Expected any // iqPathAnswer or iqXORAnswer
 }
 
-func isQualityAnswerQuestion(kind string) bool {
-	return kind == "candy" || kind == QualityRandomQuestionKind
+// newIQCheckQuestions returns one fresh question of each family.
+func newIQCheckQuestions() ([]iqCheckQuestion, error) {
+	return generateIQCheckQuestions(rand.Reader)
 }
 
-// One fresh question per sample, shared by every model in that sample. A batch
-// alternates families with a random starting family instead of repeating one
-// fixed question. The source is passed explicitly so entropy failures are testable.
-func generateQualityRandomSamples(cfg *PelicanTestConfig, source io.Reader) ([]*PelicanTestConfig, error) {
+// The source is passed explicitly so entropy failures are testable.
+func generateIQCheckQuestions(source io.Reader) ([]iqCheckQuestion, error) {
 	var seed [16]byte
 	if _, err := io.ReadFull(source, seed[:]); err != nil {
-		return nil, fmt.Errorf("random question entropy unavailable")
+		return nil, fmt.Errorf("iq check question entropy unavailable")
 	}
 	// The PRNG expands a fresh crypto/rand seed; it is not a credential generator.
 	rng := mathrand.New(mathrand.NewPCG(binary.LittleEndian.Uint64(seed[:8]), binary.LittleEndian.Uint64(seed[8:]))) //nolint:gosec
-	first := rng.IntN(2)
-	samples := make([]*PelicanTestConfig, cfg.ParallelCount)
-	seen := make(map[string]bool, len(samples))
-	for i := range samples {
-		for attempt := 0; attempt < 32; attempt++ {
-			var prompt, family string
-			var answer any
-			var err error
-			if (first+i)%2 == 0 {
-				family = "paths"
-				prompt, answer, err = generateQualityPathQuestion(rng)
-			} else {
-				family = "weighted_xor"
-				prompt, answer, err = generateQualityXORQuestion(rng)
-			}
-			if err != nil {
-				return nil, err
-			}
-			digest := sha256.Sum256([]byte(prompt))
-			id := fmt.Sprintf("%x", digest[:16])
-			if seen[id] {
-				continue
-			}
-			seen[id] = true
-			reference, err := json.Marshal(answer)
-			if err != nil {
-				return nil, fmt.Errorf("random question reference unavailable")
-			}
-			snapshot := *cfg
-			policy := *cfg.Quality
-			policy.ExpectedAnswer = string(reference)
-			snapshot.Quality = &policy
-			snapshot.Prompt = prompt
-			snapshot.RandomQuestion = &QualityRandomQuestion{ID: id, Family: family, Version: qualityRandomGeneratorVersion}
-			samples[i] = &snapshot
-			break
+	pathPrompt, pathAnswer, err := generateIQPathQuestion(rng)
+	if err != nil {
+		return nil, err
+	}
+	xorPrompt, xorAnswer, err := generateIQXORQuestion(rng)
+	if err != nil {
+		return nil, err
+	}
+	return []iqCheckQuestion{
+		{Family: "paths", Prompt: pathPrompt, Expected: pathAnswer},
+		{Family: "weighted_xor", Prompt: xorPrompt, Expected: xorAnswer},
+	}, nil
+}
+
+// gradeIQCheckAnswer reports whether the model output matches the reference.
+// The answer is the last JSON object in the output that has the required
+// fields, so stray braces in surrounding text do not spoil it. Output without
+// such an object counts as wrong: the question asks for JSON only.
+func gradeIQCheckAnswer(question iqCheckQuestion, output string) bool {
+	switch expected := question.Expected.(type) {
+	case iqPathAnswer:
+		var answer struct {
+			Count *int   `json:"count"`
+			First string `json:"first"`
 		}
-		if samples[i] == nil {
-			return nil, fmt.Errorf("random question batch unavailable")
+		if !lastIQCheckObject(output, func(raw json.RawMessage) bool {
+			answer.Count, answer.First = nil, ""
+			return json.Unmarshal(raw, &answer) == nil && answer.Count != nil
+		}) {
+			return false
+		}
+		return *answer.Count == expected.Count && strings.TrimSpace(answer.First) == expected.First
+	case iqXORAnswer:
+		var answer struct {
+			Penalty     *int     `json:"penalty"`
+			Assignments []string `json:"assignments"`
+		}
+		if !lastIQCheckObject(output, func(raw json.RawMessage) bool {
+			answer.Penalty, answer.Assignments = nil, nil
+			return json.Unmarshal(raw, &answer) == nil && answer.Penalty != nil && answer.Assignments != nil
+		}) {
+			return false
+		}
+		assignments := make([]string, len(answer.Assignments))
+		for i, value := range answer.Assignments {
+			assignments[i] = strings.TrimSpace(value)
+		}
+		slices.Sort(assignments)
+		return *answer.Penalty == expected.Penalty && slices.Equal(assignments, expected.Assignments)
+	}
+	return false
+}
+
+// lastIQCheckObject decodes a JSON value at every "{" in the output and leaves
+// the last one that accept takes in place. It reports whether any was taken.
+func lastIQCheckObject(output string, accept func(json.RawMessage) bool) bool {
+	// Answers are short and come last; bound the scan on runaway output.
+	const maxScan = 64 << 10
+	if len(output) > maxScan {
+		output = output[len(output)-maxScan:]
+	}
+	var last json.RawMessage
+	for i := 0; i < len(output); i++ {
+		if output[i] != '{' {
+			continue
+		}
+		var raw json.RawMessage
+		if json.NewDecoder(strings.NewReader(output[i:])).Decode(&raw) == nil && accept(raw) {
+			last = raw
 		}
 	}
-	return samples, nil
+	return last != nil && accept(last)
 }
 
-type qualityGridPoint struct{ X, Y int }
+type iqGridPoint struct{ X, Y int }
 
-type qualityPathProblem struct {
+type iqPathProblem struct {
 	Width, Height, Turns int
-	Blocked              [3]qualityGridPoint
-	Checkpoints          [2]qualityGridPoint
+	Blocked              [3]iqGridPoint
+	Checkpoints          [2]iqGridPoint
 }
 
-type qualityPathAnswer struct {
+type iqPathAnswer struct {
 	Count int    `json:"count"`
 	First string `json:"first"`
 }
 
-type qualityPathState struct{ X, Y, Last, Turns, Hits, Run int }
+type iqPathState struct{ X, Y, Last, Turns, Hits, Run int }
 
 // State counting avoids materializing every path. All instances fit in a 7x7
 // grid and at most 14 steps, so both time and integer arithmetic are bounded.
-func solveQualityPath(p qualityPathProblem) qualityPathAnswer {
-	memo := make(map[qualityPathState]int)
+func solveIQPath(p iqPathProblem) iqPathAnswer {
+	memo := make(map[iqPathState]int)
 	blocked := func(x, y int) bool {
 		for _, point := range p.Blocked {
 			if point.X == x && point.Y == y {
@@ -106,7 +136,7 @@ func solveQualityPath(p qualityPathProblem) qualityPathAnswer {
 		}
 		return false
 	}
-	next := func(state qualityPathState, direction int) qualityPathState {
+	next := func(state iqPathState, direction int) iqPathState {
 		if direction == 1 {
 			state.X++
 			state.Run++
@@ -125,8 +155,8 @@ func solveQualityPath(p qualityPathProblem) qualityPathAnswer {
 		}
 		return state
 	}
-	var count func(qualityPathState) int
-	count = func(state qualityPathState) int {
+	var count func(iqPathState) int
+	count = func(state iqPathState) int {
 		if state.X > p.Width || state.Y > p.Height || state.Turns > p.Turns || state.Hits > 1 || state.Run >= 3 || blocked(state.X, state.Y) {
 			return 0
 		}
@@ -143,8 +173,8 @@ func solveQualityPath(p qualityPathProblem) qualityPathAnswer {
 		memo[state] = value
 		return value
 	}
-	state := qualityPathState{}
-	answer := qualityPathAnswer{Count: count(state)}
+	state := iqPathState{}
+	answer := iqPathAnswer{Count: count(state)}
 	if answer.Count == 0 {
 		return answer
 	}
@@ -162,14 +192,14 @@ func solveQualityPath(p qualityPathProblem) qualityPathAnswer {
 	return answer
 }
 
-func generateQualityPathQuestion(rng *mathrand.Rand) (string, any, error) {
+func generateIQPathQuestion(rng *mathrand.Rand) (string, iqPathAnswer, error) {
 	for attempt := 0; attempt < 128; attempt++ {
-		p := qualityPathProblem{Width: 5 + rng.IntN(3), Height: 5 + rng.IntN(3), Turns: 4 + rng.IntN(4)}
-		var points []qualityGridPoint
+		p := iqPathProblem{Width: 5 + rng.IntN(3), Height: 5 + rng.IntN(3), Turns: 4 + rng.IntN(4)}
+		var points []iqGridPoint
 		for x := 0; x <= p.Width; x++ {
 			for y := 0; y <= p.Height; y++ {
 				if (x != 0 || y != 0) && (x != p.Width || y != p.Height) {
-					points = append(points, qualityGridPoint{x, y})
+					points = append(points, iqGridPoint{x, y})
 				}
 			}
 		}
@@ -180,31 +210,32 @@ func generateQualityPathQuestion(rng *mathrand.Rand) (string, any, error) {
 		for i := range p.Checkpoints {
 			p.Checkpoints[i] = points[order[i+3]]
 		}
-		answer := solveQualityPath(p)
+		answer := solveIQPath(p)
 		if answer.Count < 3 {
 			continue
 		}
-		pointText := func(point qualityGridPoint) string { return fmt.Sprintf("(%d,%d)", point.X, point.Y) }
+		pointText := func(point iqGridPoint) string { return fmt.Sprintf("(%d,%d)", point.X, point.Y) }
 		prompt := fmt.Sprintf("从格点(0,0)走到(%d,%d)，每步只能R=(1,0)或U=(0,1)。不能经过禁点%s、%s、%s；检查点%s、%s必须恰好经过一个。相邻动作字母不同时算一次转向，第一步不算，必须恰好转向%d次。动作串不得包含连续三个R。求合法动作串总数及字典序最小的动作串，规定R<U。只输出JSON对象，字段count为整数，first为动作串，不加解释或代码块。",
 			p.Width, p.Height, pointText(p.Blocked[0]), pointText(p.Blocked[1]), pointText(p.Blocked[2]), pointText(p.Checkpoints[0]), pointText(p.Checkpoints[1]), p.Turns)
 		return prompt, answer, nil
 	}
-	return "", nil, fmt.Errorf("random path question unavailable")
+	return "", iqPathAnswer{}, fmt.Errorf("iq check path question unavailable")
 }
 
-type qualityXORObservation struct {
+type iqXORObservation struct {
 	Indices []int
 	Value   int
 	Weight  int
 }
 
-type qualityXORAnswer struct {
+type iqXORAnswer struct {
 	Penalty     int      `json:"penalty"`
 	Assignments []string `json:"assignments"`
 }
 
-func solveQualityXOR(rows []qualityXORObservation) qualityXORAnswer {
-	answer := qualityXORAnswer{Penalty: int(^uint(0) >> 1)}
+// Assignments are produced in ascending lexicographic order.
+func solveIQXOR(rows []iqXORObservation) iqXORAnswer {
+	answer := iqXORAnswer{Penalty: int(^uint(0) >> 1)}
 	for assignment := 0; assignment < 64; assignment++ {
 		bits := make([]byte, 6)
 		for i := range bits {
@@ -231,13 +262,13 @@ func solveQualityXOR(rows []qualityXORObservation) qualityXORAnswer {
 	return answer
 }
 
-func generateQualityXORQuestion(rng *mathrand.Rand) (string, any, error) {
+func generateIQXORQuestion(rng *mathrand.Rand) (string, iqXORAnswer, error) {
 	indices := [][]int{{0, 1}, {1, 2}, {2, 3}, {3, 4}, {4, 5}, {0, 5}, {0, 2, 4}, {1, 3, 5}, {0, 3, 4}, {1, 2, 5}, {0, 1, 5}}
 	for attempt := 0; attempt < 128; attempt++ {
 		truth := rng.IntN(64)
 		order := rng.Perm(len(indices))
 		corrupt := map[int]bool{order[0]: true, order[1]: true, order[2]: true}
-		rows := make([]qualityXORObservation, len(indices))
+		rows := make([]iqXORObservation, len(indices))
 		for i, members := range indices {
 			value := 0
 			for _, index := range members {
@@ -246,9 +277,9 @@ func generateQualityXORQuestion(rng *mathrand.Rand) (string, any, error) {
 			if corrupt[i] {
 				value ^= 1
 			}
-			rows[i] = qualityXORObservation{Indices: members, Value: value, Weight: 1 + rng.IntN(6)}
+			rows[i] = iqXORObservation{Indices: members, Value: value, Weight: 1 + rng.IntN(6)}
 		}
-		answer := solveQualityXOR(rows)
+		answer := solveIQXOR(rows)
 		if answer.Penalty == 0 || len(answer.Assignments) > 4 {
 			continue
 		}
@@ -264,9 +295,5 @@ func generateQualityXORQuestion(rng *mathrand.Rand) (string, any, error) {
 		_, _ = prompt.WriteString("求最小总代价及所有最优赋值。只输出JSON对象，字段penalty为整数，assignments为六位01字符串数组，从左至右对应ABCDEF，按字典序升序。不加解释或代码块。")
 		return prompt.String(), answer, nil
 	}
-	return "", nil, fmt.Errorf("random XOR question unavailable")
-}
-
-func newQualityRandomSamples(cfg *PelicanTestConfig) ([]*PelicanTestConfig, error) {
-	return generateQualityRandomSamples(cfg, rand.Reader)
+	return "", iqXORAnswer{}, fmt.Errorf("iq check xor question unavailable")
 }
