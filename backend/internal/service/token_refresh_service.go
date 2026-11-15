@@ -1060,7 +1060,7 @@ func (s *TokenRefreshService) refreshWithRetryWithRateGate(
 				s.notifyAccountSchedulingBlocked(account, time.Time{}, "token_refresh_non_retryable")
 			}
 			cacheInvalidationFailed := false
-			if (account.Type == AccountTypeOAuth || account.IsBPSOAuth()) && (!isGrokOAuth || persistentlyBlocked) {
+			if account.Type == AccountTypeOAuth && (!isGrokOAuth || persistentlyBlocked) {
 				if s.cacheInvalidator == nil {
 					cacheInvalidationFailed = true
 				} else if invalidateErr := s.cacheInvalidator.InvalidateToken(ctx, account); invalidateErr != nil {
@@ -1251,7 +1251,7 @@ func (s *TokenRefreshService) postRefreshStateSyncWithCleanup(parent context.Con
 
 func (s *TokenRefreshService) postRefreshStateSync(ctx context.Context, account *Account) {
 	// 对所有 OAuth 账号调用缓存失效（InvalidateToken 内部根据平台判断是否需要处理）
-	if s.cacheInvalidator != nil && (account.Type == AccountTypeOAuth || account.IsBPSOAuth()) {
+	if s.cacheInvalidator != nil && account.Type == AccountTypeOAuth {
 		if err := s.cacheInvalidator.InvalidateToken(ctx, account); err != nil {
 			slog.Warn("token_refresh.invalidate_token_cache_failed",
 				"account_id", account.ID,

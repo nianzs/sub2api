@@ -11,6 +11,7 @@ var DefaultModels = []Model{
 	{ID: "gpt-5.6-sol", Type: "model", DisplayName: "GPT-5.6 Sol"},
 	{ID: "gpt-5.6-terra", Type: "model", DisplayName: "GPT-5.6 Terra"},
 	{ID: "gpt-5.6-luna", Type: "model", DisplayName: "GPT-5.6 Luna"},
+	{ID: "grok-4.7", Type: "model", DisplayName: "Grok 4.7"},
 	{ID: "kimi-k3", Type: "model", DisplayName: "Kimi K3"},
 	{ID: "claude-opus-4-8", Type: "model", DisplayName: "Claude Opus 4.8"},
 	{ID: "claude-opus-4-8-thinking", Type: "model", DisplayName: "Claude Opus 4.8 (Thinking)"},

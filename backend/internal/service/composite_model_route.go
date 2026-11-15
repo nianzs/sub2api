@@ -33,7 +33,7 @@ type CompositeModelOwnership struct {
 	Matched        bool
 	Ambiguous      bool
 	// OpenAIGatewayOAuthClaimed 表示声明方中含 OpenAI 网关族平台的 OAuth /
-	// setup-token / BPS OAuth 凭据。歧义请求无法解析平台，会落到默认的 Anthropic 网关
+	// setup-token 凭据。歧义请求无法解析平台，会落到默认的 Anthropic 网关
 	// handler：Anthropic / Gemini / Antigravity 的 OAuth 在那里有原生或兼容
 	// 转发，API Key 上游可能兼容多种格式，唯独这类凭据只能走 OpenAI 网关。
 	OpenAIGatewayOAuthClaimed bool

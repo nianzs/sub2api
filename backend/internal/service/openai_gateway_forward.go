@@ -64,25 +64,6 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 		return nil, errors.New("codex_cli_only restriction: only codex official clients are allowed")
 	}
 
-	modelForBPS := gjson.GetBytes(body, "model").String()
-	if err := validateExcelOAuthRoute(account, modelForBPS); err != nil {
-		return nil, newExcelOAuthRouteFailoverError()
-	}
-	// The BPS tools probe must exercise BPS itself; a silent native fallback
-	// would report a passing BPS test without touching BPS.
-	if c.GetBool(bpsAccountProbeRequiredContextKey) &&
-		(!account.IsExcelBPSEnabledForModel(modelForBPS) || account.excelBPSNativeFallbackReason(body) != "") {
-		return nil, errors.New("bps probe path is unavailable")
-	}
-	if account.IsExcelBPSEnabledForModel(modelForBPS) {
-		return s.forwardExcelBPS(ctx, c, account, body, startTime)
-	}
-	if account.IsBPSOAuth() {
-		// Unreachable while validateExcelOAuthRoute holds; never hand an Excel
-		// token to the native path.
-		return nil, newExcelOAuthRouteFailoverError()
-	}
-
 	normalizedBody, normalized, err := normalizeOpenAICodexCompactReasoningEffortForAccount(c, account, body)
 	if err != nil {
 		return nil, err
@@ -1533,9 +1514,6 @@ func (s *OpenAIGatewayService) buildUpstreamRequest(ctx context.Context, c *gin.
 	// 客户端回带的 x-codex-turn-state 若已知由其他账号铸造（failover 换号），
 	// 剥离后再出站——异账号 blob 与本账号的（指纹收敛后）出站身份自相矛盾。
 	s.guardOpenAICodexTurnStateEcho(c, account, req.Header)
-	if err := s.applyOpenAICodexTicket(ctx, account, extractOpenAICodexTicketModel(body), req.Header); err != nil {
-		return nil, err
-	}
 	if account.UsesOpenAICodexProtocol() {
 		compatMessagesBridge := isOpenAICompatMessagesBridgeContext(c) || isOpenAICompatMessagesBridgeBody(body)
 		// 清除客户端透传的 session 头，后续用隔离后的值重新设置，防止跨用户会话碰撞。

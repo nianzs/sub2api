@@ -1166,7 +1166,8 @@ func shouldUseKiroConservativeBillingFallback(result *ForwardResult, billingMode
 	if opts == nil || !opts.IsKiroAccount {
 		return false
 	}
-	if isExactKiroGPT56Model(billingModel) || isExactKiroGPT56Model(result.Model) {
+	if isExactKiroGPT56Model(billingModel) || isExactKiroGPT56Model(result.Model) ||
+		isExactKiroGrok47Model(billingModel) || isExactKiroGrok47Model(result.Model) {
 		return false
 	}
 	return true
@@ -1179,6 +1180,14 @@ func isExactKiroGPT56Model(model string) bool {
 	default:
 		return false
 	}
+}
+
+// isExactKiroGrok47Model 判断模型是否为 Kiro 上的 Grok 4.7。它与 GPT-5.6 一样在
+// 定价目录（或 fallbackPrices）里有自己的价目，解析成功时根本不走保守兜底；
+// 这里的豁免只覆盖目录异常缺失的场景，避免被按 claude-opus-4-6 高估
+// （input 约 2.5 倍、output 约 4.17 倍）。
+func isExactKiroGrok47Model(model string) bool {
+	return strings.TrimSpace(strings.ToLower(model)) == "grok-4.7"
 }
 
 func (s *GatewayService) calculateKiroConservativeTokenCost(tokens UsageTokens, multiplier float64) *CostBreakdown {

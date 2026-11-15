@@ -6,8 +6,11 @@ import (
 )
 
 // KiroContextWindowTokens 返回模型在 Kiro 上游的上下文窗口大小（token），
-// 用于把 contextUsageEvent 的使用百分比换算成 token 数。取值与 kiro.rs 的
-// get_context_window_size 保持一致。
+// 用于把 contextUsageEvent 的使用百分比换算成 token 数。
+//
+// 取值按 Kiro 官方模型页/模型选择器公布的窗口，统一用十进制整千（1M = 1_000_000），
+// 与 kiro.rs 的 get_context_window_size 口径一致。注意模型选择器徽章上 GPT-5.6 显示
+// 986K，而官方文档明确写的是 1M token context window（IDE/CLI/Web），此处以文档为准。
 //
 // 换算结果会写进 usage.input_tokens，既影响计费，也影响客户端的上下文进度条
 // 与自动压缩阈值。漏配一个 1M 模型会让该模型的 input 少报 5 倍——新增 1M
@@ -21,6 +24,17 @@ func KiroContextWindowTokens(model string) int {
 		"claude-opus-4.6", "claude-opus-4.7", "claude-opus-4.8", "claude-opus-5", "claude-opus-5.5",
 		"claude-haiku-5.5", "claude-fable-5":
 		return 1_000_000
+	case "kimi-k3":
+		return 1_000_000
+	case "grok-4.7":
+		// Kiro 文档口径 500K，与其定价目录的 max_input_tokens 一致。
+		return 500_000
+	case "qwen3-coder-next":
+		return 256_000
+	case "minimax-m2.5", "minimax-m2.1":
+		return 196_000
+	case "deepseek-3.2":
+		return 164_000
 	}
 	// 其他 GPT 模型的窗口尚未确认，沿用 kiro.rs 的 272k 兜底。
 	if strings.HasPrefix(normalized, "gpt") {

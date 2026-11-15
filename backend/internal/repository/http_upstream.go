@@ -34,7 +34,6 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/pkg/tlsfingerprint"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/xai"
 	"github.com/Wei-Shaw/sub2api/internal/service"
-	"github.com/Wei-Shaw/sub2api/internal/util/transportdiag"
 	"github.com/Wei-Shaw/sub2api/internal/util/urlvalidator"
 )
 
@@ -105,10 +104,7 @@ const (
 	upstreamProtocolModeOpenAIH1         = "openai_h1"
 	upstreamProtocolModeOpenAIH2         = "openai_h2"
 	upstreamProtocolModeOpenAIH1Fallback = "openai_h1_fallback"
-	upstreamProtocolModeOpenAIH1NoReuse  = "openai_h1_noreuse"
 	upstreamProtocolModeGrok             = "grok"
-	upstreamProtocolModeBPSH2            = "bps_h2"
-	upstreamProtocolModeBPSH1            = "bps_h1"
 )
 
 var errUpstreamClientLimitReached = errors.New("upstream client cache limit reached")
@@ -172,8 +168,6 @@ type httpUpstreamService struct {
 	clients map[string]*upstreamClientEntry // 客户端缓存池，key 由隔离策略决定
 	// OpenAI 走 HTTP/HTTPS 代理时的 H2->H1 回退状态（key=标准化 proxyKey）
 	openAIHTTP2Fallbacks sync.Map
-	// BPS fallback state is isolated from Codex and contains only hashed proxy keys.
-	bpsHTTP2Fallbacks map[[32]byte]bpsHTTP2Fallback
 }
 
 // NewHTTPUpstream 创建通用 HTTP 上游服务
@@ -226,29 +220,15 @@ func (s *httpUpstreamService) Do(req *http.Request, proxyURL string, accountID i
 	// 执行请求
 	client := s.httpClientForUpstreamRequest(entry.client, req)
 	client = httpClientWithGrokAccessDeniedFallback(client)
-	var bpsTrace *transportdiag.Trace
-	if profile == service.HTTPUpstreamProfileExcelBPS {
-		bpsTrace = transportdiag.FromContext(req.Context())
-		if bpsTrace == nil {
-			bpsTrace = &transportdiag.Trace{}
-			req = bpsTrace.Request(req)
-		}
-	}
 	resp, err := doUpstreamRequest(client, req, s.upstreamDrainTimeout())
 	if err != nil {
 		s.recordOpenAIHTTP2Failure(profile, entry.protocolMode, entry.proxyKey, err)
-		s.recordBPSHTTP2Failure(req.Context(), entry.proxyKey, bpsTrace, err)
 		// 请求失败，立即减少计数
 		atomic.AddInt64(&entry.inFlight, -1)
 		atomic.StoreInt64(&entry.lastUsed, time.Now().UnixNano())
 		return nil, err
 	}
 	s.recordOpenAIHTTP2Success(profile, entry.protocolMode, entry.proxyKey)
-	if bpsTrace != nil && bpsTrace.NegotiatedHTTP2() {
-		resp.Body = &bpsFeedbackBody{ReadCloser: resp.Body, trace: bpsTrace, failed: func(err error) {
-			s.recordBPSHTTP2Failure(req.Context(), entry.proxyKey, bpsTrace, err)
-		}}
-	}
 
 	// 包装响应体，在关闭时自动减少计数并更新时间戳
 	// 这确保了流式响应（如 SSE）在完全读取前不会被淘汰
@@ -1092,20 +1072,11 @@ func (s *httpUpstreamService) resolveOpenAIHTTP2Settings() openAIHTTP2Settings {
 }
 
 func (s *httpUpstreamService) resolveProtocolMode(profile service.HTTPUpstreamProfile, proxyKey string, parsedProxy *url.URL) string {
-	if profile == service.HTTPUpstreamProfileExcelBPS {
-		if s.bpsHTTP1Active(proxyKey, time.Now()) {
-			return upstreamProtocolModeBPSH1
-		}
-		return upstreamProtocolModeBPSH2
-	}
 	if profile == service.HTTPUpstreamProfileLongStream {
 		return upstreamProtocolModeLongStreamH2
 	}
 	if profile == service.HTTPUpstreamProfileGrok {
 		return upstreamProtocolModeGrok
-	}
-	if profile == service.HTTPUpstreamProfileOpenAIHarvest {
-		return upstreamProtocolModeOpenAIH1NoReuse
 	}
 	if profile != service.HTTPUpstreamProfileOpenAI {
 		return upstreamProtocolModeDefault
@@ -1429,7 +1400,7 @@ func buildUpstreamTransport(settings poolSettings, proxyURL *url.URL, protocolMo
 		ResponseHeaderTimeout: settings.responseHeaderTimeout,
 	}
 	switch protocolMode {
-	case upstreamProtocolModeLongStreamH2, upstreamProtocolModeOpenAIH2, upstreamProtocolModeBPSH2:
+	case upstreamProtocolModeLongStreamH2, upstreamProtocolModeOpenAIH2:
 		transport.ForceAttemptHTTP2 = true
 		// 显式配置 http2 并启用 PING 健康探测，剔除代理/NAT 静默掐断的死连接，
 		// 避免请求挂在死连接上直到 TCP 重传超时（分钟级）。
@@ -1438,13 +1409,6 @@ func buildUpstreamTransport(settings poolSettings, proxyURL *url.URL, protocolMo
 		}
 	case upstreamProtocolModeOpenAIH1:
 		transport.ForceAttemptHTTP2 = false
-		transport.TLSNextProto = make(map[string]func(string, *tls.Conn) http.RoundTripper)
-	case upstreamProtocolModeOpenAIH1NoReuse:
-		// Harvest must open a fresh CONNECT each attempt so the harvest proxy can rotate egress IPs.
-		transport.ForceAttemptHTTP2 = false
-		transport.DisableKeepAlives = true
-		transport.MaxIdleConns = 0
-		transport.MaxIdleConnsPerHost = 0
 		transport.TLSNextProto = make(map[string]func(string, *tls.Conn) http.RoundTripper)
 	case upstreamProtocolModeOpenAIH1Fallback:
 		// 显式禁用 HTTP/2，确保代理不兼容场景回退到 HTTP/1.1。

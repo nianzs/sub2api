@@ -492,9 +492,7 @@ func (s *AccountUsageService) getUsageForAccount(ctx context.Context, account *A
 		return s.getPassiveUsageForAccount(ctx, account)
 	}
 
-	// BPS-only accounts read the same stored windows, refreshed from BPS response
-	// headers; the native Codex probe below never runs for them (IsOAuth).
-	if account.IsOpenAIOAuthCredentialAccount() {
+	if account.Platform == PlatformOpenAI && account.Type == AccountTypeOAuth {
 		// Usage can come from a stored snapshot even when a probe fails. Neither
 		// that nor a working access token proves a rejected refresh token recovered.
 		return s.getOpenAIUsage(ctx, account, forceProbe)

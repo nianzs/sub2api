@@ -14,12 +14,6 @@ import type {
 } from "@/types";
 import type { RechargeBonusTier } from "@/utils/rechargeBonus";
 
-/** Codex 门票订阅档位长度规则：plan 对账号 plan_type 做小写子串匹配，先命中先生效 */
-export interface CodexTicketPlanLengthRule {
-  plan: string;
-  length: number;
-}
-
 export interface DefaultSubscriptionSetting {
   group_id: number;
   validity_days: number;
@@ -651,12 +645,6 @@ export interface SystemSettings {
   openai_codex_client_version: string;
   openai_codex_client_version_synced: string;
   openai_codex_version_auto_sync_enabled: boolean;
-  openai_codex_ticket_enabled: boolean;
-  openai_codex_ticket_fail_closed: boolean;
-  openai_codex_ticket_harvest_proxy_url: string;
-  openai_codex_ticket_harvest_proxy_configured: boolean;
-  openai_codex_ticket_default_length: number;
-  openai_codex_ticket_plan_lengths: CodexTicketPlanLengthRule[] | null;
   claude_code_client_version: string;
   claude_code_client_version_synced: string;
   claude_code_version_auto_sync_enabled: boolean;
@@ -989,11 +977,6 @@ export interface UpdateSettingsRequest {
   openai_codex_user_agent?: string;
   openai_codex_client_version?: string;
   openai_codex_version_auto_sync_enabled?: boolean;
-  openai_codex_ticket_enabled?: boolean;
-  openai_codex_ticket_fail_closed?: boolean;
-  openai_codex_ticket_harvest_proxy_url?: string;
-  openai_codex_ticket_default_length?: number;
-  openai_codex_ticket_plan_lengths?: CodexTicketPlanLengthRule[];
   claude_code_client_version?: string;
   claude_code_version_auto_sync_enabled?: boolean;
   // fish 原生号动态尺寸规划阈值（网关）

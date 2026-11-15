@@ -182,13 +182,6 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 	cacheCreationTokens := result.Usage.CacheCreationInputTokens
 	cacheCreation30mTokens := result.Usage.CacheCreation30mInputTokens
 	cacheCreation12hTokens := result.Usage.CacheCreation12hInputTokens
-	if account.IsExcelBPSCacheCreationAsInputEnabled() && result.UpstreamEndpoint == "/basispoints/api/responses" {
-		// Total input already includes cache creation. Retain those tokens in the
-		// ordinary input bucket without changing the original upstream usage.
-		cacheCreationTokens = 0
-		cacheCreation30mTokens = 0
-		cacheCreation12hTokens = 0
-	}
 	actualInputTokens := result.Usage.InputTokens - result.Usage.CacheReadInputTokens - cacheCreationTokens
 	if actualInputTokens < 0 {
 		actualInputTokens = 0
@@ -588,10 +581,9 @@ func openAILongContextBillingGate(account *Account) *bool {
 
 // openAISubscriptionLongContextExempt 按实际凭据和最终发送模型判断订阅豁免。
 // GPT-6.1 Sol / Terra 的订阅请求不再收取模型长上下文附加费；API Key 仍使用 API 价卡。
-// BPS OAuth 账号消耗的是同一份 ChatGPT 订阅，同样豁免。
 // 使用发送模型，避免客户别名、渠道计费模型或响应模型计费切换改变上游订阅规则。
 func openAISubscriptionLongContextExempt(account *Account, result *OpenAIForwardResult) bool {
-	if (!account.IsOpenAIOAuthLike() && !account.IsBPSOAuth()) || result == nil {
+	if !account.IsOpenAIOAuthLike() || result == nil {
 		return false
 	}
 	model := strings.TrimSpace(result.UpstreamModel)

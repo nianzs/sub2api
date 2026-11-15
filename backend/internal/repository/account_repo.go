@@ -59,10 +59,6 @@ var schedulerNeutralExtraKeyPrefixes = []string{
 	"codex_5h_",
 	"codex_7d_",
 	"codex_reset_credit_",
-	// 292 门票是纯运行态凭据：它不在 filterSchedulerExtra 的投影白名单里，
-	// 因此 bucket 重建事件永远搬不动门票状态，续期时开事务+发 outbox 是白干。
-	// 归为观测型后仍会同步单账号快照（见 UpdateExtra），不丢任何新鲜度。
-	"codex_turn_ticket:",
 	"passive_usage_",
 	"upstream_billing_probe",
 	"upstream_billing_rate_sync",
@@ -691,8 +687,7 @@ func lockAndMergeAccountProbeExtra(
 			extra -> 'opencode_go_usage_auto_refresh',
 			extra -> 'opencode_go_usage_snapshot',
 			extra -> 'grok_observed_models',
-			extra -> 'upstream_model_metadata',
-			COALESCE(extra, '{}'::jsonb)
+			extra -> 'upstream_model_metadata'
 		FROM accounts
 		WHERE id = $1 AND deleted_at IS NULL
 		FOR NO KEY UPDATE
@@ -723,7 +718,6 @@ func lockAndMergeAccountProbeExtra(
 		currentOpenCodeSnapshot        []byte
 		currentGrokObservedModels      []byte
 		currentUpstreamModelMetadata   []byte
-		currentExtraJSON               []byte
 	)
 	if err := rows.Scan(
 		&identityUnchanged,
@@ -740,7 +734,6 @@ func lockAndMergeAccountProbeExtra(
 		&currentOpenCodeSnapshot,
 		&currentGrokObservedModels,
 		&currentUpstreamModelMetadata,
-		&currentExtraJSON,
 	); err != nil {
 		return nil, err
 	}
@@ -748,18 +741,7 @@ func lockAndMergeAccountProbeExtra(
 		return nil, err
 	}
 
-	// 门票是 1 小时 TTL 的临时凭据。extra 若是非对象 JSON，解析失败不得让整个
-	// 账号编辑失败，只降级放弃「保留库内门票」这一件事。
-	var currentExtra map[string]any
-	if len(currentExtraJSON) > 0 {
-		if err := json.Unmarshal(currentExtraJSON, &currentExtra); err != nil {
-			logger.LegacyPrintf("repository.account",
-				"[Account] current extra unmarshal failed, codex ticket preservation skipped: id=%d err=%v",
-				account.ID, err)
-			currentExtra = nil
-		}
-	}
-	extra := service.MergeOpenAICodexTicketExtra(copyJSONMap(normalizeJSONMap(account.Extra)), currentExtra)
+	extra := copyJSONMap(normalizeJSONMap(account.Extra))
 	for _, key := range []string{
 		service.UpstreamBillingProbeEnabledExtraKey,
 		service.UpstreamBillingRateSyncEnabledExtraKey,
@@ -1377,14 +1359,12 @@ func (r *accountRepository) ListOAuthRefreshCandidatePage(ctx context.Context, o
 		query += `
 			AND status = 'active'`
 	}
-	// bps-oauth (OpenAI Excel/BPS-only) accounts hold OAuth credentials refreshed
-	// through the same OpenAI lifecycle as oauth accounts.
 	if options.IncludeSetupToken {
 		query += `
-			AND type IN ('oauth', 'setup-token', 'bps-oauth')`
+			AND type IN ('oauth', 'setup-token')`
 	} else {
 		query += `
-			AND type IN ('oauth', 'bps-oauth')`
+			AND type = 'oauth'`
 	}
 	args := []any{pq.Array(options.Platforms), options.AfterID, options.Limit}
 	if options.RequireRefreshToken {
@@ -3405,9 +3385,6 @@ func (r *accountRepository) BulkUpdate(ctx context.Context, ids []int64, updates
 			extraExpression += " || $" + itoa(idx) + "::jsonb"
 			args = append(args, payload)
 			idx++
-			if enabled, exists := updates.Extra["openai_excel_bps_cache_creation_as_input"].(bool); exists && !enabled {
-				extraExpression = "(" + extraExpression + ") - 'openai_excel_bps_cache_creation_as_input'"
-			}
 			if upstreamBillingProbeExplicitlyDisabled(updates.Extra) || upstreamBillingProbeSnapshotClearRequested(updates.Extra) {
 				extraExpression = "(" + extraExpression + ") - 'upstream_billing_probe'"
 			}

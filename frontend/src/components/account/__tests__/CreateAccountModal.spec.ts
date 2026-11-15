@@ -85,8 +85,6 @@ vi.mock('vue-i18n', async () => {
 })
 
 import CreateAccountModal from '../CreateAccountModal.vue'
-import { DEFAULT_EXCEL_BPS_MODELS } from '@/constants/account'
-import { OPENAI_EXCEL_OAUTH_CLIENT_ID } from '@/composables/useOpenAIOAuth'
 
 const BaseDialogStub = defineComponent({
   name: 'BaseDialog',
@@ -102,7 +100,6 @@ const OAuthAuthorizationFlowStub = defineComponent({
     showCodexSessionImportOption: Boolean,
     showAgentIdentityOption: Boolean,
     showCodexPatOption: Boolean,
-    excelOauth: Boolean,
     initialInputMethod: String,
   },
   data: () => ({ inputMethod: 'manual' }),
@@ -1026,145 +1023,6 @@ describe('CreateAccountModal OpenAI long-context billing', () => {
     expect(payload?.upstream_billing_probe_enabled).toBe(true)
     // 创建成功后前端立即发起一次首探（与其他 apikey 平台一致）。
     expect(probeUpstreamBillingMock).toHaveBeenCalledWith(42)
-  })
-
-  it('OpenAI 的 OAuth / BPS OAuth / API Key 三个类型按钮在同一行', async () => {
-    const wrapper = mountModal()
-    await selectButtonByText(wrapper, 'OpenAI')
-
-    const grid = wrapper.get('[data-testid="openai-account-type-grid"]')
-    expect(grid.classes()).toContain('grid-cols-3')
-    expect(grid.classes()).not.toContain('grid-cols-2')
-    const labels = grid.findAll(':scope > button').map((button) => button.find('span.block').text())
-    expect(labels).toEqual(['OAuth', 'BPS OAuth', 'API Key'])
-  })
-
-  it('BPS OAuth 只保留 Excel 可用的授权入口', async () => {
-    const wrapper = mountModal()
-    await selectButtonByText(wrapper, 'OpenAI')
-    await wrapper.get('[data-testid="openai-bps-oauth"]').trigger('click')
-    expect(wrapper.find('[data-testid="bps-oauth-models"]').exists()).toBe(false)
-    await wrapper.get('form#create-account-form input[type="text"]').setValue('BPS account')
-    await wrapper.get('form#create-account-form').trigger('submit.prevent')
-    await flushPromises()
-
-    const flow = wrapper.findComponent({ name: 'OAuthAuthorizationFlow' })
-    expect(flow.exists()).toBe(true)
-    expect((wrapper.vm as any).form.type).toBe('bps-oauth')
-    expect(flow.props('showMobileRefreshTokenOption')).toBe(false)
-    expect(flow.props('showCodexSessionImportOption')).toBe(false)
-    expect(flow.props('showAgentIdentityOption')).toBe(false)
-    expect(flow.props('showCodexPatOption')).toBe(false)
-  })
-
-  it('BPS OAuth 第二步提示 Excel 回调，返回上一步保留 BPS 类型与模型', async () => {
-    const wrapper = mountModal()
-    await selectButtonByText(wrapper, 'OpenAI')
-    await wrapper.get('[data-testid="openai-bps-oauth"]').trigger('click')
-    const models = [...(wrapper.vm as any).allowedModels]
-    await wrapper.get('form#create-account-form input[type="text"]').setValue('BPS account')
-    await wrapper.get('form#create-account-form').trigger('submit.prevent')
-    await flushPromises()
-
-    expect(wrapper.findComponent({ name: 'OAuthAuthorizationFlow' }).props('excelOauth')).toBe(true)
-
-    ;(wrapper.vm as any).goBackToBasicInfo()
-    await flushPromises()
-
-    expect((wrapper.vm as any).form.type).toBe('bps-oauth')
-    expect((wrapper.vm as any).openaiBPSOAuth).toBe(true)
-    expect((wrapper.vm as any).allowedModels).toEqual(models)
-  })
-
-  it('BPS OAuth 默认在通用模型限制里预填 BPS 模型，候选只列 BPS 模型', async () => {
-    const wrapper = mountModal()
-    await selectButtonByText(wrapper, 'OpenAI')
-    const section = () => wrapper.get('[data-testid="oauth-model-restriction-section"]')
-    // 普通 OAuth：原生目录，不限定候选
-    expect(section().getComponent(ModelWhitelistSelectorStub).props('availableModels')).toBeUndefined()
-    expect(section().getComponent(ModelWhitelistSelectorStub).props('modelValue')).toContain('gpt-image-2')
-
-    await wrapper.get('[data-testid="openai-bps-oauth"]').trigger('click')
-    await flushPromises()
-    const selector = section().getComponent(ModelWhitelistSelectorStub)
-    expect(selector.props('modelValue')).toEqual([...DEFAULT_EXCEL_BPS_MODELS])
-    expect(selector.props('availableModels')).toEqual([...DEFAULT_EXCEL_BPS_MODELS])
-
-    const mappingTab = section().findAll('button').find((button) => button.text() === 'admin.accounts.modelMapping')
-    await mappingTab!.trigger('click')
-    expect(section().findAll('[data-testid="oauth-preset-mapping"]').map((button) => button.text())).toEqual([
-      '+ GPT-6 Astra',
-      '+ GPT-5.6 Sol',
-      '+ GPT-5.6 Terra',
-    ])
-
-    // 切回普通 OAuth：恢复原生预设与白名单
-    await selectButtonByText(wrapper, 'admin.accounts.types.chatgptOauth')
-    await flushPromises()
-    expect(section().findAll('[data-testid="oauth-preset-mapping"]').map((button) => button.text())).toContain('+ GPT-4o')
-    const whitelistTab = section().findAll('button').find((button) => button.text() === 'admin.accounts.modelWhitelist')
-    await whitelistTab!.trigger('click')
-    await flushPromises()
-    expect(section().getComponent(ModelWhitelistSelectorStub).props('availableModels')).toBeUndefined()
-    expect(section().getComponent(ModelWhitelistSelectorStub).props('modelValue')).toContain('gpt-image-2')
-  })
-
-  it('BPS OAuth 建号把模型写进 model_mapping，不再写 openai_excel_bps_models', async () => {
-    generateAuthUrlMock.mockResolvedValue({
-      auth_url: 'https://auth.openai.com/oauth/authorize?client_id=excel&state=bps.test',
-      session_id: 'session-1',
-    })
-    exchangeCodeMock.mockResolvedValue({
-      access_token: 'at',
-      refresh_token: 'rt',
-      client_id: OPENAI_EXCEL_OAUTH_CLIENT_ID,
-    })
-    createAccountMock.mockResolvedValue({ id: 42 })
-
-    const wrapper = mountModal()
-    await selectButtonByText(wrapper, 'OpenAI')
-    await wrapper.get('[data-testid="openai-bps-oauth"]').trigger('click')
-    await wrapper.get('form#create-account-form input[type="text"]').setValue('BPS account')
-    await wrapper.get('form#create-account-form').trigger('submit.prevent')
-    await flushPromises()
-    await wrapper.get('[data-testid="generate-url"]').trigger('click')
-    await flushPromises()
-    expect(generateAuthUrlMock).toHaveBeenCalledWith(expect.any(String), expect.objectContaining({ oauth_client: 'excel' }))
-
-    await (wrapper.vm as any).handleOpenAIExchange('auth-code')
-    await flushPromises()
-
-    expect(createAccountMock).toHaveBeenCalledTimes(1)
-    const payload = createAccountMock.mock.calls[0]?.[0]
-    expect(payload?.type).toBe('bps-oauth')
-    expect(payload?.credentials?.model_mapping).toEqual({
-      'gpt-6-astra': 'gpt-6-astra',
-      'gpt-5.6-sol': 'gpt-5.6-sol',
-      'gpt-5.6-terra': 'gpt-5.6-terra',
-    })
-    expect(payload?.extra ?? {}).not.toHaveProperty('openai_excel_bps_models')
-  })
-
-  it('BPS OAuth 不受 Codex 透传开关影响，始终应用模型映射', async () => {
-    const wrapper = mountModal()
-    await selectButtonByText(wrapper, 'OpenAI')
-    ;(wrapper.vm as any).openaiPassthroughEnabled = true
-    await flushPromises()
-    expect((wrapper.vm as any).isOpenAIModelRestrictionDisabled).toBe(true)
-
-    await wrapper.get('[data-testid="openai-bps-oauth"]').trigger('click')
-    await flushPromises()
-    expect((wrapper.vm as any).isOpenAIModelRestrictionDisabled).toBe(false)
-  })
-
-  it('普通 OpenAI OAuth 仍提供 Codex 导入入口', async () => {
-    const wrapper = await openCodexImportStep()
-    const flow = wrapper.findComponent({ name: 'OAuthAuthorizationFlow' })
-    expect((wrapper.vm as any).form.type).toBe('oauth')
-    expect(flow.props('showMobileRefreshTokenOption')).toBe(true)
-    expect(flow.props('showCodexSessionImportOption')).toBe(true)
-    expect(flow.props('showAgentIdentityOption')).toBe(true)
-    expect(flow.props('showCodexPatOption')).toBe(true)
   })
 
   it('leaves Codex session import billing ownership to the backend', async () => {

@@ -1243,17 +1243,6 @@ func TestBuildSchedulerMetadataAccount_KeepsRPMFieldsForRPMGate(t *testing.T) {
 	})
 }
 
-// The retired BPS model whitelist is no longer projected into the scheduler
-// snapshot; a BPS-only account's models come from its model mapping.
-func TestFilterSchedulerExtraDropsRetiredExcelBPSWhitelist(t *testing.T) {
-	filtered := filterSchedulerExtra(map[string]any{
-		"openai_excel_bps_models": []string{"gpt-7-new"},
-		"openai_passthrough":      nil,
-	})
-	require.NotContains(t, filtered, "openai_excel_bps_models")
-	require.NotContains(t, filtered, "openai_passthrough")
-}
-
 func TestFishWalletExtraIsProjectedAndSchedulerNeutral(t *testing.T) {
 	filtered := filterSchedulerExtra(map[string]any{
 		service.FishWalletBalanceExtraKey:   300,

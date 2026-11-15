@@ -995,11 +995,6 @@ func (a *Account) IsModelSupported(requestedModel string) bool {
 }
 
 func (a *Account) isModelMappingSupported(requestedModel string) bool {
-	// BPS-only（bps-oauth）账号没有原生 Codex 通道：不具备 BPS 资格（free / 影子）时
-	// 不服务任何模型；其余按下方 model_mapping 判定，空映射只放行默认 BPS 模型。
-	if a.IsBPSOAuth() && !a.IsExcelBPSEnabled() {
-		return false
-	}
 	// 透传模式仅替换认证、模型语义完全交由上游决定，因此放行所有模型。
 	// 该短路必须在 model_mapping 判定之前：账号从"白名单模式"切换到透传后，
 	// credentials 里常残留旧的非空 model_mapping，若不在此放行，透传账号会被
@@ -1017,9 +1012,6 @@ func (a *Account) isModelMappingSupported(requestedModel string) bool {
 	}
 	mapping := a.GetModelMapping()
 	if len(mapping) == 0 {
-		if a.IsBPSOAuth() {
-			return isExcelBPSDefaultModel(requestedModel)
-		}
 		if a.IsOpenAIOAuth() {
 			return isOpenAIOAuthServableModel(requestedModel)
 		}
@@ -1802,7 +1794,7 @@ func (a *Account) GetOpenAIAccessToken() string {
 }
 
 func (a *Account) GetOpenAIRefreshToken() string {
-	if !a.IsOpenAIOAuthCredentialAccount() {
+	if !a.IsOpenAIOAuth() {
 		return ""
 	}
 	return a.GetCredential("refresh_token")
@@ -1932,19 +1924,15 @@ func (a *Account) GetOpenAIUserAgent() string {
 	return a.GetCredential("user_agent")
 }
 
-// GetChatGPTAccountID returns the ChatGPT workspace of an OpenAI subscription
-// credential (Codex OAuth, setup token or BPS-only). It identifies the account
-// only; callers that send ChatGPT headers gate on the native protocol
-// themselves (see openai_chatgpt_headers.go).
 func (a *Account) GetChatGPTAccountID() string {
-	if !a.IsOpenAIOAuthLike() && !a.IsBPSOAuth() {
+	if !a.IsOpenAIOAuthLike() {
 		return ""
 	}
 	return a.GetCredential("chatgpt_account_id")
 }
 
 func (a *Account) IsChatGPTAccountFedRAMP() bool {
-	if (!a.IsOpenAIOAuthLike() && !a.IsBPSOAuth()) || a.Credentials == nil {
+	if !a.IsOpenAIOAuthLike() || a.Credentials == nil {
 		return false
 	}
 	v, ok := a.Credentials["chatgpt_account_is_fedramp"]
@@ -2205,7 +2193,7 @@ func (a *Account) GetOpenAIOrganizationID() string {
 }
 
 func (a *Account) GetOpenAITokenExpiresAt() *time.Time {
-	if !a.IsOpenAIOAuthCredentialAccount() {
+	if !a.IsOpenAIOAuth() {
 		return nil
 	}
 	return a.GetCredentialAsTime("expires_at")
@@ -2271,8 +2259,7 @@ func (a *Account) IsCodexTelemetryEnabled() bool {
 // 兼容字段：accounts.extra.openai_oauth_passthrough（历史 OAuth 开关）。
 // 字段缺失或类型不正确时，按 false（关闭）处理。
 func (a *Account) IsOpenAIPassthroughEnabled() bool {
-	// BPS 转发始终应用账号映射，透传对 bps-oauth 不生效。
-	if a == nil || !a.IsOpenAI() || a.Extra == nil || a.IsBPSOAuth() {
+	if a == nil || !a.IsOpenAI() || a.Extra == nil {
 		return false
 	}
 	if enabled, ok := a.Extra["openai_passthrough"].(bool); ok {
@@ -2297,48 +2284,7 @@ func (a *Account) IsOpenAIPassthroughEnabled() bool {
 // 优先级：
 // 1. 按账号类型读取分类型字段
 // 2. 分类型字段缺失时，回退兼容字段
-// IsExcelBPSEnabled reports whether the account routes through the Excel
-// gateway (bps.openai.com). BPS is the only channel of a BPS-only (bps-oauth)
-// account, so it is always on for eligible accounts; the account's model
-// restriction decides what it serves. Free-plan accounts are never eligible.
-func (a *Account) IsExcelBPSEnabled() bool {
-	return excelBPSRouteEligible(a)
-}
-
-const ExcelBPSIgnoreEncryptedContentKey = "openai_excel_bps_ignore_encrypted_content"
-
-// IsExcelBPSIgnoreEncryptedContentEnabled opts into replacing ciphertext that
-// BPS cannot forward, such as sub-agent messages in an old Codex conversation,
-// with an omission notice instead of rejecting the whole request.
-func (a *Account) IsExcelBPSIgnoreEncryptedContentEnabled() bool {
-	if !a.IsExcelBPSEnabled() {
-		return false
-	}
-	enabled, _ := a.Extra[ExcelBPSIgnoreEncryptedContentKey].(bool)
-	return enabled
-}
-
-// IsExcelBPSCacheCreationAsInputEnabled controls local billing and downstream usage.
-// The setting has no effect unless this account uses the Excel/BPS protocol.
-func (a *Account) IsExcelBPSCacheCreationAsInputEnabled() bool {
-	if !a.IsExcelBPSEnabled() {
-		return false
-	}
-	enabled, _ := a.Extra["openai_excel_bps_cache_creation_as_input"].(bool)
-	return enabled
-}
-
-// IsExcelBPSEnabledForModel reports whether a request for this model routes
-// through BPS. Every model of an eligible BPS-only account does; which models
-// the account accepts at all is its model restriction (IsModelSupported).
-func (a *Account) IsExcelBPSEnabledForModel(requestedModel string) bool {
-	return a.IsExcelBPSEnabled()
-}
-
 func (a *Account) IsOpenAIResponsesWebSocketV2Enabled() bool {
-	if a.IsBPSOAuth() {
-		return false
-	}
 	if a == nil || !a.IsOpenAI() || a.Extra == nil {
 		return false
 	}

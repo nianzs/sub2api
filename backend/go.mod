@@ -38,7 +38,6 @@ require (
 	github.com/redis/go-redis/v9 v9.22.0
 	github.com/refraction-networking/utls v1.8.2
 	github.com/robfig/cron/v3 v3.0.1
-	github.com/santhosh-tekuri/jsonschema/v6 v6.0.3
 	github.com/shirou/gopsutil/v4 v4.25.6
 	github.com/shopspring/decimal v1.4.0
 	github.com/smartwalle/alipay/v3 v3.2.29

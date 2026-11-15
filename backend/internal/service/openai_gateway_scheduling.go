@@ -443,10 +443,7 @@ func openAICompatibleAccountEligibilityFailureReasonBeforeProfit(ctx context.Con
 	if requestedModel != "" && !supportsOpenAIRequestModel(account, requestedModel, requireCompact) {
 		return "model_not_supported"
 	}
-	// The BPS-aware check keeps legacy candidate filtering, sticky hits and DB
-	// rechecks on the same BPS-only rules as the advanced scheduler (model
-	// whitelist and entry points without a BPS route).
-	if !accountSupportsOpenAICapabilitiesForRequest(ctx, account, requestedModel, requiredCapability, "") {
+	if !account.SupportsOpenAIEndpointCapability(requiredCapability) {
 		if account.IsGrok() && requiredCapability == OpenAIEndpointCapabilityGrokMediaGeneration {
 			_, reason := account.GrokMediaGenerationEligibility()
 			slog.Debug("grok_media_account_ineligible", "account_id", account.ID, "reason", reason)
@@ -820,9 +817,6 @@ func prioritizeOpenAICompactAccounts(accounts []*Account) []*Account {
 // would be sent for a given request, honoring the legacy compact-only mapping
 // when the caller is on the /responses/compact path.
 func resolveOpenAIAccountUpstreamModelForRequest(account *Account, requestedModel string, requireCompact bool) string {
-	if account.IsExcelBPSEnabledForModel(requestedModel) {
-		return account.GetMappedModel(requestedModel)
-	}
 	// Forward checks the raw Chat Completions fallback before passthrough.
 	// These API-key accounts therefore apply normal account model_mapping and
 	// upstream normalization, but never compact_model_mapping.
@@ -1001,7 +995,7 @@ func (s *OpenAIGatewayService) tryStickySessionHit(ctx context.Context, groupID 
 		_ = s.deleteStickySessionAccountID(ctx, groupID, sessionHash)
 		return nil
 	}
-	if s.isOpenAIAccountRequestRuntimeBlocked(account, requestedModel, requireCompact) {
+	if s.isOpenAIAccountRequestRuntimeBlocked(account, requestedModel) {
 		_ = s.deleteStickySessionAccountID(ctx, groupID, sessionHash)
 		return nil
 	}
@@ -1046,17 +1040,6 @@ func (s *OpenAIGatewayService) selectBestAccount(ctx context.Context, groupID *i
 		// Skip excluded accounts
 		if _, excluded := excludedIDs[acc.ID]; excluded {
 			filterStats.exclude("excluded")
-			continue
-		}
-		// Name the in-memory BPS cooldowns before the generic eligibility
-		// checks (which also see them as runtime blocks): an all-cooling BPS
-		// pool must report them so the handler answers 429, not 503.
-		if s.isExcelBPSModelCoolingDown(acc, requestedModel) {
-			filterStats.exclude(excelBPSModelPermissionFilterReason)
-			continue
-		}
-		if s.isExcelBPSCoolingDown(acc, requestedModel) {
-			filterStats.exclude(excelBPSRateLimitedFilterReason)
 			continue
 		}
 
@@ -1242,7 +1225,7 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 						_ = s.deleteStickySessionAccountID(ctx, groupID, sessionHash)
 					} else if !s.openAIAccountMatchesSchedulingGroup(account, groupID) {
 						_ = s.deleteStickySessionAccountID(ctx, groupID, sessionHash)
-					} else if s.isOpenAIAccountRequestRuntimeBlocked(account, requestedModel, requireCompact) {
+					} else if s.isOpenAIAccountRequestRuntimeBlocked(account, requestedModel) {
 						_ = s.deleteStickySessionAccountID(ctx, groupID, sessionHash)
 					} else if needsUpstreamCheck && s.isUpstreamModelRestrictedByChannel(ctx, *groupID, account, requestedModel, requireCompact) {
 						_ = s.deleteStickySessionAccountID(ctx, groupID, sessionHash)
@@ -1311,17 +1294,7 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 			filterStats.exclude("shadow_parent_unhealthy")
 			continue
 		}
-		// BPS cooldowns are runtime blocks too; name them first (see
-		// selectBestAccount).
-		if s.isExcelBPSModelCoolingDown(acc, requestedModel) {
-			filterStats.exclude(excelBPSModelPermissionFilterReason)
-			continue
-		}
-		if s.isExcelBPSCoolingDown(acc, requestedModel) {
-			filterStats.exclude(excelBPSRateLimitedFilterReason)
-			continue
-		}
-		if s.isOpenAIAccountRequestRuntimeBlocked(acc, requestedModel, requireCompact) {
+		if s.isOpenAIAccountRequestRuntimeBlocked(acc, requestedModel) {
 			filterStats.exclude("runtime_blocked")
 			continue
 		}
@@ -1599,7 +1572,7 @@ func (s *OpenAIGatewayService) resolveFreshSchedulableOpenAIAccountBeforeProfit(
 	if !parentHealthyForShadow(fresh, s.parentAccountLookup(ctx)) {
 		return nil
 	}
-	if s.isOpenAIAccountRequestRuntimeBlocked(fresh, requestedModel, requireCompact) {
+	if s.isOpenAIAccountRequestRuntimeBlocked(fresh, requestedModel) {
 		return nil
 	}
 	if s.isOpenAIAccountBlockedBySchedulingThreshold(ctx, fresh) {
@@ -1676,7 +1649,7 @@ func (s *OpenAIGatewayService) recheckSelectedOpenAIAccountFromDBBeforeProfit(ct
 	if !parentHealthyForShadow(latest, s.parentAccountLookup(ctx)) {
 		return nil
 	}
-	if s.isOpenAIAccountRequestRuntimeBlocked(latest, requestedModel, requireCompact) {
+	if s.isOpenAIAccountRequestRuntimeBlocked(latest, requestedModel) {
 		return nil
 	}
 	if s.isOpenAIAccountBlockedBySchedulingThreshold(ctx, latest) {

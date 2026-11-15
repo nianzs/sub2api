@@ -60,6 +60,7 @@ func TestDefaultKiroModelMapping_MatchesKiroReferenceModels(t *testing.T) {
 		"gpt-5.6-terra":                       "gpt-5.6-terra",
 		"gpt-5.6-luna":                        "gpt-5.6-luna",
 		"codex-auto-review":                   "gpt-5.6-luna",
+		"grok-4.7":                            "grok-4.7",
 		"kimi-k3":                             "kimi-k3",
 	}
 
@@ -206,6 +207,8 @@ func TestDefaultBedrockModelMapping_ContainsNewClaudeModels(t *testing.T) {
 	t.Parallel()
 
 	cases := map[string]string{
+		"claude-fable-5-2":  "anthropic.claude-fable-5-2",
+		"claude-mythos-5-2": "anthropic.claude-mythos-5-2",
 		"claude-fable-5-1":  "anthropic.claude-fable-5-1",
 		"claude-fable-5":    "anthropic.claude-fable-5",
 		"claude-opus-4-8":   "us.anthropic.claude-opus-4-8-v1",

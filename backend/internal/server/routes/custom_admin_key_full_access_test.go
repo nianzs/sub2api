@@ -34,7 +34,7 @@ func TestAdminFullAccessRegisteredRoutesPreserveFullHandlers(t *testing.T) {
 	key, _, err := settings.CreateScopedAdminKey(context.Background(), service.ScopedAdminKeyInput{Name: "完整管理", Enabled: true, ConfirmFullAccess: true, Policy: adminaccess.Policy{FullAccess: true}}, 9)
 	require.NoError(t, err)
 	svc := &fullAccessRouteService{scopedRouteAccounts{t: t}}
-	account := adminhandler.NewAccountHandler(svc, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+	account := adminhandler.NewAccountHandler(svc, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
 	auth := middleware.NewAdminAuthMiddleware(nil, service.NewUserService(&scopedRouteUsers{}, nil, nil, nil), settings, nil)
 	r := gin.New()
 	RegisterAdminRoutes(r.Group("/api/v1"), &handler.Handlers{Admin: &handler.AdminHandlers{Account: account, Group: adminhandler.NewGroupHandler(svc, nil, nil), Proxy: adminhandler.NewProxyHandler(svc)}}, auth, middleware.AuditLogMiddleware(func(c *gin.Context) { c.Next() }), middleware.StepUpAuthMiddleware(func(c *gin.Context) { c.AbortWithStatus(403) }), nil, nil)

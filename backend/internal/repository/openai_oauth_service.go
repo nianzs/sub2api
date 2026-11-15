@@ -3,7 +3,6 @@ package repository
 import (
 	"context"
 	"errors"
-	"fmt"
 	"net/http"
 	"net/url"
 	"strings"
@@ -13,7 +12,6 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/pkg/openai"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/imroc/req/v3"
-	"github.com/tidwall/gjson"
 )
 
 // NewOpenAIOAuthClient creates a new OpenAI OAuth client
@@ -23,48 +21,6 @@ func NewOpenAIOAuthClient() service.OpenAIOAuthClient {
 
 type openaiOAuthService struct {
 	tokenURL string
-}
-
-// tokenURLForClient follows the official Excel client's token contract, which
-// targets the unified token endpoint. Other query parameters are kept.
-func (s *openaiOAuthService) tokenURLForClient(clientID string) string {
-	if clientID != openai.ExcelClientID {
-		return s.tokenURL
-	}
-	u, err := url.Parse(s.tokenURL)
-	if err != nil {
-		return s.tokenURL
-	}
-	query := u.Query()
-	query.Set("unified", "true")
-	u.RawQuery = query.Encode()
-	return u.String()
-}
-
-// excelOAuthFailureCodes are the OAuth error codes an Excel token failure may
-// name. The token refresh service classifies failures by these codes in the
-// error text (non-retryable credentials, refresh races), so they survive while
-// the rest of the response body, which can echo credentials, is dropped.
-var excelOAuthFailureCodes = map[string]struct{}{
-	"invalid_grant": {}, "invalid_refresh_token": {}, "token_expired": {},
-	"app_session_terminated": {}, "refresh_token_reused": {}, "refresh_token_invalidated": {},
-	"invalid_client": {}, "unauthorized_client": {}, "access_denied": {},
-	"invalid_scope": {}, "invalid_request": {},
-}
-
-// excelOAuthFailure formats an Excel token endpoint rejection with the status
-// and, when allowlisted, the OAuth error code only.
-func excelOAuthFailure(code, action string, resp *req.Response) error {
-	message := fmt.Sprintf("Excel OAuth token %s failed: status %d", action, resp.StatusCode)
-	body := resp.Bytes()
-	errorCode := gjson.GetBytes(body, "error").String()
-	if gjson.GetBytes(body, "error").IsObject() {
-		errorCode = gjson.GetBytes(body, "error.code").String()
-	}
-	if _, ok := excelOAuthFailureCodes[errorCode]; ok {
-		message += ", error: " + errorCode
-	}
-	return infraerrors.New(http.StatusBadGateway, code, message)
 }
 
 func (s *openaiOAuthService) ExchangeCode(ctx context.Context, code, codeVerifier, redirectURI, proxyURL, clientID string) (*openai.TokenResponse, error) {
@@ -90,16 +46,14 @@ func (s *openaiOAuthService) ExchangeCode(ctx context.Context, code, codeVerifie
 
 	var tokenResp openai.TokenResponse
 
-	request := client.R().
+	authUA, authOriginator := service.CodexCanonicalAuthIdentity()
+	resp, err := client.R().
 		SetContext(ctx).
+		SetHeader("User-Agent", authUA).
+		SetHeader("originator", authOriginator).
 		SetFormDataFromValues(formData).
-		SetSuccessResult(&tokenResp)
-	// The Excel client does not identify as Codex.
-	if clientID != openai.ExcelClientID {
-		authUA, authOriginator := service.CodexCanonicalAuthIdentity()
-		request.SetHeader("User-Agent", authUA).SetHeader("originator", authOriginator)
-	}
-	resp, err := request.Post(s.tokenURLForClient(clientID))
+		SetSuccessResult(&tokenResp).
+		Post(s.tokenURL)
 
 	if err != nil {
 		if shouldReturnOpenAINoProxyHint(ctx, proxyURL, err) {
@@ -109,9 +63,6 @@ func (s *openaiOAuthService) ExchangeCode(ctx context.Context, code, codeVerifie
 	}
 
 	if !resp.IsSuccessState() {
-		if clientID == openai.ExcelClientID {
-			return nil, excelOAuthFailure("OPENAI_OAUTH_TOKEN_EXCHANGE_FAILED", "exchange", resp)
-		}
 		return nil, infraerrors.Newf(http.StatusBadGateway, "OPENAI_OAUTH_TOKEN_EXCHANGE_FAILED", "token exchange failed: status %d, body: %s", resp.StatusCode, resp.String())
 	}
 
@@ -141,23 +92,18 @@ func (s *openaiOAuthService) refreshTokenWithClientID(ctx context.Context, refre
 	formData.Set("grant_type", "refresh_token")
 	formData.Set("refresh_token", refreshToken)
 	formData.Set("client_id", clientID)
-	// The Excel client refreshes without a scope parameter.
-	if clientID != openai.ExcelClientID {
-		formData.Set("scope", openai.RefreshScopes)
-	}
+	formData.Set("scope", openai.RefreshScopes)
 
 	var tokenResp openai.TokenResponse
 
-	request := client.R().
+	authUA, authOriginator := service.CodexCanonicalAuthIdentity()
+	resp, err := client.R().
 		SetContext(ctx).
+		SetHeader("User-Agent", authUA).
+		SetHeader("originator", authOriginator).
 		SetFormDataFromValues(formData).
-		SetSuccessResult(&tokenResp)
-	// The Excel client does not identify as Codex.
-	if clientID != openai.ExcelClientID {
-		authUA, authOriginator := service.CodexCanonicalAuthIdentity()
-		request.SetHeader("User-Agent", authUA).SetHeader("originator", authOriginator)
-	}
-	resp, err := request.Post(s.tokenURLForClient(clientID))
+		SetSuccessResult(&tokenResp).
+		Post(s.tokenURL)
 
 	if err != nil {
 		if shouldReturnOpenAINoProxyHint(ctx, proxyURL, err) {
@@ -167,9 +113,6 @@ func (s *openaiOAuthService) refreshTokenWithClientID(ctx context.Context, refre
 	}
 
 	if !resp.IsSuccessState() {
-		if clientID == openai.ExcelClientID {
-			return nil, excelOAuthFailure("OPENAI_OAUTH_TOKEN_REFRESH_FAILED", "refresh", resp)
-		}
 		return nil, infraerrors.Newf(http.StatusBadGateway, "OPENAI_OAUTH_TOKEN_REFRESH_FAILED", "token refresh failed: status %d, body: %s", resp.StatusCode, resp.String())
 	}
 

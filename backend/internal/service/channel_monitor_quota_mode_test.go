@@ -509,11 +509,6 @@ func TestMonitorAccountQuotaCapability_Matrix(t *testing.T) {
 			account: &Account{ID: 12, Platform: domain.PlatformOpenAI, Type: AccountTypeOAuth},
 		},
 		{
-			// BPS OAuth 的用量来自 BPS 响应头快照与用量日志，同样可作额度数据源。
-			name:    "openai bps oauth ok",
-			account: &Account{ID: 16, Platform: domain.PlatformOpenAI, Type: AccountTypeBPSOAuth},
-		},
-		{
 			// 防过度拦截：gemini/grok/antigravity 走本地统计/值通道降级，不会永久 error。
 			name:    "gemini api key ok",
 			account: &Account{ID: 13, Platform: domain.PlatformGemini, Type: AccountTypeAPIKey},

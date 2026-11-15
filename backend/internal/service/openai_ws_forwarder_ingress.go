@@ -86,13 +86,6 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 	// A handler may reuse the same gin context across account failover attempts.
 	// Never let an OAuth attempt's response aliases leak into the next account.
 	setCodexToolNameReverse(c, nil)
-	// BPS-only accounts have no WebSocket route at all, whatever the model,
-	// plan or global switch: never let their Excel token reach native Codex.
-	// The scheduler already excludes them; this backstop hands the session to
-	// another account.
-	if account.IsBPSOAuth() {
-		return newBPSUnsupportedInboundFailoverError()
-	}
 	if _, err := s.prepareCodexAccountIdentitySource(ctx, c, account); err != nil {
 		return err
 	}

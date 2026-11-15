@@ -455,13 +455,13 @@
       <!-- Account Type Selection (OpenAI) -->
       <div v-if="form.platform === 'openai'">
         <label class="input-label">{{ t('admin.accounts.accountType') }}</label>
-        <div class="mt-2 grid grid-cols-3 gap-3" data-tour="account-form-type" data-testid="openai-account-type-grid">
+        <div class="mt-2 grid grid-cols-2 gap-3" data-tour="account-form-type">
           <button
             type="button"
-            @click="accountCategory = 'oauth-based'; openaiBPSOAuth = false"
+            @click="accountCategory = 'oauth-based'"
             :class="[
               'flex items-center gap-3 rounded-lg border-2 p-3 text-left transition-all',
-              accountCategory === 'oauth-based' && !openaiBPSOAuth
+              accountCategory === 'oauth-based'
                 ? 'border-green-500 bg-green-50 dark:bg-green-900/20'
                 : 'border-gray-200 hover:border-green-300 dark:border-dark-600 dark:hover:border-green-700'
             ]"
@@ -469,7 +469,7 @@
             <div
               :class="[
                 'flex h-8 w-8 shrink-0 items-center justify-center rounded-lg',
-                accountCategory === 'oauth-based' && !openaiBPSOAuth
+                accountCategory === 'oauth-based'
                   ? 'bg-green-500 text-white'
                   : 'bg-gray-100 text-gray-500 dark:bg-dark-600 dark:text-gray-400'
               ]"
@@ -484,35 +484,7 @@
 
           <button
             type="button"
-            data-testid="openai-bps-oauth"
-            @click="accountCategory = 'oauth-based'; openaiBPSOAuth = true"
-            :class="[
-              'flex items-center gap-3 rounded-lg border-2 p-3 text-left transition-all',
-              isOpenAIBPSOAuth
-                ? 'border-green-500 bg-green-50 dark:bg-green-900/20'
-                : 'border-gray-200 hover:border-green-300 dark:border-dark-600 dark:hover:border-green-700'
-            ]"
-          >
-            <div
-              :class="[
-                'flex h-8 w-8 shrink-0 items-center justify-center rounded-lg',
-                isOpenAIBPSOAuth
-                  ? 'bg-green-500 text-white'
-                  : 'bg-gray-100 text-gray-500 dark:bg-dark-600 dark:text-gray-400'
-              ]"
-            >
-              <Icon name="link" size="sm" />
-            </div>
-            <div>
-              <span class="block text-sm font-medium text-gray-900 dark:text-white">BPS OAuth</span>
-              <span class="text-xs text-gray-500 dark:text-gray-400">{{ t('admin.accounts.oauth.openai.excelTypeDesc') }}</span>
-            </div>
-          </button>
-
-
-          <button
-            type="button"
-            @click="accountCategory = 'apikey'; openaiBPSOAuth = false"
+            @click="accountCategory = 'apikey'"
             :class="[
               'flex items-center gap-3 rounded-lg border-2 p-3 text-left transition-all',
               accountCategory === 'apikey'
@@ -3451,7 +3423,6 @@
               v-model="allowedModels"
               :model-mappings="modelMappings"
               :platform="form.platform"
-              :available-models="isOpenAIBPSOAuth ? bpsCandidateModels : undefined"
               :sync-credentials="syncPreviewCredentials"
               @upstream-synced="upstreamModelsPreviewed = true"
             />
@@ -4194,7 +4165,7 @@
 
       <!-- OpenAI 自动透传开关（OAuth/API Key） -->
       <div
-        v-if="form.platform === 'openai' && !isOpenAIBPSOAuth"
+        v-if="form.platform === 'openai'"
         class="border-t border-gray-200 pt-4 dark:border-dark-600"
       >
         <div class="flex items-center justify-between">
@@ -4255,7 +4226,7 @@
 
       <!-- OpenAI WS Mode（off/ctx_pool/passthrough/http_bridge/ws_bridge） -->
       <div
-        v-if="form.platform === 'openai' && !isOpenAIBPSOAuth && (accountCategory === 'oauth-based' || accountCategory === 'apikey')"
+        v-if="form.platform === 'openai' && (accountCategory === 'oauth-based' || accountCategory === 'apikey')"
         data-testid="create-openai-ws-mode"
         class="border-t border-gray-200 pt-4 dark:border-dark-600"
       >
@@ -4374,7 +4345,7 @@
       </div>
 
       <div
-        v-if="form.platform === 'openai' && accountCategory === 'oauth-based' && !isOpenAIBPSOAuth"
+        v-if="form.platform === 'openai' && accountCategory === 'oauth-based'"
         class="border-t border-gray-200 pt-4 dark:border-dark-600"
       >
         <div class="flex items-center justify-between">
@@ -4430,7 +4401,7 @@
 
       <!-- Codex 指纹收敛模式（仅 OpenAI OAuth） -->
       <div
-        v-if="form.platform === 'openai' && accountCategory === 'oauth-based' && !isOpenAIBPSOAuth"
+        v-if="form.platform === 'openai' && accountCategory === 'oauth-based'"
         class="border-t border-gray-200 pt-4 dark:border-dark-600"
       >
         <div class="flex items-center justify-between gap-4">
@@ -4478,7 +4449,7 @@
 
       <!-- OpenAI Compact 能力配置 -->
       <div
-        v-if="form.platform === 'openai' && !isOpenAIBPSOAuth && (accountCategory === 'oauth-based' || accountCategory === 'apikey')"
+        v-if="form.platform === 'openai' && (accountCategory === 'oauth-based' || accountCategory === 'apikey')"
         class="border-t border-gray-200 pt-4 dark:border-dark-600 space-y-4"
       >
         <div class="flex items-center justify-between">
@@ -4763,7 +4734,6 @@
         v-else-if="form.platform !== 'leonardo'"
         ref="oauthFlowRef"
         :add-method="form.platform === 'anthropic' ? addMethod : 'oauth'"
-        :excel-oauth="isOpenAIBPSOAuth"
         :auth-url="currentAuthUrl"
         :session-id="currentSessionId"
         :loading="currentOAuthLoading"
@@ -4773,12 +4743,12 @@
         :allow-multiple="form.platform === 'anthropic'"
         :show-cookie-option="form.platform === 'anthropic'"
         :show-refresh-token-option="form.platform === 'openai' || form.platform === 'antigravity' || form.platform === 'grok'"
-        :show-mobile-refresh-token-option="form.platform === 'openai' && !isOpenAIBPSOAuth"
+        :show-mobile-refresh-token-option="form.platform === 'openai'"
         :show-session-token-option="false"
         :show-access-token-option="false"
-        :show-codex-session-import-option="form.platform === 'openai' && !isOpenAIBPSOAuth"
-        :show-agent-identity-option="form.platform === 'openai' && !isOpenAIBPSOAuth"
-        :show-codex-pat-option="form.platform === 'openai' && !isOpenAIBPSOAuth"
+        :show-codex-session-import-option="form.platform === 'openai'"
+        :show-agent-identity-option="form.platform === 'openai'"
+        :show-codex-pat-option="form.platform === 'openai'"
         :show-sso-option="form.platform === 'grok'"
         :show-email-password-option="false"
         :show-manual-option="true"
@@ -5142,14 +5112,12 @@ import { useAppStore } from '@/stores/app'
 import {
   claudeModels,
   getPresetMappingsByPlatform,
-  getBPSPresetMappings,
   getModelsByPlatform,
   commonErrorCodes,
   buildModelMappingObject,
   fetchAntigravityDefaultMappings,
   isValidWildcardPattern
 } from '@/composables/useModelWhitelist'
-import { useBPSCandidateModels } from '@/composables/useBPSCandidateModels'
 import { adminAPI } from '@/api/admin'
 import { useQuotaNotifyState } from '@/composables/useQuotaNotifyState'
 import {
@@ -5157,7 +5125,7 @@ import {
   type AddMethod,
   type AuthInputMethod
 } from '@/composables/useAccountOAuth'
-import { useOpenAIOAuth, OPENAI_EXCEL_OAUTH_CLIENT_ID } from '@/composables/useOpenAIOAuth'
+import { useOpenAIOAuth } from '@/composables/useOpenAIOAuth'
 import { useGeminiOAuth } from '@/composables/useGeminiOAuth'
 import { useAntigravityOAuth } from '@/composables/useAntigravityOAuth'
 import { useKiroOAuth } from '@/composables/useKiroOAuth'
@@ -5243,7 +5211,7 @@ import {
 import { createStableObjectKeyResolver } from '@/utils/stableObjectKey'
 import { supportsAccountQuota } from '@/utils/accountQuota'
 import { getAccountExpiryTimestamp } from '@/components/account/accountExpiry'
-import { VERTEX_LOCATION_SELECT_OPTIONS, BEDROCK_REGION_SELECT_OPTIONS, DEFAULT_EXCEL_BPS_MODELS } from '@/constants/account'
+import { VERTEX_LOCATION_SELECT_OPTIONS, BEDROCK_REGION_SELECT_OPTIONS } from '@/constants/account'
 import { KIRO_REGION_SELECT_OPTIONS } from '@/constants/kiroRegions'
 import {
   OPENAI_WS_MODE_CTX_POOL,
@@ -5381,8 +5349,6 @@ const hideAccountLongContextBilling = computed(() => {
 // OAuth composables
 const oauth = useAccountOAuth() // For Anthropic OAuth
 const openaiOAuth = useOpenAIOAuth() // For OpenAI OAuth
-const openaiBPSOAuth = ref(false)
-const isOpenAIBPSOAuth = computed(() => form.platform === 'openai' && accountCategory.value === 'oauth-based' && openaiBPSOAuth.value)
 const geminiOAuth = useGeminiOAuth() // For Gemini OAuth
 const antigravityOAuth = useAntigravityOAuth() // For Antigravity OAuth
 const kiroOAuth = useKiroOAuth() // For Kiro OAuth / IDC
@@ -5691,11 +5657,6 @@ const modelMappings = ref<ModelMapping[]>([])
 const openAICompactModelMappings = ref<ModelMapping[]>([])
 const modelRestrictionMode = ref<'whitelist' | 'mapping'>('whitelist')
 const allowedModels = ref<string[]>([])
-// BPS OAuth 账号的白名单候选只列 BPS 模型
-const { candidates: bpsCandidateModels, reset: resetBPSCandidateModels } = useBPSCandidateModels(allowedModels)
-// 白名单模式的预填：BPS OAuth 用默认 BPS 模型，其余按平台目录。
-const defaultWhitelistModels = () =>
-  isOpenAIBPSOAuth.value ? [...DEFAULT_EXCEL_BPS_MODELS] : [...getModelsByPlatform(form.platform)]
 
 const upstreamModelsPreviewed = ref(false)
 const DEFAULT_POOL_MODE_RETRY_COUNT = 3
@@ -6173,9 +6134,8 @@ const openAIWSModeHintKey = computed(() =>
   resolveOpenAIWSModeHintKey(openaiResponsesWebSocketV2Mode.value)
 )
 
-// Passthrough is a Codex-only option: BPS OAuth always applies the model mapping.
 const isOpenAIModelRestrictionDisabled = computed(() =>
-  form.platform === 'openai' && !isOpenAIBPSOAuth.value && openaiPassthroughEnabled.value
+  form.platform === 'openai' && openaiPassthroughEnabled.value
 )
 
 const mixedChannelWarningMessageText = computed(() => {
@@ -6201,9 +6161,7 @@ const geminiHelpLinks = {
 }
 
 // Computed: current preset mappings based on platform
-const presetMappings = computed(() =>
-  isOpenAIBPSOAuth.value ? getBPSPresetMappings() : getPresetMappingsByPlatform(form.platform)
-)
+const presetMappings = computed(() => getPresetMappingsByPlatform(form.platform))
 const tempUnschedScopeOptions = computed<Array<{ value: TempUnschedulableScope; label: string; description: string }>>(() => [
   {
     value: 'model',
@@ -6335,7 +6293,7 @@ watch(
       // Modal opened - fill related models
       // Leonardo 留空白名单：不下发 model_mapping = 后端回落默认映射。
       if (form.platform === 'leonardo') return
-      allowedModels.value = defaultWhitelistModels()
+      allowedModels.value = [...getModelsByPlatform(form.platform)]
       // Antigravity: 默认使用映射模式并填充默认映射
       if (form.platform === 'antigravity') {
         antigravityModelRestrictionMode.value = 'mapping'
@@ -6361,7 +6319,7 @@ watch(
 
 // Sync form.type based on accountCategory, addMethod, and platform-specific type
 watch(
-  [accountCategory, addMethod, antigravityAccountType, () => form.platform, openaiBPSOAuth],
+  [accountCategory, addMethod, antigravityAccountType, () => form.platform],
   ([category, method, agType]) => {
     // Antigravity upstream 类型（实际创建为 apikey）
     if (form.platform === 'antigravity' && agType === 'upstream') {
@@ -6390,10 +6348,7 @@ watch(
     if ((form.platform === 'gemini' || form.platform === 'anthropic') && category === 'service_account') {
       form.type = 'service_account' as AccountType
     } else if (category === 'oauth-based') {
-      // BPS OAuth（官方 Excel 授权）是独立的 BPS-only 账号类型
-      form.type = form.platform === 'anthropic'
-        ? method as AccountType
-        : form.platform === 'openai' && openaiBPSOAuth.value ? 'bps-oauth' : 'oauth'
+      form.type = form.platform === 'anthropic' ? method as AccountType : 'oauth'
     } else {
       form.type = 'apikey'
     }
@@ -6505,7 +6460,6 @@ watch(
       interceptWarmupRequests.value = false
     }
     if (newPlatform !== 'openai') {
-      openaiBPSOAuth.value = false
       openaiPassthroughEnabled.value = false
       openaiFlattenNamespacesEnabled.value = false
       openAIEndpointCapabilities.value = ['chat_completions', 'embeddings']
@@ -6531,7 +6485,6 @@ watch(
     // Reset OAuth states
     oauth.resetState()
     openaiOAuth.resetState()
-    openaiBPSOAuth.value = false
 
     geminiOAuth.resetState()
     antigravityOAuth.resetState()
@@ -6607,20 +6560,10 @@ watch(
       return
     }
     if (newMode === 'whitelist') {
-      allowedModels.value = defaultWhitelistModels()
+      allowedModels.value = [...getModelsByPlatform(form.platform)]
     }
   }
 )
-
-// 切到 BPS OAuth 时白名单预填默认 BPS 模型（映射模式不读白名单，一并替换以免带入原生模型）；
-// 切回其他 OpenAI 类型时恢复平台默认白名单。
-watch(isOpenAIBPSOAuth, (bps) => {
-  if (form.platform !== 'openai') return
-  if (bps || modelRestrictionMode.value === 'whitelist') {
-    allowedModels.value = defaultWhitelistModels()
-  }
-  resetBPSCandidateModels()
-})
 
 watch(
   [antigravityModelRestrictionMode, () => form.platform],
@@ -7085,7 +7028,6 @@ const resetForm = () => {
   geminiTierAIStudio.value = 'aistudio_free'
   oauth.resetState()
   openaiOAuth.resetState()
-  openaiBPSOAuth.value = false
   geminiOAuth.resetState()
   antigravityOAuth.resetState()
   kiroOAuth.resetState()
@@ -7108,12 +7050,6 @@ const buildOpenAIExtra = (base?: Record<string, unknown>): Record<string, unknow
   }
 
   const extra: Record<string, unknown> = { ...(base || {}) }
-  if (isOpenAIBPSOAuth.value) {
-    // BPS-only 账号只走 BPS：只写计费开关（可服务的模型以通用模型限制为准），
-    // Codex 专属设置（WS、透传、CLI only、指纹、compact 等）一律不落库。
-    extra.openai_long_context_billing_enabled = openAILongContextBillingEnabled.value
-    return extra
-  }
   if (accountCategory.value === 'oauth-based') {
     extra.openai_oauth_responses_websockets_v2_mode = openaiOAuthResponsesWebSocketV2Mode.value
     extra.openai_oauth_responses_websockets_v2_enabled = isOpenAIWSModeEnabled(openaiOAuthResponsesWebSocketV2Mode.value)
@@ -7753,7 +7689,6 @@ const handleSubmit = async () => {
   })
 }
 
-// Going back keeps the chosen account type (BPS OAuth included) and its models.
 const goBackToBasicInfo = () => {
   step.value = 1
   oauth.resetState()
@@ -7767,7 +7702,7 @@ const goBackToBasicInfo = () => {
 
 const handleGenerateUrl = async () => {
   if (form.platform === 'openai') {
-    await openaiOAuth.generateAuthUrl(form.proxy_id, undefined, isOpenAIBPSOAuth.value ? 'excel' : 'codex')
+    await openaiOAuth.generateAuthUrl(form.proxy_id)
   } else if (form.platform === 'gemini') {
     await geminiOAuth.generateAuthUrl(
       form.proxy_id,
@@ -8210,9 +8145,6 @@ const handleOpenAIExchange = async (authCode: string) => {
     )
     if (!tokenInfo) return
 
-    if (isOpenAIBPSOAuth.value && tokenInfo.client_id !== OPENAI_EXCEL_OAUTH_CLIENT_ID) {
-      throw new Error(t('admin.accounts.oauth.openai.excelSessionMismatch'))
-    }
     const credentials = oauthClient.buildCredentials(tokenInfo)
     const oauthExtra = oauthClient.buildExtraInfo(tokenInfo) as Record<string, unknown> | undefined
     const extra = buildOpenAIExtra(oauthExtra)
@@ -8225,8 +8157,7 @@ const handleOpenAIExchange = async (authCode: string) => {
         credentials.model_mapping = modelMapping
       }
     }
-    // Compact is Codex-only; BPS OAuth hides the setting, so never store it.
-    if (shouldCreateOpenAI && !isOpenAIBPSOAuth.value) {
+    if (shouldCreateOpenAI) {
       const compactModelMapping = buildOpenAICompactModelMapping()
       if (compactModelMapping) {
         credentials.compact_model_mapping = compactModelMapping
@@ -8243,7 +8174,7 @@ const handleOpenAIExchange = async (authCode: string) => {
         name: form.name,
         notes: form.notes,
         platform: 'openai',
-        type: isOpenAIBPSOAuth.value ? 'bps-oauth' : 'oauth',
+        type: 'oauth',
         credentials,
         extra: withUpstreamRequestIdHeader(extra),
         proxy_id: form.proxy_id,
@@ -8508,7 +8439,7 @@ const handleOpenAIBatchRT = async (refreshTokenInput: string, clientId?: string)
             credentials.model_mapping = modelMapping
           }
         }
-        if (shouldCreateOpenAI && !isOpenAIBPSOAuth.value) {
+        if (shouldCreateOpenAI) {
           const compactModelMapping = buildOpenAICompactModelMapping()
           if (compactModelMapping) {
             credentials.compact_model_mapping = compactModelMapping
@@ -8524,7 +8455,7 @@ const handleOpenAIBatchRT = async (refreshTokenInput: string, clientId?: string)
             name: accountName,
             notes: form.notes,
             platform: 'openai',
-            type: isOpenAIBPSOAuth.value ? 'bps-oauth' : 'oauth',
+            type: 'oauth',
             credentials,
             extra: withUpstreamRequestIdHeader(extra),
             proxy_id: form.proxy_id,
@@ -8571,9 +8502,7 @@ const handleOpenAIBatchRT = async (refreshTokenInput: string, clientId?: string)
 }
 
 // 手动输入 RT（Codex CLI client_id，默认）
-// BPS OAuth 账号的 RT 属于官方 Excel 客户端，必须用 Excel client_id 兑换；
-// 用 Codex client_id 校验会失败，或把 Codex RT 建成带 BPS 标记的账号。
-const handleOpenAIValidateRT = (rt: string) => handleOpenAIBatchRT(rt, isOpenAIBPSOAuth.value ? OPENAI_EXCEL_OAUTH_CLIENT_ID : undefined)
+const handleOpenAIValidateRT = (rt: string) => handleOpenAIBatchRT(rt)
 
 // 手动输入 Mobile RT
 const handleOpenAIValidateMobileRT = (rt: string) => handleOpenAIBatchRT(rt, OPENAI_MOBILE_RT_CLIENT_ID)

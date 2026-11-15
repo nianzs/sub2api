@@ -322,15 +322,3 @@ func TestGPT55RetirementEmptyListingDoesNotUseDefaults(t *testing.T) {
 	require.Empty(t, modelListingSource(service.PlatformOpenAI, []string{}, []string{"gpt-5.5"}))
 	require.Equal(t, []string{"gpt-5.5"}, modelListingSource(service.PlatformOpenAI, nil, []string{"gpt-5.5"}))
 }
-
-// A pool whose BPS accounts are all in their BPS 429 cooldown is rate
-// limited, not unavailable.
-func TestClassifySelectionFailureErrorExcelBPSCooldown(t *testing.T) {
-	fallback := noAccountErrorClassification{Status: http.StatusServiceUnavailable, ErrType: "api_error", Message: "No available accounts"}
-	got := classifySelectionFailureError(
-		fmt.Errorf("no available OpenAI accounts supporting model: gpt-5.6-sol (pool=2, filtered: excel_bps_rate_limited=2)"),
-		fallback,
-	)
-	require.Equal(t, http.StatusTooManyRequests, got.Status)
-	require.Equal(t, "rate_limit_error", got.ErrType)
-}

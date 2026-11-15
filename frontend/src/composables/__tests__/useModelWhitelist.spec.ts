@@ -103,6 +103,25 @@ describe('useModelWhitelist', () => {
     expect(getModelsByPlatform('antigravity')).toContain('claude-opus-4-8')
   })
 
+  it.each([
+    ['claude-fable-5-2', 'Fable 5.2'],
+    ['claude-mythos-5-2', 'Mythos 5.2']
+  ])('preserves %s in Anthropic whitelists and presets without inventing provider mappings', (model, label) => {
+    for (const platform of ['claude', 'anthropic']) {
+      const models = getModelsByPlatform(platform)
+      expect(models).toContain(model)
+      expect(buildModelMappingObject('whitelist', models, [])?.[model]).toBe(model)
+      expect(getPresetMappingsByPlatform(platform)).toEqual(expect.arrayContaining([
+        expect.objectContaining({ label, from: model, to: model })
+      ]))
+    }
+    expect(getPresetMappingsByPlatform('bedrock')).toEqual(expect.arrayContaining([
+      expect.objectContaining({ label, from: model, to: `anthropic.${model}` })
+    ]))
+    expect(getModelsByPlatform('antigravity')).not.toContain(model)
+    expect(getPresetMappingsByPlatform('antigravity').some(mapping => mapping.from === model)).toBe(false)
+  })
+
   it('Claude Sonnet 5.5 预设使用各平台的官方模型 ID', () => {
     expect(getPresetMappingsByPlatform('claude')).toEqual(expect.arrayContaining([
       expect.objectContaining({ label: 'Sonnet 5.5', from: 'claude-sonnet-5-5', to: 'claude-sonnet-5-5' })
@@ -232,7 +251,8 @@ describe('useModelWhitelist', () => {
       'claude-haiku-4-5-20251001',
       'claude-haiku-4-5-20251001-thinking',
       'claude-haiku-5-5',
-      'claude-haiku-5-5-thinking'
+      'claude-haiku-5-5-thinking',
+      'grok-4.7'
     ])
     expect(models).toContain('gpt-5.6-sol')
     expect(models).toContain('gpt-5.6-terra')
@@ -344,7 +364,8 @@ describe('useModelWhitelist', () => {
       { from: 'claude-haiku-4-5-20251001', to: 'claude-haiku-4.5' },
       { from: 'claude-haiku-4-5-20251001-thinking', to: 'claude-haiku-4.5' },
       { from: 'claude-haiku-5-5', to: 'claude-haiku-5.5' },
-      { from: 'claude-haiku-5-5-thinking', to: 'claude-haiku-5.5' }
+      { from: 'claude-haiku-5-5-thinking', to: 'claude-haiku-5.5' },
+      { from: 'grok-4.7', to: 'grok-4.7' }
     ])
     expect(mappingPairs).toEqual(expect.arrayContaining([
       { from: 'gpt-5.6-sol', to: 'gpt-5.6-sol' },
@@ -405,9 +426,10 @@ describe('useModelWhitelist', () => {
       { from: 'claude-haiku-4-5-20251001', to: 'claude-haiku-4.5' },
       { from: 'claude-haiku-4-5-20251001-thinking', to: 'claude-haiku-4.5' },
       { from: 'claude-haiku-5-5', to: 'claude-haiku-5.5' },
-      { from: 'claude-haiku-5-5-thinking', to: 'claude-haiku-5.5' }
+      { from: 'claude-haiku-5-5-thinking', to: 'claude-haiku-5.5' },
+      { from: 'grok-4.7', to: 'grok-4.7' }
     ]))
-    expect(mappings).toHaveLength(29)
+    expect(mappings).toHaveLength(30)
     expect(mappings.every(item => !item.from.startsWith('kiro-'))).toBe(true)
     expect(mappings.every(item => !item.to.startsWith('kiro-'))).toBe(true)
     expect(mappings.every(item => !item.from.endsWith('-agentic'))).toBe(true)
