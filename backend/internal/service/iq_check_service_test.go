@@ -332,3 +332,89 @@ func TestApplyIQCheckResponsesPayload(t *testing.T) {
 	require.Equal(t, "q?", input[0]["content"].([]map[string]any)[0]["text"])
 	require.Equal(t, map[string]any{"effort": "high"}, payload["reasoning"])
 }
+
+// BulkUpdate also applies the schedulable flag so bulk toggles can be exercised.
+func (r *iqCheckTestRepo) BulkUpdate(ctx context.Context, ids []int64, updates AccountBulkUpdate) (int64, error) {
+	n, err := r.upstreamBillingProbeAccountRepo.BulkUpdate(ctx, ids, updates)
+	if err != nil || updates.Schedulable == nil {
+		return n, err
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, id := range ids {
+		if account, ok := r.accounts[id]; ok {
+			account.Schedulable = *updates.Schedulable
+		}
+	}
+	return n, nil
+}
+
+func TestIQCheckBulkToggleTakesOverScheduling(t *testing.T) {
+	h := newIQCheckHarness(t, iqCheckTestAccount(1))
+	h.round("wrong")
+	h.round("wrong")
+	require.False(t, h.repo.account(t, 1).Schedulable)
+	require.True(t, h.state(t).DisabledByCheck)
+
+	// Bulk-disabling a stopped account keeps it off: a later pass must not turn it on.
+	admin := &adminServiceImpl{accountRepo: h.repo}
+	off, on := false, true
+	_, err := admin.BulkUpdateAccounts(context.Background(), &BulkUpdateAccountsInput{AccountIDs: []int64{1}, Schedulable: &off})
+	require.NoError(t, err)
+	require.False(t, h.state(t).DisabledByCheck)
+	require.Zero(t, h.state(t).RecentWrong)
+	h.round("right")
+	require.False(t, h.repo.account(t, 1).Schedulable)
+
+	// Bulk-enabled by hand, it starts a fresh window.
+	_, err = admin.BulkUpdateAccounts(context.Background(), &BulkUpdateAccountsInput{AccountIDs: []int64{1}, Schedulable: &on})
+	require.NoError(t, err)
+	h.round("wrong")
+	require.True(t, h.repo.account(t, 1).Schedulable)
+	h.round("one")
+	require.False(t, h.repo.account(t, 1).Schedulable)
+}
+
+func TestBulkUpdateAccountsDropsIQCheckState(t *testing.T) {
+	h := newIQCheckHarness(t, iqCheckTestAccount(1))
+	admin := &adminServiceImpl{accountRepo: h.repo}
+	forged, err := iqCheckStateValue(IQCheckState{DisabledByCheck: true})
+	require.NoError(t, err)
+
+	_, err = admin.BulkUpdateAccounts(context.Background(), &BulkUpdateAccountsInput{
+		AccountIDs: []int64{1},
+		Extra:      map[string]any{IQCheckStateExtraKey: forged, IQCheckEnabledExtraKey: false},
+	})
+
+	require.NoError(t, err)
+	require.Len(t, h.repo.bulkUpdates, 1)
+	require.NotContains(t, h.repo.bulkUpdates[0].Extra, IQCheckStateExtraKey)
+	require.Equal(t, false, h.repo.bulkUpdates[0].Extra[IQCheckEnabledExtraKey])
+}
+
+func TestDuplicateAccountStartsWithFreshIQCheckState(t *testing.T) {
+	ctx := context.Background()
+	repo := &codexSeedDuplicateRepo{upstreamBillingProbeAccountRepo: &upstreamBillingProbeAccountRepo{accounts: make(map[int64]*Account)}}
+	svc := &adminServiceImpl{accountRepo: repo, accountDuplicateRepo: repo}
+	stopped, err := iqCheckStateValue(IQCheckState{DisabledByCheck: true, LastRoundWrong: 2, RecentWrong: 3, Answered: 4})
+	require.NoError(t, err)
+	source := &Account{
+		Name:     "source",
+		Platform: PlatformOpenAI,
+		Type:     AccountTypeAPIKey,
+		Extra: map[string]any{
+			IQCheckEnabledExtraKey:     true,
+			IQCheckAutoDisableExtraKey: true,
+			IQCheckStateExtraKey:       stopped,
+		},
+	}
+	require.NoError(t, repo.Create(ctx, source))
+
+	duplicate, err := svc.DuplicateAccount(ctx, source.ID, "admin:1", "")
+
+	require.NoError(t, err)
+	require.False(t, duplicate.Schedulable)
+	require.NotContains(t, duplicate.Extra, IQCheckStateExtraKey)
+	require.Equal(t, true, duplicate.Extra[IQCheckEnabledExtraKey])
+	require.Equal(t, true, duplicate.Extra[IQCheckAutoDisableExtraKey])
+}

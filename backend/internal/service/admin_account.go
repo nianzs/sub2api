@@ -112,6 +112,9 @@ var duplicateAccountDiscardedExtraKeys = map[string]struct{}{
 	"quota_weekly_start":    {},
 	"quota_daily_reset_at":  {},
 	"quota_weekly_reset_at": {},
+	// The IQ check's ownership and answer window belong to the account it ran on;
+	// a copy keeps the check settings but must not be re-enabled by the source's state.
+	IQCheckStateExtraKey: {},
 	// Provider observations, capability probes, and transient scheduling state.
 	"model_rate_limits":                      {},
 	"session_window_utilization":             {},
@@ -1002,6 +1005,7 @@ func (s *adminServiceImpl) BulkUpdateAccounts(ctx context.Context, input *BulkUp
 	delete(input.Extra, OllamaCloudUsageSnapshotExtraKey)
 	delete(input.Extra, OpenCodeGoUsageAutoRefreshExtraKey)
 	delete(input.Extra, OpenCodeGoUsageSnapshotExtraKey)
+	delete(input.Extra, IQCheckStateExtraKey)
 
 	if len(input.AccountIDs) == 0 && input.Filters != nil {
 		accountIDs, err := s.resolveBulkUpdateTargetIDs(ctx, input.Filters)
@@ -1037,7 +1041,7 @@ func (s *adminServiceImpl) BulkUpdateAccounts(ctx context.Context, input *BulkUp
 
 	// 预取所有目标账号，供凭据守卫/代理守卫/混合渠道检查共用，避免多次 DB 查询。
 	var cachedTargets []*Account
-	if len(input.Credentials) > 0 || input.ProxyID != nil || needMixedChannelCheck || openAISettings.any() || input.ProbeEnabled != nil || input.RateMultiplier != nil {
+	if len(input.Credentials) > 0 || input.ProxyID != nil || needMixedChannelCheck || openAISettings.any() || input.ProbeEnabled != nil || input.RateMultiplier != nil || input.Schedulable != nil {
 		loaded, err := s.accountRepo.GetByIDs(ctx, input.AccountIDs)
 		if err != nil {
 			return nil, err
@@ -1206,6 +1210,18 @@ func (s *adminServiceImpl) BulkUpdateAccounts(ctx context.Context, input *BulkUp
 	// Run bulk update for column/jsonb fields first.
 	if _, err := s.accountRepo.BulkUpdate(ctx, input.AccountIDs, repoUpdates); err != nil {
 		return nil, err
+	}
+
+	// 批量切换调度与单个切换一样视为人工接管：降智检测不再恢复或计入此前的答错轮次。
+	if input.Schedulable != nil {
+		for _, account := range cachedTargets {
+			if account == nil {
+				continue
+			}
+			if err := ReleaseIQCheckScheduling(ctx, s.accountRepo, account); err != nil {
+				logger.LegacyPrintf("service.admin_account", "release iq check scheduling failed: account=%d err=%v", account.ID, err)
+			}
+		}
 	}
 
 	// 将 proxy 变更传播到每个目标账号的 spark 影子账号
