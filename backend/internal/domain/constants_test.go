@@ -60,6 +60,7 @@ func TestDefaultKiroModelMapping_MatchesKiroReferenceModels(t *testing.T) {
 		"gpt-5.6-terra":                       "gpt-5.6-terra",
 		"gpt-5.6-luna":                        "gpt-5.6-luna",
 		"codex-auto-review":                   "gpt-5.6-luna",
+		"grok-4.7":                            "grok-4.7",
 		"kimi-k3":                             "kimi-k3",
 	}
 

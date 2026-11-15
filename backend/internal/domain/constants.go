@@ -202,6 +202,7 @@ var DefaultKiroModelMapping = map[string]string{
 	"gpt-5.6-terra":                       "gpt-5.6-terra",
 	"gpt-5.6-luna":                        "gpt-5.6-luna",
 	"codex-auto-review":                   "gpt-5.6-luna",
+	"grok-4.7":                            "grok-4.7",
 	"kimi-k3":                             "kimi-k3",
 	"claude-opus-4-8":                     "claude-opus-4.8",
 	"claude-opus-4-8-thinking":            "claude-opus-4.8",

@@ -12,6 +12,7 @@ import (
 	"image/gif"
 	"image/jpeg"
 	"image/png"
+	"math/rand"
 	"net/http"
 	"net/http/httptest"
 	"sync"
@@ -55,10 +56,14 @@ func TestEstimateImageTokensUsesDimensionsNotEncodedLength(t *testing.T) {
 	var flatPNG bytes.Buffer
 	require.NoError(t, png.Encode(&flatPNG, flat))
 
+	// Random pixels are incompressible, so the encoded payload is much larger
+	// than the flat image's. A structured pattern (e.g. x/y gradients) can be
+	// compressed below the flat image and would invalidate the premise.
 	noisy := image.NewRGBA(image.Rect(0, 0, 512, 512))
+	rng := rand.New(rand.NewSource(1))
 	for y := 0; y < 512; y++ {
 		for x := 0; x < 512; x++ {
-			noisy.SetRGBA(x, y, color.RGBA{R: uint8(x), G: uint8(y), B: uint8(x ^ y), A: 255})
+			noisy.SetRGBA(x, y, color.RGBA{R: uint8(rng.Intn(256)), G: uint8(rng.Intn(256)), B: uint8(rng.Intn(256)), A: 255})
 		}
 	}
 	var noisyPNG bytes.Buffer

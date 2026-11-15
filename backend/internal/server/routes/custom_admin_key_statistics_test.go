@@ -169,7 +169,7 @@ func TestScopedAdminRegisteredStatisticsAndOpenAIRoutes(t *testing.T) {
 				}
 				quota := service.NewOpenAIQuotaService(repo, nil, service.NewOpenAITokenProvider(repo, nil, nil), factory, referrals)
 				usage := service.NewAccountUsageService(repo, logs, nil, nil, nil, nil, nil, quota, service.NewUsageCache(), nil, nil)
-				accounts := adminhandler.NewAccountHandler(admin, nil, nil, nil, nil, nil, nil, usage, nil, nil, nil, nil, nil, nil)
+				accounts := adminhandler.NewAccountHandler(admin, nil, nil, nil, nil, nil, nil, nil, usage, nil, nil, nil, nil, nil, nil)
 				openai := adminhandler.NewOpenAIOAuthHandler(nil, admin, quota, nil)
 				groups := adminhandler.NewGroupHandler(admin, nil, service.NewGroupCapacityService(repo, &scopedRouteCapacityGroups{}, nil, nil, nil))
 				router := gin.New()

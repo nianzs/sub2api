@@ -326,6 +326,11 @@ func TestProtocolRulesWithProtocolSets(t *testing.T) {
 	}
 }
 
+// commandCodeCatalogTestSeq 保证每次 forward 的基址唯一：time.Now().UnixNano()
+// 在部分平台的分辨率不足，连续两次调用可能返回相同值，导致后一次 lookup 命中前一次
+// 写入的目录条目（缓存按地址隔离）。
+var commandCodeCatalogTestSeq atomic.Int64
+
 // 经真实入口验证：目录声明模型支持入站协议时原样直通，不做协议转换。
 func TestCommandCodeGatewayPassesThroughCatalogProtocols(t *testing.T) {
 	type observation struct {
@@ -334,7 +339,7 @@ func TestCommandCodeGatewayPassesThroughCatalogProtocols(t *testing.T) {
 	}
 	forward := func(t *testing.T, ingress routingMatrixIngress, model string, catalog map[string][]string) observation {
 		t.Helper()
-		base := fmt.Sprintf("http://cc-%s-%d.example", strings.ReplaceAll(t.Name(), "/", "-"), time.Now().UnixNano())
+		base := fmt.Sprintf("http://cc-%s-%d.example", strings.ReplaceAll(t.Name(), "/", "-"), commandCodeCatalogTestSeq.Add(1))
 		account := commandCodeTestAccount(12)
 		account.Credentials["api_base_urls"] = map[string]any{
 			APIProtocolChatCompletions: base + "/provider/v1",

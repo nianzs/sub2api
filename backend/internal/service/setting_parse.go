@@ -248,7 +248,6 @@ func (s *SettingService) InitializeDefaultSettings(ctx context.Context) error {
 		SettingKeyOpenAICodexClientVersion:                           "",
 		SettingKeyOpenAICodexClientVersionSynced:                     "",
 		SettingKeyOpenAICodexVersionAutoSyncEnabled:                  "true",
-		SettingKeyOpenAICodexTicketHarvestProxyURL:                   "",
 		SettingKeyClaudeCodeClientVersion:                            "",
 		SettingKeyClaudeCodeClientVersionSynced:                      "",
 		SettingKeyClaudeCodeVersionAutoSyncEnabled:                   "true",
@@ -905,32 +904,6 @@ func (s *SettingService) parseSettings(settings map[string]string) *SystemSettin
 	} else {
 		result.OpenAICodexVersionAutoSyncEnabled = true
 	}
-	if v, ok := settings[SettingKeyOpenAICodexTicketEnabled]; ok && v != "" {
-		result.OpenAICodexTicketEnabled = v == "true"
-	} else if s != nil && s.cfg != nil {
-		result.OpenAICodexTicketEnabled = s.cfg.Gateway.OpenAICodexTicket.Enabled
-	}
-	// 缺票拦截：后台值优先，缺失/空回退 yaml fail_closed（默认 true）。
-	if v, ok := settings[SettingKeyOpenAICodexTicketFailClosed]; ok && v != "" {
-		result.OpenAICodexTicketFailClosed = v == "true"
-	} else if s != nil && s.cfg != nil {
-		result.OpenAICodexTicketFailClosed = s.cfg.Gateway.OpenAICodexTicket.FailClosed
-	}
-	result.OpenAICodexTicketHarvestProxyURL = strings.TrimSpace(settings[SettingKeyOpenAICodexTicketHarvestProxyURL])
-	// 门票默认长度：后台值优先，缺失/非法回退 yaml target_length（兜底 292）。
-	result.OpenAICodexTicketDefaultLength = 0
-	if s != nil && s.cfg != nil {
-		result.OpenAICodexTicketDefaultLength = s.cfg.Gateway.OpenAICodexTicket.TargetLength
-	}
-	if v, ok := settings[SettingKeyOpenAICodexTicketDefaultLength]; ok {
-		if n, err := strconv.Atoi(strings.TrimSpace(v)); err == nil && n >= OpenAICodexTicketMinTargetLength && n <= OpenAICodexTicketMaxTargetLength {
-			result.OpenAICodexTicketDefaultLength = n
-		}
-	}
-	if result.OpenAICodexTicketDefaultLength <= 0 {
-		result.OpenAICodexTicketDefaultLength = 292
-	}
-	result.OpenAICodexTicketPlanLengthRules = parseOpenAICodexTicketPlanLengthRules(settings[SettingKeyOpenAICodexTicketPlanLengths])
 	result.ClaudeCodeClientVersion = NormalizeClaudeCodeClientVersion(settings[SettingKeyClaudeCodeClientVersion])
 	result.ClaudeCodeClientVersionSynced = NormalizeClaudeCodeClientVersion(settings[SettingKeyClaudeCodeClientVersionSynced])
 	// 自动同步默认开启：缺失/空值一律视为开启，与 openai_codex_version_auto_sync_enabled 同一惯例。

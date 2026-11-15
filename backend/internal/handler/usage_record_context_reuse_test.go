@@ -49,7 +49,7 @@ func TestGatewayUsageKeepsModelAfterGinContextReuse(t *testing.T) {
 			gw := service.NewGatewayService(
 				nil, &fakeGroupRepo{group: group}, usageRepo, billingRepo, nil, nil, nil, nil, cfg,
 				snapshot, nil, service.NewBillingService(cfg, nil), nil, nil, nil, upstream,
-				&service.DeferredService{}, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil,
+				&service.DeferredService{}, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil,
 			)
 			pool := newUsageRecordTestPool(t)
 			blocked, release := make(chan struct{}), make(chan struct{})

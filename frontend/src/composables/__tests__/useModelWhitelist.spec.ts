@@ -251,7 +251,8 @@ describe('useModelWhitelist', () => {
       'claude-haiku-4-5-20251001',
       'claude-haiku-4-5-20251001-thinking',
       'claude-haiku-5-5',
-      'claude-haiku-5-5-thinking'
+      'claude-haiku-5-5-thinking',
+      'grok-4.7'
     ])
     expect(models).toContain('gpt-5.6-sol')
     expect(models).toContain('gpt-5.6-terra')
@@ -363,7 +364,8 @@ describe('useModelWhitelist', () => {
       { from: 'claude-haiku-4-5-20251001', to: 'claude-haiku-4.5' },
       { from: 'claude-haiku-4-5-20251001-thinking', to: 'claude-haiku-4.5' },
       { from: 'claude-haiku-5-5', to: 'claude-haiku-5.5' },
-      { from: 'claude-haiku-5-5-thinking', to: 'claude-haiku-5.5' }
+      { from: 'claude-haiku-5-5-thinking', to: 'claude-haiku-5.5' },
+      { from: 'grok-4.7', to: 'grok-4.7' }
     ])
     expect(mappingPairs).toEqual(expect.arrayContaining([
       { from: 'gpt-5.6-sol', to: 'gpt-5.6-sol' },
@@ -424,9 +426,10 @@ describe('useModelWhitelist', () => {
       { from: 'claude-haiku-4-5-20251001', to: 'claude-haiku-4.5' },
       { from: 'claude-haiku-4-5-20251001-thinking', to: 'claude-haiku-4.5' },
       { from: 'claude-haiku-5-5', to: 'claude-haiku-5.5' },
-      { from: 'claude-haiku-5-5-thinking', to: 'claude-haiku-5.5' }
+      { from: 'claude-haiku-5-5-thinking', to: 'claude-haiku-5.5' },
+      { from: 'grok-4.7', to: 'grok-4.7' }
     ]))
-    expect(mappings).toHaveLength(29)
+    expect(mappings).toHaveLength(30)
     expect(mappings.every(item => !item.from.startsWith('kiro-'))).toBe(true)
     expect(mappings.every(item => !item.to.startsWith('kiro-'))).toBe(true)
     expect(mappings.every(item => !item.from.endsWith('-agentic'))).toBe(true)

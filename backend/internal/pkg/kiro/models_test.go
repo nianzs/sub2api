@@ -16,6 +16,7 @@ func TestDefaultModels_MatchesKiroReferenceModels(t *testing.T) {
 		"gpt-5.6-sol",
 		"gpt-5.6-terra",
 		"gpt-5.6-luna",
+		"grok-4.7",
 		"kimi-k3",
 		"claude-opus-4-8",
 		"claude-opus-4-8-thinking",

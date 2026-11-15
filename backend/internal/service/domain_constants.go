@@ -716,18 +716,6 @@ const (
 	SettingKeyOpenAICodexClientVersionSynced = "openai_codex_client_version_synced"
 	// SettingKeyOpenAICodexVersionAutoSyncEnabled 是否启用 Codex 客户端版本号自动同步（默认 true）。
 	SettingKeyOpenAICodexVersionAutoSyncEnabled = "openai_codex_version_auto_sync_enabled"
-	// SettingKeyOpenAICodexTicketEnabled 后台 292 打票总开关（默认 false）。
-	SettingKeyOpenAICodexTicketEnabled = "openai_codex_ticket_enabled"
-	// SettingKeyOpenAICodexTicketHarvestProxyURL 打票专用代理 URL；空则回退 yaml/env。
-	SettingKeyOpenAICodexTicketHarvestProxyURL = "openai_codex_ticket_harvest_proxy_url"
-	// SettingKeyOpenAICodexTicketDefaultLength 门票默认目标长度；缺失回退 yaml target_length（292）。
-	SettingKeyOpenAICodexTicketDefaultLength = "openai_codex_ticket_default_length"
-	// SettingKeyOpenAICodexTicketPlanLengths 订阅档位长度规则 JSON（[{"plan":"team","length":332}]），
-	// 按账号 plan_type 小写子串匹配、先命中先生效；未命中用默认长度。
-	SettingKeyOpenAICodexTicketPlanLengths = "openai_codex_ticket_plan_lengths"
-	// SettingKeyOpenAICodexTicketFailClosed 缺票拦截：门控模型无有效门票时暂停该账号调度；
-	// 缺失回退 yaml gateway.openai_codex_ticket.fail_closed（默认 true）。
-	SettingKeyOpenAICodexTicketFailClosed = "openai_codex_ticket_fail_closed"
 	// SettingKeyClaudeCodeClientVersion 网关对 Anthropic 上游声明的 Claude Code CLI 客户端版本号（管理员覆写）。
 	// 空值表示跟随自动同步值；自动同步也没有结果时回退到 claude.CLIVersion()（环境变量覆盖 + 内置基线）。
 	// 版本太旧会被 Anthropic 拒绝（claude_code_version_too_old），故该值需保持跟随官方发布。

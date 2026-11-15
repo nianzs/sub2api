@@ -196,6 +196,16 @@ describe('ModelWhitelistSelector', () => {
     expect(wrapper.emitted('update:modelValue')).toEqual([[['custom-model']]])
   })
 
+  it('fills related models from the platform catalog without availableModels', async () => {
+    const wrapper = mountSelector({ modelValue: [] })
+
+    const fillRelated = wrapper.findAll('button').find(button => button.text() === 'admin.accounts.fillRelatedModels')
+    await fillRelated!.trigger('click')
+    const filled = wrapper.emitted('update:modelValue')?.at(-1)?.[0] as string[]
+    expect(filled).toContain('gpt-image-2')
+    expect(filled).toContain('codex-auto-review')
+  })
+
   it('copies a model ID without selecting the model', async () => {
     const wrapper = mountSelector()
     await wrapper.get('div.cursor-pointer').trigger('click')

@@ -724,6 +724,7 @@ func TestKiroMinimumCacheableTokens(t *testing.T) {
 		"gpt-5.6-sol":                         1024,
 		"gpt-5.6-terra":                       1024,
 		"gpt-5.6-luna":                        1024,
+		"grok-4.7":                            1024,
 		"kimi-k3":                             1024,
 		"claude-opus-4-8":                     4096,
 		"claude-opus-4-8-thinking":            4096,
