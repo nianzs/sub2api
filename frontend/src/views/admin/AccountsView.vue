@@ -1174,8 +1174,11 @@ const {
   }
 })
 
-// 降智检测的鹈鹕图：只为当前页开启过检测的 OpenAI 账号批量拉取；检测时间变了才重拉。
+// 降智检测的鹈鹕图：只为当前页开启过检测的 OpenAI 账号拉取。按账号记下所拉图对应的检测时间，
+// 只重拉检测时间变了或还没拉过的账号；后端单次最多 200 个 ID，超出时分批请求。
+const IQ_DRAWINGS_BATCH_SIZE = 200
 const iqDrawingsByAccountId = ref<Record<number, IQCheckDrawing>>({})
+const iqDrawingsCheckedAt = new Map<number, string>()
 let iqDrawingsReqSeq = 0
 const iqDrawingsKey = computed(() => hiddenColumns.has('iq_check') ? '' : accounts.value
   .filter(account => account.platform === 'openai' && (account.extra?.iq_check_enabled === true || account.extra?.iq_check_state))
@@ -1183,15 +1186,35 @@ const iqDrawingsKey = computed(() => hiddenColumns.has('iq_check') ? '' : accoun
   .join(','))
 const refreshIQDrawings = async (key: string) => {
   const reqSeq = ++iqDrawingsReqSeq
-  const ids = key ? key.split(',').map(part => Number(part.split(':')[0])) : []
-  if (ids.length === 0) {
-    iqDrawingsByAccountId.value = {}
-    return
+  // checked_at 本身含冒号，只按第一个冒号切出账号 ID。
+  const entries = key ? key.split(',').map(part => {
+    const sep = part.indexOf(':')
+    return { id: Number(part.slice(0, sep)), checkedAt: part.slice(sep + 1) }
+  }) : []
+  const onPage = new Set(entries.map(entry => entry.id))
+  for (const id of [...iqDrawingsCheckedAt.keys()]) {
+    if (!onPage.has(id)) iqDrawingsCheckedAt.delete(id)
+  }
+  // 不在当前页的图丢掉；要重拉的账号在新图到之前先显示旧图。
+  iqDrawingsByAccountId.value = Object.fromEntries(
+    Object.entries(iqDrawingsByAccountId.value).filter(([id]) => onPage.has(Number(id)))
+  )
+  const stale = entries.filter(entry => iqDrawingsCheckedAt.get(entry.id) !== entry.checkedAt)
+  if (stale.length === 0) return
+  const batches: number[][] = []
+  for (let i = 0; i < stale.length; i += IQ_DRAWINGS_BATCH_SIZE) {
+    batches.push(stale.slice(i, i + IQ_DRAWINGS_BATCH_SIZE).map(entry => entry.id))
   }
   try {
-    const drawings = await adminAPI.accounts.getIQCheckDrawings(ids)
+    const results = await Promise.all(batches.map(ids => adminAPI.accounts.getIQCheckDrawings(ids)))
     if (reqSeq !== iqDrawingsReqSeq) return
-    iqDrawingsByAccountId.value = Object.fromEntries(drawings.map(drawing => [drawing.account_id, drawing]))
+    const next = { ...iqDrawingsByAccountId.value }
+    for (const entry of stale) {
+      delete next[entry.id]
+      iqDrawingsCheckedAt.set(entry.id, entry.checkedAt)
+    }
+    for (const drawing of results.flat()) next[drawing.account_id] = drawing
+    iqDrawingsByAccountId.value = next
   } catch (error) {
     // 拉图失败只是不显示缩略图，不影响列表。
     if (reqSeq === iqDrawingsReqSeq) console.error('Failed to load IQ check drawings:', error)

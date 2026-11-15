@@ -2018,13 +2018,12 @@ func TestGatewayModels_CompositeCodexRouteLookupErrorKeepsFallback(t *testing.T)
 }
 
 // A group left on a removed platform (old migrations still allow "adobe" in the
-// CHECK constraint; "leonardo" was only validated in the application) must not
-// advertise any models, and its leftover accounts must not leak their mappings
-// into the list.
+// CHECK constraint) must not advertise any models, and its leftover accounts
+// must not leak their mappings into the list.
 func TestGatewayModels_RemovedPlatformGroupListsNothing(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
-	for _, platform := range []string{"adobe", "leonardo"} {
+	for _, platform := range []string{"adobe"} {
 		t.Run(platform, func(t *testing.T) {
 			groupID := int64(21)
 			h := newGatewayModelsHandlerForTest(

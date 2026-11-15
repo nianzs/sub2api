@@ -29,6 +29,9 @@ type IQCheckDrawingRepository interface {
 	// Save replaces the account's previous drawing.
 	Save(ctx context.Context, drawing *IQCheckDrawing) error
 	ListByAccountIDs(ctx context.Context, ids []int64) ([]IQCheckDrawing, error)
+	// DeleteForDeletedAccounts drops drawings of soft-deleted accounts, which
+	// the table's ON DELETE CASCADE never sees.
+	DeleteForDeletedAccounts(ctx context.Context) (int64, error)
 }
 
 var (

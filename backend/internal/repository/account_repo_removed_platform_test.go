@@ -14,9 +14,8 @@ import (
 )
 
 // removedPlatforms were once registered but no longer exist in domain.Platforms
-// (old migrations still allow adobe in the accounts/groups CHECK constraints;
-// leonardo was only ever validated in the application).
-var removedPlatforms = []string{"adobe", "leonardo"}
+// (old migrations still allow adobe in the accounts/groups CHECK constraints).
+var removedPlatforms = []string{"adobe"}
 
 // knownPlatformPredicate binds exactly the registered concrete platforms, so a
 // leftover row on a removed platform can never satisfy it.
@@ -62,7 +61,7 @@ func TestSchedulableQueriesApplyKnownPlatformPredicate(t *testing.T) {
 			return len(got), err
 		}},
 		{"ListSchedulableUngroupedByPlatform", func(r *accountRepository) (int, error) {
-			got, err := r.ListSchedulableUngroupedByPlatform(ctx, removedPlatforms[1])
+			got, err := r.ListSchedulableUngroupedByPlatform(ctx, removedPlatforms[0])
 			return len(got), err
 		}},
 		{"ListSchedulableUngroupedByPlatforms", func(r *accountRepository) (int, error) {

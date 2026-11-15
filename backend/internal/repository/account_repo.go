@@ -79,6 +79,9 @@ var schedulerNeutralExtraKeys = map[string]struct{}{
 	"codex_referral_snapshot":    {},
 	"grok_billing_snapshot":      {},
 	"session_window_utilization": {},
+	// IQ check state is written on every claim and round; selection reads the
+	// schedulable column the check toggles, never this key.
+	"iq_check_state": {},
 }
 
 const postgresParameterBatchSize = 50000

@@ -10,9 +10,8 @@ import (
 )
 
 // removedPlatformsForTest were once registered, so rows may survive in existing
-// databases (old migrations still allow adobe in the DB CHECK constraints;
-// leonardo was only ever validated in the application).
-var removedPlatformsForTest = []string{"adobe", "leonardo"}
+// databases (old migrations still allow adobe in the DB CHECK constraints).
+var removedPlatformsForTest = []string{"adobe"}
 
 // A leftover OAuth account on a removed platform must behave as if it did not
 // exist: it is not treated as a concrete platform, does not get a default

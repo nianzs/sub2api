@@ -42,3 +42,14 @@ FROM account_iq_check_drawings WHERE account_id = ANY($1) ORDER BY account_id`, 
 	}
 	return drawings, rows.Err()
 }
+
+// DeleteForDeletedAccounts removes drawings whose account was soft-deleted.
+// Accounts are never hard-deleted, so ON DELETE CASCADE alone leaves them behind.
+func (r *iqCheckDrawingRepository) DeleteForDeletedAccounts(ctx context.Context) (int64, error) {
+	result, err := r.db.ExecContext(ctx, `DELETE FROM account_iq_check_drawings d
+USING accounts a WHERE a.id = d.account_id AND a.deleted_at IS NOT NULL`)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
