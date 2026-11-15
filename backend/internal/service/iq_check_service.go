@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"sync"
 	"time"
@@ -36,8 +37,13 @@ const (
 	iqCheckMaxConcurrent   = 4
 	iqCheckQuestionTimeout = 4 * time.Minute
 	iqCheckCycleInterval   = time.Minute
-	iqCheckLeaderLockTTL   = 2 * time.Minute
-	iqCheckErrorMaxRunes   = 300
+	// Shorter than the cycle so the holder can claim again on its next tick,
+	// long enough that no other replica claims in between.
+	iqCheckCycleLockTTL = 50 * time.Second
+	iqCheckCycleLockKey = "iq_check:cycle"
+	// Drawings of soft-deleted accounts are pruned this often per instance.
+	iqCheckDrawingPruneInterval = time.Hour
+	iqCheckErrorMaxRunes        = 300
 )
 
 // IQCheckState is the last check result stored under IQCheckStateExtraKey.
@@ -80,6 +86,7 @@ type IQCheckService struct {
 	instanceID   string
 	now          func() time.Time
 	slots        chan struct{}
+	lastPrune    time.Time
 
 	ctx     context.Context
 	cancel  context.CancelFunc
@@ -163,9 +170,10 @@ func (s *IQCheckService) runLoop() {
 // replicas skip the account even while its check is still running.
 func (s *IQCheckService) RunDue(ctx context.Context) {
 	now := s.now()
-	if !s.acquireCycleLock(ctx, now) {
+	if !s.acquireCycleLock(ctx) {
 		return
 	}
+	s.pruneDrawings(ctx, now)
 	accounts, err := s.accounts.FindByExtraField(ctx, IQCheckEnabledExtraKey, true)
 	if err != nil {
 		logger.LegacyPrintf("service.iq_check", "list accounts failed: %v", err)
@@ -199,21 +207,35 @@ func (s *IQCheckService) RunDue(ctx context.Context) {
 	}
 }
 
-// One instance claims accounts per minute. The lock is left to expire so a
-// replica ticking later in the same minute does not claim again.
-func (s *IQCheckService) acquireCycleLock(ctx context.Context, now time.Time) bool {
+// One instance claims accounts per cycle. The lock is left to expire, so a
+// replica ticking soon after (even across a minute boundary) does not claim
+// the same due accounts again.
+func (s *IQCheckService) acquireCycleLock(ctx context.Context) bool {
 	if s.lockCache == nil {
 		return true
 	}
-	key := "iq_check:" + now.UTC().Truncate(time.Minute).Format("200601021504")
 	lockCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
 	defer cancel()
-	acquired, err := s.lockCache.TryAcquireLeaderLock(lockCtx, key, s.instanceID, iqCheckLeaderLockTTL)
+	acquired, err := s.lockCache.TryAcquireLeaderLock(lockCtx, iqCheckCycleLockKey, s.instanceID, iqCheckCycleLockTTL)
 	if err != nil {
 		logger.LegacyPrintf("service.iq_check", "leader lock failed: %v", err)
 		return false
 	}
 	return acquired
+}
+
+// pruneDrawings drops drawings of deleted accounts at most once per interval,
+// including one saved by a check that was still running when its account was deleted.
+func (s *IQCheckService) pruneDrawings(ctx context.Context, now time.Time) {
+	if s.drawings == nil || (!s.lastPrune.IsZero() && now.Sub(s.lastPrune) < iqCheckDrawingPruneInterval) {
+		return
+	}
+	s.lastPrune = now
+	if removed, err := s.drawings.DeleteForDeletedAccounts(ctx); err != nil {
+		logger.LegacyPrintf("service.iq_check", "prune drawings failed: %v", err)
+	} else if removed > 0 {
+		logger.LegacyPrintf("service.iq_check", "pruned %d drawings of deleted accounts", removed)
+	}
 }
 
 type iqCheckRound struct {
@@ -270,6 +292,13 @@ func (s *IQCheckService) runRound(ctx context.Context, accountID int64, model st
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
+			// A panic in the probe path counts as a failed request, not a crashed server.
+			defer func() {
+				if r := recover(); r != nil {
+					errs[i] = fmt.Errorf("probe panicked: %v", r)
+					logger.LegacyPrintf("service.iq_check", "question panicked: account=%d err=%v", accountID, r)
+				}
+			}()
 			questionCtx, cancel := context.WithTimeout(ctx, iqCheckQuestionTimeout)
 			defer cancel()
 			answer, err := s.probe(questionCtx, accountID, model, questions[i].Prompt)
@@ -454,7 +483,22 @@ func iqCheckDue(account *Account, state IQCheckState, now time.Time) bool {
 	if enabled, _ := account.Extra[IQCheckEnabledExtraKey].(bool); !enabled {
 		return false
 	}
+	if !iqCheckAccountAvailable(account, state) {
+		return false
+	}
 	return state.NextCheckAt == nil || !now.Before(*state.NextCheckAt)
+}
+
+// iqCheckAccountAvailable skips accounts that could not serve traffic anyway:
+// expired, rate-limited, overloaded, cooling down, out of quota, or turned off
+// by hand. An account the check itself turned off is still checked, since a
+// passing round is the only way the check turns it back on.
+func iqCheckAccountAvailable(account *Account, state IQCheckState) bool {
+	probe := *account
+	if state.DisabledByCheck {
+		probe.Schedulable = true
+	}
+	return probe.IsSchedulable()
 }
 
 func iqCheckAccountExpired(account *Account, now time.Time) bool {

@@ -34,8 +34,16 @@ func TestExtractIQCheckSVG(t *testing.T) {
 }
 
 type iqCheckTestDrawings struct {
-	mu    sync.Mutex
-	saved []IQCheckDrawing
+	mu     sync.Mutex
+	saved  []IQCheckDrawing
+	prunes int
+}
+
+func (d *iqCheckTestDrawings) DeleteForDeletedAccounts(context.Context) (int64, error) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.prunes++
+	return 0, nil
 }
 
 func (d *iqCheckTestDrawings) Save(_ context.Context, drawing *IQCheckDrawing) error {

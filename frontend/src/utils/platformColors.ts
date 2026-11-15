@@ -316,6 +316,7 @@ function isPlatform(p: string): p is Platform {
     p === 'typesafe' ||
     p === 'command_code' ||
     p === 'cline' ||
+    p === 'fish' ||
     p === 'composite'
   )
 }

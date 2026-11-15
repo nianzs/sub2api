@@ -70,7 +70,7 @@ function mountView() {
         },
         DataTable: DataTableStub,
         AccountIQCheckCell: IQCellStub,
-        AccountTableActions: { template: '<div><slot name="after" /></div>' },
+        AccountTableActions: { template: `<div><button data-test="manual-refresh" @click="$emit('refresh')">refresh</button><slot name="after" /></div>` },
         AccountTableFilters: true,
         AccountBulkActionsBar: true,
         Pagination: true,
@@ -142,5 +142,48 @@ describe('admin AccountsView IQ check drawings', () => {
     expect(wrapper.findAll('[data-test="iq-cell"]')).toHaveLength(4)
     expect(wrapper.get('[data-test="iq-cell"][data-account="1"]').attributes('data-svg')).toBe('')
     errorSpy.mockRestore()
+  })
+
+  it('reloads only the drawings whose check time changed', async () => {
+    getIQCheckDrawings.mockImplementation(async (ids: number[]) => ids.map(id => (
+      { account_id: id, svg: `<svg data-v="${getIQCheckDrawings.mock.calls.length}"/>`, error: '', model: 'gpt-5.4', latency_ms: 1, drawn_at: '2026-11-15T10:00:00Z' }
+    )))
+    const wrapper = mountView()
+    await flushPromises()
+    expect(getIQCheckDrawings).toHaveBeenLastCalledWith([1, 4])
+
+    listAccounts.mockResolvedValueOnce({
+      items: [
+        account(1, 'openai', { iq_check_enabled: true, iq_check_state: { checked_at: '2026-11-15T11:00:00Z' } }),
+        account(4, 'openai', { iq_check_state: { checked_at: '2026-11-15T09:00:00Z', disabled_by_check: true } })
+      ],
+      total: 2,
+      page: 1,
+      page_size: 20,
+      pages: 1
+    })
+    await wrapper.get('[data-test="manual-refresh"]').trigger('click')
+    await flushPromises()
+
+    expect(getIQCheckDrawings).toHaveBeenCalledTimes(2)
+    expect(getIQCheckDrawings).toHaveBeenLastCalledWith([1])
+    expect(wrapper.get('[data-test="iq-cell"][data-account="1"]').attributes('data-svg')).toContain('data-v="2"')
+    // The unchanged account keeps the drawing it already had.
+    expect(wrapper.get('[data-test="iq-cell"][data-account="4"]').attributes('data-svg')).toContain('data-v="1"')
+  })
+
+  it('splits more than 200 accounts into batches the backend accepts', async () => {
+    const items = Array.from({ length: 250 }, (_, i) => account(i + 1, 'openai', { iq_check_enabled: true }))
+    listAccounts.mockReset().mockResolvedValue({ items, total: 250, page: 1, page_size: 250, pages: 1 })
+    getIQCheckDrawings.mockImplementation(async (ids: number[]) => ids.map(id => (
+      { account_id: id, svg: '<svg/>', error: '', model: 'gpt-5.4', latency_ms: 1, drawn_at: '2026-11-15T10:00:00Z' }
+    )))
+    const wrapper = mountView()
+    await flushPromises()
+
+    expect(getIQCheckDrawings).toHaveBeenCalledTimes(2)
+    expect(getIQCheckDrawings.mock.calls[0][0]).toHaveLength(200)
+    expect(getIQCheckDrawings.mock.calls[1][0]).toHaveLength(50)
+    expect(wrapper.get('[data-test="iq-cell"][data-account="250"]').attributes('data-svg')).toBe('<svg/>')
   })
 })

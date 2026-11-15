@@ -245,6 +245,84 @@ func TestIQCheckLeavesManuallyDisabledAccountsAlone(t *testing.T) {
 	h.round("right")
 	require.False(t, h.repo.account(t, 1).Schedulable)
 	require.Empty(t, h.repo.schedulableCalls)
+	// An account turned off by hand is not probed at all.
+	require.Zero(t, h.probes.Load())
+}
+
+func TestIQCheckSkipsTemporarilyUnavailableAccounts(t *testing.T) {
+	future, past := time.Now().Add(time.Hour), time.Now().Add(-time.Hour)
+	rateLimited := iqCheckTestAccount(1)
+	rateLimited.RateLimitResetAt = &future
+	overloaded := iqCheckTestAccount(2)
+	overloaded.OverloadUntil = &future
+	coolingDown := iqCheckTestAccount(3)
+	coolingDown.TempUnschedulableUntil = &future
+	expired := iqCheckTestAccount(4)
+	expired.AutoPauseOnExpired = true
+	expired.ExpiresAt = &past
+	h := newIQCheckHarness(t, rateLimited, overloaded, coolingDown, expired)
+
+	h.round("wrong")
+
+	require.Zero(t, h.probes.Load())
+	for id := int64(1); id <= 4; id++ {
+		// Not claimed: checked on the first tick after it is available again.
+		require.Nil(t, decodeIQCheckState(h.repo.account(t, id).Extra).NextCheckAt, "account %d", id)
+	}
+}
+
+func TestIQCheckKeepsCheckingAnAccountItStopped(t *testing.T) {
+	h := newIQCheckHarness(t, iqCheckTestAccount(1))
+	h.round("wrong")
+	h.round("wrong")
+	require.False(t, h.repo.account(t, 1).Schedulable)
+	probes := h.probes.Load()
+
+	h.round("right")
+
+	require.Greater(t, h.probes.Load(), probes)
+	require.True(t, h.repo.account(t, 1).Schedulable)
+}
+
+func TestIQCheckQuestionPanicCountsAsFailedRequest(t *testing.T) {
+	h := newIQCheckHarness(t, iqCheckTestAccount(1))
+	answer := h.svc.probe
+	h.svc.probe = func(ctx context.Context, id int64, model, prompt string) (string, error) {
+		if prompt == "path?" {
+			panic("boom")
+		}
+		return answer(ctx, id, model, prompt)
+	}
+
+	require.NotPanics(t, func() { h.round("right") })
+
+	state := h.state(t)
+	require.Contains(t, state.Error, "probe panicked: boom")
+	require.Equal(t, 1, state.Answered)
+	require.True(t, h.repo.account(t, 1).Schedulable)
+}
+
+func TestIQCheckPrunesDeletedAccountDrawingsHourly(t *testing.T) {
+	h := newIQCheckHarness(t, iqCheckTestAccount(1))
+	drawings := &iqCheckTestDrawings{}
+	h.svc.drawings = drawings
+
+	h.svc.RunDue(context.Background())
+	h.svc.wg.Wait()
+	h.svc.RunDue(context.Background())
+	h.svc.wg.Wait()
+	require.Equal(t, 1, drawings.prunes)
+
+	h.now = h.now.Add(iqCheckDrawingPruneInterval)
+	h.svc.RunDue(context.Background())
+	h.svc.wg.Wait()
+	require.Equal(t, 2, drawings.prunes)
+
+	// Only the instance that holds the cycle lock prunes.
+	h.now = h.now.Add(iqCheckDrawingPruneInterval)
+	h.svc.lockCache = &iqCheckTestLock{deny: true}
+	h.svc.RunDue(context.Background())
+	require.Equal(t, 2, drawings.prunes)
 }
 
 func TestIQCheckManualToggleTakesOverScheduling(t *testing.T) {

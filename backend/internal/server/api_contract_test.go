@@ -1913,8 +1913,10 @@ func (s *stubAccountRepo) GetByID(ctx context.Context, id int64) (*service.Accou
 	return nil, service.ErrAccountNotFound
 }
 
+// GetByIDs matches GetByID: the stub holds no accounts, so none are found. A
+// bulk schedulable toggle loads its targets to release IQ check ownership.
 func (s *stubAccountRepo) GetByIDs(ctx context.Context, ids []int64) ([]*service.Account, error) {
-	return nil, errors.New("not implemented")
+	return []*service.Account{}, nil
 }
 
 func (s *stubAccountRepo) ExistsByID(ctx context.Context, id int64) (bool, error) {

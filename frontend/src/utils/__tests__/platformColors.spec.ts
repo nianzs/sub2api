@@ -16,6 +16,11 @@ describe('platformColors', () => {
     expect(platformBadgeClass('kiro')).not.toContain('orange')
   })
 
+  it('Fish 平台使用自己的青色主题，而不是默认样式', () => {
+    expect(platformBadgeClass('fish')).toContain('cyan')
+    expect(platformBadgeClass('fish')).not.toBe(platformBadgeClass('legacy-removed'))
+  })
+
 
   it('未知平台（如已下线的旧平台字符串）回落到默认样式且不抛错', () => {
     expect(() => platformBadgeClass('legacy-removed')).not.toThrow()
