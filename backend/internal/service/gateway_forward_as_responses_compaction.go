@@ -180,6 +180,7 @@ func (s *GatewayService) handleResponsesCompactionResponseWithRetry(
 		return nil, s.failCompaction(c, clientStream, http.StatusBadGateway,
 			"Failed to build compaction response", requestID)
 	}
+	respJSON = withResponsesUpstreamCredits(c, respJSON, "usage", usage.KiroCredits)
 
 	if s.responseHeaderFilter != nil {
 		responseheaders.WriteFilteredHeaders(c.Writer.Header(), resp.Header, s.responseHeaderFilter)
@@ -281,7 +282,11 @@ func writeCompactionIncomplete(c *gin.Context, clientStream bool, model string, 
 		},
 	}
 	if !clientStream {
-		c.JSON(http.StatusOK, response)
+		body, err := json.Marshal(response)
+		if err != nil {
+			return err
+		}
+		c.Data(http.StatusOK, "application/json; charset=utf-8", withResponsesUpstreamCredits(c, body, "usage", usage.KiroCredits))
 		return nil
 	}
 	payload, err := json.Marshal(map[string]any{
@@ -292,6 +297,7 @@ func writeCompactionIncomplete(c *gin.Context, clientStream bool, model string, 
 	if err != nil {
 		return err
 	}
+	payload = withResponsesUpstreamCredits(c, payload, "response.usage", usage.KiroCredits)
 	writeCompactionSSEHeaders(c)
 	_, _ = c.Writer.Write([]byte("event: response.incomplete\ndata: " + string(payload) + "\n\n"))
 	c.Writer.Flush()

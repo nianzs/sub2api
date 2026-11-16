@@ -704,6 +704,7 @@ func (s *GatewayService) writeResponsesBufferedResult(
 		if err != nil {
 			return nil, fmt.Errorf("restore responses client tools: %w", err)
 		}
+		respBytes = withResponsesUpstreamCredits(c, respBytes, "usage", usage.KiroCredits)
 		c.Data(http.StatusOK, "application/json; charset=utf-8", respBytes)
 	} else {
 		c.JSON(http.StatusOK, responsesResp)
@@ -819,6 +820,9 @@ func (s *GatewayService) handleResponsesStreamingResponse(
 			}
 			for _, restored := range payloads {
 				eventType := gjson.GetBytes(restored, "type").String()
+				if isResponsesTerminalEvent(eventType) {
+					restored = withResponsesUpstreamCredits(c, restored, "response.usage", usage.KiroCredits)
+				}
 				if _, err := fmt.Fprintf(c.Writer, "event: %s\ndata: %s\n\n", eventType, restored); err != nil {
 					stream.markClientDisconnected()
 					return
@@ -841,12 +845,15 @@ func (s *GatewayService) handleResponsesStreamingResponse(
 		}
 		if finalEvents := apicompat.FinalizeAnthropicResponsesStream(state); len(finalEvents) > 0 {
 			for _, evt := range finalEvents {
-				sse, err := apicompat.ResponsesEventToSSE(evt)
+				data, err := json.Marshal(evt)
 				if err != nil {
 					continue
 				}
-				out := string(reverseToolNamesIfPresent(c, []byte(sse)))
-				fmt.Fprint(c.Writer, out) //nolint:errcheck
+				if isResponsesTerminalEvent(evt.Type) {
+					data = withResponsesUpstreamCredits(c, data, "response.usage", usage.KiroCredits)
+				}
+				data = reverseToolNamesIfPresent(c, data)
+				fmt.Fprintf(c.Writer, "event: %s\ndata: %s\n\n", evt.Type, data) //nolint:errcheck
 			}
 			c.Writer.Flush()
 		}
