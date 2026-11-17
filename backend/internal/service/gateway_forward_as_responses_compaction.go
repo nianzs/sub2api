@@ -82,7 +82,7 @@ func (s *GatewayService) handleResponsesCompactionResponseWithRetry(
 	}
 
 	writerSizeBefore := c.Writer.Size()
-	finalResp, usage, stream := s.collectAnthropicResponseFromSSE(resp.Body, requestID, heartbeat)
+	finalResp, usage, stream := s.collectAnthropicResponseFromSSE(resp.Body, requestID, heartbeat, upstreamResponseModelObserverFromContext(c))
 	failure := stream.failure()
 	exc := failure.kiroException()
 	// Kiro 在流里报「输入太长」与 HTTP 400 同义，和上下文已满一样先截断工具输出重试一次。
@@ -106,7 +106,7 @@ func (s *GatewayService) handleResponsesCompactionResponseWithRetry(
 				}
 				return nil, s.failCompaction(c, clientStream, mapUpstreamStatusCode(retryResp.StatusCode), "Upstream request failed", requestID)
 			}
-			retryFinal, retryUsage, retryStream := s.collectAnthropicResponseFromSSE(retryResp.Body, requestID, heartbeat)
+			retryFinal, retryUsage, retryStream := s.collectAnthropicResponseFromSSE(retryResp.Body, requestID, heartbeat, upstreamResponseModelObserverFromContext(c))
 			usage = addClaudeUsage(usage, retryUsage)
 			finalResp = retryFinal
 			failure = retryStream.failure()
