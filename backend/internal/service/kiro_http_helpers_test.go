@@ -224,7 +224,9 @@ func TestBuildKiroPayloadForAccountPropagatesThinkingHeaders(t *testing.T) {
 	require.NoError(t, err)
 	payload := buildResult.Payload
 	require.NotContains(t, string(payload), "CHUNKED WRITE PROTOCOL")
-	require.Contains(t, string(payload), "\\u003cthinking_mode\\u003eenabled\\u003c/thinking_mode\\u003e")
+	require.NotContains(t, string(payload), "thinking_mode")
+	require.Equal(t, "adaptive", gjson.GetBytes(payload, "additionalModelRequestFields.thinking.type").String())
+	require.Equal(t, "medium", gjson.GetBytes(payload, "additionalModelRequestFields.output_config.effort").String())
 }
 
 func TestBuildKiroPayloadForAccountPreservesThinkingAliasAfterMapping(t *testing.T) {
@@ -253,8 +255,10 @@ func TestBuildKiroPayloadForAccountPreservesThinkingAliasAfterMapping(t *testing
 
 	require.Equal(t, "claude-opus-4.6", gjson.GetBytes(payload, "conversationState.currentMessage.userInputMessage.modelId").String())
 	systemContent := gjson.GetBytes(payload, "conversationState.history.0.userInputMessage.content").String()
-	require.Contains(t, systemContent, "<thinking_mode>adaptive</thinking_mode>")
-	require.Contains(t, systemContent, "<thinking_effort>high</thinking_effort>")
+	require.NotContains(t, systemContent, "<thinking_mode>")
+	require.NotContains(t, systemContent, "<thinking_effort>")
+	require.Equal(t, "adaptive", gjson.GetBytes(payload, "additionalModelRequestFields.thinking.type").String())
+	require.Equal(t, "high", gjson.GetBytes(payload, "additionalModelRequestFields.output_config.effort").String())
 }
 
 func TestBuildKiroPayloadForAccountMapsOpus47ToDottedModelID(t *testing.T) {

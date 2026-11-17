@@ -494,7 +494,10 @@ func TestBuildKiroPayloadInjectsAdaptiveThinkingForOpus46ThinkingModel(t *testin
 	payload := kiroBuildResult.Payload
 
 	systemContent := gjson.GetBytes(payload, "conversationState.history.0.userInputMessage.content").String()
-	require.Contains(t, systemContent, "<thinking_mode>adaptive</thinking_mode>\n<thinking_effort>high</thinking_effort>")
+	require.NotContains(t, systemContent, "<thinking_mode>")
+	require.NotContains(t, systemContent, "<thinking_effort>")
+	require.Equal(t, "adaptive", gjson.GetBytes(payload, "additionalModelRequestFields.thinking.type").String())
+	require.Equal(t, "high", gjson.GetBytes(payload, "additionalModelRequestFields.output_config.effort").String())
 	require.NotContains(t, systemContent, "[Context: Current time is ")
 }
 
@@ -509,7 +512,8 @@ func TestBuildKiroPayloadInjectsAdaptiveThinkingForOpus5ThinkingModel(t *testing
 	payload := kiroBuildResult.Payload
 
 	systemContent := gjson.GetBytes(payload, "conversationState.history.0.userInputMessage.content").String()
-	require.Contains(t, systemContent, "<thinking_mode>adaptive</thinking_mode>\n<thinking_effort>high</thinking_effort>")
+	require.NotContains(t, systemContent, "<thinking_mode>")
+	require.NotContains(t, systemContent, "<thinking_effort>")
 	require.Equal(t, "adaptive", gjson.GetBytes(payload, "additionalModelRequestFields.thinking.type").String())
 	require.Equal(t, "high", gjson.GetBytes(payload, "additionalModelRequestFields.output_config.effort").String())
 	require.True(t, kiroBuildResult.Context.ThinkingEnabled)
@@ -554,6 +558,10 @@ func TestBuildKiroPayloadAddsAdditionalModelRequestFieldsForOutputConfigModels(t
 			require.Equal(t, "adaptive", gjson.GetBytes(payload, "additionalModelRequestFields.thinking.type").String())
 			require.Equal(t, "summarized", gjson.GetBytes(payload, "additionalModelRequestFields.thinking.display").String())
 			require.Equal(t, tc.wantEffort, gjson.GetBytes(payload, "additionalModelRequestFields.output_config.effort").String())
+			systemContent := gjson.GetBytes(payload, "conversationState.history.0.userInputMessage.content").String()
+			require.NotContains(t, systemContent, "<thinking_mode>")
+			require.NotContains(t, systemContent, "<thinking_effort>")
+			require.NotContains(t, systemContent, "<max_thinking_length>")
 		})
 	}
 }

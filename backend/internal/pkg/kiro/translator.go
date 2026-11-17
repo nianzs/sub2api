@@ -573,7 +573,15 @@ func BuildKiroPayloadWithContext(claudeBody []byte, modelID, profileArn, origin 
 		thinking = nil
 		requestCtx.ThinkingEnabled = false
 	}
-	systemPrompt := buildInjectedSystemPrompt(baseSystem, thinking, toolChoiceHint)
+	// Claude 4.6+ 的思考强度走 additionalModelRequestFields（官方 IDE 的
+	// thinking + output_config.effort）。同一套 <thinking_mode> 标签再写进提示词
+	// 没有协议作用，还会被 Kiro 反蒸馏当成要求输出思考过程，从而空答。
+	// 4.6 之前没有这个字段，仍只能靠提示词标签。
+	promptThinking := thinking
+	if isOutputConfigPathModel(modelID) {
+		promptThinking = nil
+	}
+	systemPrompt := buildInjectedSystemPrompt(baseSystem, promptThinking, toolChoiceHint)
 
 	history, currentUserMsg, currentToolResults := processMessages(filteredMessages, modelID, normalizeOrigin(origin), &requestCtx)
 	history = prependSystemHistory(history, systemPrompt, modelID, normalizeOrigin(origin))
@@ -1654,10 +1662,6 @@ func deriveThinkingDirective(body []byte, headers http.Header) *thinkingDirectiv
 	if effort := gjson.GetBytes(body, "reasoning_effort").String(); effort != "" && effort != "none" {
 		return &thinkingDirective{Mode: "enabled", BudgetTokens: 16000}
 	}
-	model := strings.ToLower(strings.TrimSpace(gjson.GetBytes(body, "model").String()))
-	if strings.Contains(model, "-reason") {
-		return &thinkingDirective{Mode: "enabled", BudgetTokens: 16000}
-	}
 	return nil
 }
 
@@ -1762,7 +1766,9 @@ func buildKiroTemporalContext() string {
 //
 //	output_config 路径 → { thinking: {type:'adaptive',display:'summarized'}, output_config: {effort} }
 //
-// 对于旧模型或 enabled 模式，不注入（依赖 system prompt 标签兜底）。
+// enabled 模式先把 budget_tokens 折成 effort，再走同一条路径。
+// 4.6 之前的模型不接受该字段，思考强度仍靠 system prompt 里的 <thinking_mode> 标签。
+// 4.6+ 不再写这些标签：字段已经表达强度，标签只会让提示词像在要求输出思考过程。
 //
 // 这实现了管理器的 P1 功能：确保 Claude 4.6+ 新模型的 thinking 使用 effort-based 控制。
 //
