@@ -2,9 +2,11 @@ package service
 
 import (
 	"net/http"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	"github.com/tidwall/gjson"
 )
 
 func TestClassifyKiroHTTPErrorBadRequestCategories(t *testing.T) {
@@ -137,4 +139,20 @@ func TestKiroContextLengthClientMessage(t *testing.T) {
 	require.False(t, ok)
 	_, ok = kiroContextLengthClientMessage(http.StatusInternalServerError, []byte(`{"message":"Input is too long."}`))
 	require.False(t, ok)
+}
+
+// 「输入太长」诊断日志要能定位到最长的字段（如某个 tool_result 的文本）。
+func TestKiroLargestStringField(t *testing.T) {
+	payload := `{"conversationState":{"history":[` +
+		`{"userInputMessage":{"content":"hi","userInputMessageContext":{"toolResults":[{"content":[{"text":"` + strings.Repeat("x", 500) + `"}]}]}}},` +
+		`{"assistantResponseMessage":{"content":"` + strings.Repeat("y", 100) + `"}}],` +
+		`"currentMessage":{"userInputMessage":{"content":"next","images":[{"source":{"bytes":"` + strings.Repeat("z", 300) + `"}}]}}}}`
+
+	path, n := kiroLargestStringField(gjson.Parse(payload), "")
+	require.Equal(t, "conversationState.history.0.userInputMessage.userInputMessageContext.toolResults.0.content.0.text", path)
+	require.Equal(t, 502, n)
+
+	path, n = kiroLargestStringField(gjson.Parse(`{"a":1,"b":[true,null]}`), "")
+	require.Empty(t, path)
+	require.Zero(t, n)
 }

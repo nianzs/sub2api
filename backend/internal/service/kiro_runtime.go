@@ -595,6 +595,9 @@ func (s *GatewayService) executeKiroUpstreamWithParsed(ctx context.Context, acco
 				}
 				classification := classifyKiroHTTPError(resp.StatusCode, string(respBody))
 				logKiroBadRequestClassification(classification, account, mappedModel, resp.Header, respBody)
+				if classification.Category == kiroErrorBadRequestContextLength {
+					logKiroOversizedPayload(account, mappedModel, payload)
+				}
 				resetHTTPResponseBody(resp, respBody)
 				return resp, requestCtx, nil
 			}
@@ -1091,6 +1094,46 @@ func logKiroBadRequestClassification(classification kiroErrorClassification, acc
 		zap.String("request_id", headers.Get("x-request-id")),
 		zap.String("body_excerpt", truncateForLog(body, 512)),
 	)
+}
+
+// logKiroOversizedPayload 记录被 Kiro 判为「输入太长」的 payload 总字节数和其中最长的字段，
+// 用来区分超限的是图片、某个 tool_result 还是整体历史。只记路径和长度，不记内容。
+func logKiroOversizedPayload(account *Account, model string, payload []byte) {
+	var accountID int64
+	if account != nil {
+		accountID = account.ID
+	}
+	largestPath, largestBytes := kiroLargestStringField(gjson.ParseBytes(payload), "")
+	logger.L().Warn("kiro.oversized_payload",
+		zap.Int64("account_id", accountID),
+		zap.String("model", strings.TrimSpace(model)),
+		zap.Int("payload_bytes", len(payload)),
+		zap.Int64("history_messages", gjson.GetBytes(payload, "conversationState.history.#").Int()),
+		zap.String("largest_field_path", largestPath),
+		zap.Int("largest_field_bytes", largestBytes),
+	)
+}
+
+// kiroLargestStringField 返回 JSON 中序列化后最长的字符串值的路径（gjson 语法）和字节数。
+func kiroLargestStringField(value gjson.Result, path string) (string, int) {
+	if value.Type == gjson.String {
+		return path, len(value.Raw)
+	}
+	if !value.IsObject() && !value.IsArray() {
+		return "", 0
+	}
+	bestPath, bestBytes := "", 0
+	value.ForEach(func(key, child gjson.Result) bool {
+		childPath := key.String()
+		if path != "" {
+			childPath = path + "." + childPath
+		}
+		if p, n := kiroLargestStringField(child, childPath); n > bestBytes {
+			bestPath, bestBytes = p, n
+		}
+		return true
+	})
+	return bestPath, bestBytes
 }
 
 // dumpKiro429ResponseForDebug captures the first 2KB of a Kiro 429 response body
