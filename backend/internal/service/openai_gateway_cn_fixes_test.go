@@ -90,7 +90,7 @@ func TestCalculateOpenAIRecordUsageCost_Qwen3EmbeddingFallback(t *testing.T) {
 
 	cost, err := svc.calculateOpenAIRecordUsageCost(
 		context.Background(), result, apiKey, []string{"Qwen/Qwen3-Embedding-8B"},
-		1.0, 1.0, 1.0, 1.0, UsageTokens{InputTokens: 1000}, "", nil, false, time.Time{},
+		1.0, 1.0, 1.0, 1.0, UsageTokens{InputTokens: 1000}, "", nil, false, time.Time{}, "",
 	)
 	require.NoError(t, err)
 	require.False(t, isUsagePricingUnavailableError(err),
@@ -110,7 +110,7 @@ func TestCalculateOpenAIRecordUsageCost_Qwen3RerankerFallback(t *testing.T) {
 
 	cost, err := svc.calculateOpenAIRecordUsageCost(
 		context.Background(), result, apiKey, []string{"Qwen/Qwen3-Reranker-8B"},
-		1.0, 1.0, 1.0, 1.0, UsageTokens{InputTokens: 1000}, "", nil, false, time.Time{},
+		1.0, 1.0, 1.0, 1.0, UsageTokens{InputTokens: 1000}, "", nil, false, time.Time{}, "",
 	)
 	require.NoError(t, err)
 	require.False(t, isUsagePricingUnavailableError(err),
