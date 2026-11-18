@@ -72,8 +72,16 @@ function platformCheckbox(wrapper: View, platform: string) {
 }
 
 function bedrockToggle(wrapper: View) {
+  // Toggle 可能被容器 div 包裹，label 文本与 switch 不在同一父级：
+  // 从 label 向上找到第一个包含 switch 的容器，再在该容器内定位开关。
+  const label = wrapper.findAll('label')
+    .find(label => label.text() === 'admin.channels.form.bedrockCCCompat')!
+  let container: Element | null = label.element.parentElement
+  while (container && !container.querySelector('[role="switch"]')) {
+    container = container.parentElement
+  }
   return wrapper.findAll('[role="switch"]')
-    .find(toggle => toggle.element.parentElement?.textContent?.includes('admin.channels.form.bedrockCCCompat'))!
+    .find(toggle => container!.contains(toggle.element))!
 }
 
 function makeChannel(features: Record<string, unknown>): Channel {

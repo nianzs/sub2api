@@ -132,7 +132,7 @@ func serveMessagesScenario(t *testing.T, sc preContentFailoverScenario) (*httpte
 		acquireUserSlotFn:    func(context.Context, int64, int, string) (bool, error) { return true, nil },
 		acquireAccountSlotFn: func(context.Context, int64, int, string) (bool, error) { return true, nil },
 	}
-	h := NewOpenAIGatewayHandler(gateway, service.NewConcurrencyService(cache), billingCache, &service.APIKeyService{}, nil, sc.passthrough, nil, nil, cfg)
+	h := NewOpenAIGatewayHandler(gateway, service.NewConcurrencyService(cache), billingCache, &service.APIKeyService{}, nil, sc.passthrough, nil, nil, nil, cfg)
 	apiKey := &service.APIKey{
 		ID: 9102, GroupID: &groupID,
 		User:  &service.User{ID: 9103, Status: service.StatusActive},
