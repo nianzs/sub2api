@@ -55,7 +55,7 @@ func TestGrokImageEditLocalValidationSyncAndAsync(t *testing.T) {
 						if async {
 							store := &asyncImageMemoryStore{tasks: make(map[string]*service.ImageTaskRecord)}
 							tasks := service.NewImageTaskServiceWithUploader(store, nil, time.Hour, time.Minute)
-							asyncHandler := NewAsyncImageHandler(tasks, h)
+							asyncHandler := NewAsyncImageHandler(tasks, h, nil)
 							asyncHandler.Submit(c)
 							require.Equal(t, http.StatusAccepted, recorder.Code, recorder.Body.String())
 							taskID := gjson.GetBytes(recorder.Body.Bytes(), "task_id").String()

@@ -572,4 +572,5 @@ func TestCompositeTargetPlatformMiddlewareAdaptsThinkingToRewrittenModel(t *test
 
 			require.Equal(t, http.StatusNoContent, w.Code)
 		})
+	}
 }
