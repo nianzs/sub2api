@@ -236,7 +236,7 @@ func TestAccountUsageService_AddWindowStatsKeepsKiroCredits(t *testing.T) {
 	if usage.FiveHour.WindowStats.KiroCredits != 0.17 {
 		t.Fatalf("KiroCredits = %v, want 0.17", usage.FiveHour.WindowStats.KiroCredits)
 	}
-	if cached, ok := svc.cache.windowStatsCache.Load(int64(123)); ok {
+	if cached, ok := svc.cache.windowStatsCache.Load(windowStatsCacheKey{accountID: 123, duration: 5 * time.Hour}); ok {
 		cache, ok := cached.(*windowStatsCache)
 		if !ok {
 			t.Fatalf("cached window stats has type %T", cached)

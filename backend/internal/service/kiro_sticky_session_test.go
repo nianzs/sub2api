@@ -317,7 +317,7 @@ func TestExtractBodySessionID(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			require.Equal(t, tc.want, extractBodySessionID(tc.body))
+			require.Equal(t, tc.want, extractBodySessionID([]byte(tc.body)))
 		})
 	}
 }
