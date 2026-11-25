@@ -84,9 +84,9 @@
       <!-- Platform Selection - Segmented Control Style -->
       <div>
         <label class="input-label">{{ t('admin.accounts.platform') }}</label>
-        <!-- 14 个平台：手机 3 列、sm 起 4 列的统一容器（grid 间隙即行间，不再单独留白），
-             Kiro 固定在最后一格 -->
-        <div class="mt-2 grid grid-cols-3 gap-1 rounded-lg bg-gray-100 p-1 dark:bg-dark-700 sm:grid-cols-4" data-tour="account-form-platform">
+        <!-- 15 个平台：手机 3 列、sm 起 5 列的统一容器（grid 间隙即行间，不再单独留白），
+             Kiro / Fish Audio 固定在最后两格 -->
+        <div class="mt-2 grid grid-cols-3 gap-1 rounded-lg bg-gray-100 p-1 dark:bg-dark-700 sm:grid-cols-5" data-tour="account-form-platform">
           <button
             type="button"
             @click="form.platform = 'anthropic'"
