@@ -11,14 +11,16 @@ import (
 func TestProvideAccountUsageServicePreservesKiroAndAgentIdentityDependencies(t *testing.T) {
 	kiro := &KiroTokenProvider{}
 	gateway := &OpenAIGatewayService{}
+	ops := &OpsService{}
 
 	svc := ProvideAccountUsageService(
 		nil, nil, nil, nil, nil, nil, nil, nil,
-		NewUsageCache(), nil, nil, gateway, kiro,
+		NewUsageCache(), nil, nil, gateway, kiro, ops,
 	)
 
 	require.Equal(t, kiro, svc.kiroTokenProvider)
 	require.Equal(t, gateway, svc.agentIdentityWS)
+	require.Equal(t, ops, svc.opsMonitoring)
 }
 
 func TestProvideAccountTestServicePreservesKiroAndAgentIdentityDependencies(t *testing.T) {
