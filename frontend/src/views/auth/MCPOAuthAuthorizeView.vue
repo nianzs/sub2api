@@ -44,12 +44,13 @@
           <!-- Select defaults aria-label to "Select option", which would override the <label for>; pass the visible text. -->
           <Select
             id="mcp-consent-scope"
-            v-model="scope"
+            :model-value="scope"
             :options="scopeOptions"
             :disabled="submitting"
             :aria-label="t('mcp.scope')"
             aria-describedby="mcp-scope-hint"
             data-testid="scope-select"
+            @update:model-value="setScope"
           />
           <p id="mcp-scope-hint" class="mt-2 text-xs text-gray-500 dark:text-gray-400">{{ scope === 'admin' ? t('mcp.adminScopeHint') : t('mcp.userScopeHint') }}</p>
         </div>
@@ -57,12 +58,13 @@
           <label for="mcp-consent-permissions" class="input-label">{{ t('mcp.permissions') }}</label>
           <Select
             id="mcp-consent-permissions"
-            v-model="readOnly"
+            :model-value="readOnly"
             :options="permissionOptions"
             :disabled="submitting"
             :aria-label="t('mcp.permissions')"
             aria-describedby="mcp-permissions-hint"
             data-testid="permissions-select"
+            @update:model-value="setReadOnly"
           />
           <p id="mcp-permissions-hint" class="mt-2 text-xs" :class="readOnly ? 'text-gray-500 dark:text-gray-400' : 'text-amber-700 dark:text-amber-400'">{{ readOnly ? t('mcp.readOnlyHint') : t('mcp.readWriteHint') }}</p>
           <p v-if="scope === 'admin' && !readOnly" data-testid="admin-write-hint" class="mt-1 text-xs text-amber-700 dark:text-amber-400">{{ t('mcp.adminWriteHint') }}</p>
@@ -103,14 +105,24 @@ const readOnly = ref(true)
 let authorization: MCPAuthorization | null = null
 let generation = 0
 const redirectOrigin = computed(() => consent.value ? new URL(consent.value.redirect_uri).origin : '')
+
 const scopeOptions = computed(() => [
   { value: 'user', label: t('mcp.userScope') },
   ...(authStore.isAdmin ? [{ value: 'admin', label: t('mcp.adminScope') }] : [])
 ])
+
 const permissionOptions = computed(() => [
   { value: true, label: t('mcp.readOnly') },
   { value: false, label: t('mcp.readWrite') }
 ])
+
+function setScope(value: string | number | boolean | null): void {
+  scope.value = value === 'admin' ? 'admin' : 'user'
+}
+
+function setReadOnly(value: string | number | boolean | null): void {
+  readOnly.value = value !== false
+}
 
 function errorMessage(error: unknown, fallback: string): string {
   const message = (error as { message?: unknown } | null)?.message

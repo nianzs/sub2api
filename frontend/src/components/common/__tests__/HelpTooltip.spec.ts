@@ -1,7 +1,9 @@
-import { afterEach, describe, expect, it } from 'vitest'
-import { mount } from '@vue/test-utils'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { enableAutoUnmount, mount } from '@vue/test-utils'
 import { nextTick } from 'vue'
 import HelpTooltip from '@/components/common/HelpTooltip.vue'
+
+enableAutoUnmount(afterEach)
 
 function getTooltipElement(): HTMLDivElement {
   const tooltip = document.body.querySelector('[role="tooltip"]')
@@ -13,6 +15,8 @@ function getTooltipElement(): HTMLDivElement {
 
 describe('HelpTooltip', () => {
   afterEach(() => {
+    vi.restoreAllMocks()
+    vi.unstubAllGlobals()
     document.body.innerHTML = ''
   })
 
@@ -36,8 +40,6 @@ describe('HelpTooltip', () => {
     await trigger.trigger('mouseleave')
     await nextTick()
     expect(tooltip.style.display).toBe('none')
-
-    wrapper.unmount()
   })
 
   it('keeps a hover tooltip open while the pointer moves between the trigger and the tooltip', async () => {
@@ -66,8 +68,6 @@ describe('HelpTooltip', () => {
     tooltip.dispatchEvent(new MouseEvent('mouseleave', { relatedTarget: null }))
     await nextTick()
     expect(tooltip.style.display).toBe('none')
-
-    wrapper.unmount()
   })
 
   it('supports click-to-toggle details and closes on outside click', async () => {
@@ -104,34 +104,86 @@ describe('HelpTooltip', () => {
     document.body.dispatchEvent(new MouseEvent('click', { bubbles: true }))
     await nextTick()
     expect(tooltip.style.display).toBe('none')
-
-    wrapper.unmount()
   })
 
-  // 回归：气泡是 position: fixed（视口坐标系），而 getBoundingClientRect() 已是视口坐标。
-  // 曾经额外加了 scrollX/scrollY，导致滚动距离被重复计一次，页面下滚后气泡跑到触发元素下方。
-  it('positions the tooltip in viewport coordinates without double-counting scroll', async () => {
-    const rect = { top: 300, left: 100, width: 20, height: 16 } as DOMRect
+  it.each([
+    { scrollX: 120, scrollY: 0 },
+    { scrollX: 0, scrollY: 240 },
+    { scrollX: 120, scrollY: 240 },
+  ])('uses viewport coordinates when opening with scroll ($scrollX, $scrollY)', async ({ scrollX, scrollY }) => {
+    vi.stubGlobal('scrollX', scrollX)
+    vi.stubGlobal('scrollY', scrollY)
     const wrapper = mount(HelpTooltip, {
       attachTo: document.body,
-      props: { content: 'positioned' },
+      props: { content: 'positioned details' },
     })
-
     const trigger = wrapper.get('.group')
-    ;(trigger.element as HTMLElement).getBoundingClientRect = () => rect
-    // 模拟页面已向下滚动：滚动量不应进入最终坐标。
-    Object.defineProperty(window, 'scrollY', { value: 400, configurable: true })
-    Object.defineProperty(window, 'scrollX', { value: 50, configurable: true })
+    vi.spyOn(trigger.element, 'getBoundingClientRect').mockReturnValue(new DOMRect(80, 160, 24, 24))
 
     await trigger.trigger('mouseenter')
     await nextTick()
 
     const tooltip = getTooltipElement()
-    // top: rect.top(300) 经模板的 calc(... - 8px) 得 292；若 scrollY 被重复计入则是 692。
-    // left: rect.left(100) + width/2(10) = 110；若 scrollX 被重复计入则是 160。
-    expect(tooltip.style.top).toContain('292px')
-    expect(tooltip.style.left).toBe('110px')
-
-    wrapper.unmount()
+    expect(tooltip.style.display).not.toBe('none')
+    expect(tooltip.classList.contains('fixed')).toBe(true)
+    expect(tooltip.style.left).toBe('92px')
+    expect(tooltip.style.top).toBe('152px')
   })
+
+  it('keeps the tooltip inside a narrow mobile viewport', async () => {
+    vi.stubGlobal('innerWidth', 375)
+    const wrapper = mount(HelpTooltip, {
+      attachTo: document.body,
+      props: { content: 'edge details' },
+    })
+    const trigger = wrapper.get('.group')
+    const tooltip = getTooltipElement()
+    // 图标贴在视口左侧、靠近顶部：居中会向左溢出，上方也放不下
+    vi.spyOn(trigger.element, 'getBoundingClientRect').mockReturnValue(new DOMRect(20, 40, 16, 16))
+    vi.spyOn(tooltip, 'getBoundingClientRect').mockReturnValue(new DOMRect(0, 0, 256, 80))
+
+    await trigger.trigger('mouseenter')
+    await nextTick()
+
+    expect(tooltip.style.left).toBe('8px')
+    expect(tooltip.style.top).toBe('64px')
+  })
+
+  it.each(['window scroll', 'nested scroll', 'resize'] as const)(
+    'recalculates viewport coordinates for an open tooltip on %s',
+    async (change) => {
+      const container = document.createElement('div')
+      document.body.appendChild(container)
+      const wrapper = mount(HelpTooltip, {
+        attachTo: container,
+        props: { content: 'moving details', trigger: 'click' },
+      })
+      const trigger = wrapper.get('.group')
+      const getBoundingClientRect = vi.spyOn(trigger.element, 'getBoundingClientRect')
+        .mockReturnValue(new DOMRect(80, 160, 24, 24))
+
+      await trigger.trigger('click')
+      await nextTick()
+
+      const tooltip = getTooltipElement()
+      expect(tooltip.style.left).toBe('92px')
+      expect(tooltip.style.top).toBe('152px')
+
+      vi.stubGlobal('scrollX', 120)
+      vi.stubGlobal('scrollY', 240)
+      getBoundingClientRect.mockReturnValue(new DOMRect(40, 100, 32, 24))
+
+      if (change === 'nested scroll') {
+        container.dispatchEvent(new Event('scroll', { bubbles: false }))
+      } else {
+        window.dispatchEvent(new Event(change === 'resize' ? 'resize' : 'scroll'))
+      }
+      await nextTick()
+
+      expect(tooltip.style.display).not.toBe('none')
+      expect(getBoundingClientRect).toHaveBeenCalledTimes(2)
+      expect(tooltip.style.left).toBe('56px')
+      expect(tooltip.style.top).toBe('92px')
+    },
+  )
 })
